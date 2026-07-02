@@ -1,0 +1,7 @@
+node_modules/
+.action-harness-session.json
+.tmp/
+coverage/
+recordings/
+state/
+*.log

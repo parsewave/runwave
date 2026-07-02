@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Action Harness Smoke Fixture</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        align-items: center;
+        background: #1c2430;
+        color: #f8fafc;
+        display: flex;
+        font-family: system-ui, sans-serif;
+        justify-content: center;
+      }
+
+      #target {
+        background: #f6c85f;
+        border: 0;
+        border-radius: 8px;
+        color: #17202a;
+        cursor: pointer;
+        font-size: 24px;
+        font-weight: 700;
+        height: 90px;
+        width: 220px;
+      }
+
+      #status {
+        bottom: 24px;
+        font-size: 18px;
+        left: 24px;
+        position: fixed;
+      }
+    </style>
+  </head>
+  <body>
+    <button id="target" type="button">Click target</button>
+    <div id="status">Clicks: 0</div>
+    <script>
+      window.clicks = 0;
+      const status = document.getElementById('status');
+      document.getElementById('target').addEventListener('click', () => {
+        window.clicks += 1;
+        status.textContent = `Clicks: ${window.clicks}`;
+      });
+    </script>
+  </body>
+</html>
