@@ -121,6 +121,143 @@ function waitForHttp(url, timeoutMs) {
   });
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function even(value) {
+  const rounded = Math.round(value);
+  return rounded % 2 === 0 ? rounded : rounded + 1;
+}
+
+function chooseViewportFromProbe(probe, fallback = { width: 1280, height: 720 }) {
+  const viewport = probe.viewport || fallback;
+  const canvases = Array.isArray(probe.canvases) ? probe.canvases : [];
+  const largestCanvas = canvases
+    .filter((canvas) => canvas.width > 0 && canvas.height > 0)
+    .sort((a, b) => b.width * b.height - a.width * a.height)[0];
+
+  if (largestCanvas) {
+    const coversViewport = largestCanvas.width >= viewport.width * 0.85 && largestCanvas.height >= viewport.height * 0.85;
+    if (coversViewport) {
+      return {
+        viewport: { width: even(viewport.width), height: even(viewport.height) },
+        reason: 'canvas-covers-viewport',
+        canvas: largestCanvas,
+      };
+    }
+    return {
+      viewport: {
+        width: even(clamp(largestCanvas.width + 16, 480, 1280)),
+        height: even(clamp(largestCanvas.height + 16, 360, 1000)),
+      },
+      reason: 'fit-largest-canvas',
+      canvas: largestCanvas,
+    };
+  }
+
+  const visible = probe.visibleBounds || {};
+  const neededHeight = Math.max(
+    Number(probe.scrollHeight || 0),
+    Number(visible.bottom || 0) + 16,
+    viewport.height
+  );
+  if (neededHeight > viewport.height + 24) {
+    return {
+      viewport: {
+        width: even(clamp(viewport.width, 640, 1280)),
+        height: even(clamp(neededHeight, viewport.height, 1100)),
+      },
+      reason: 'fit-page-height',
+      visibleBounds: visible,
+    };
+  }
+
+  return {
+    viewport: { width: even(viewport.width), height: even(viewport.height) },
+    reason: 'default-viewport',
+  };
+}
+
+async function probeViewport(job, dirs, url, env = process.env) {
+  const viewport = job.probeViewport || { width: 1280, height: 720 };
+  const { chromium } = require(path.join(dirs.runwave, 'node_modules', 'playwright'));
+  const launchOptions = {
+    headless: true,
+    args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
+  };
+  if (job.channel) launchOptions.channel = String(job.channel);
+  if (job.executablePath) launchOptions.executablePath = String(job.executablePath);
+
+  const browser = await chromium.launch(launchOptions);
+  try {
+    const context = await browser.newContext({
+      viewport,
+      deviceScaleFactor: Number(job.deviceScaleFactor ?? 1),
+    });
+    const page = await context.newPage();
+    await page.goto(url, { waitUntil: job.waitUntil || 'load' });
+    await new Promise((resolve) => setTimeout(resolve, Number(job.waitAfterLoad ?? 700)));
+    const probe = await page.evaluate(() => {
+      const viewport = {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio,
+      };
+      const canvases = Array.from(document.querySelectorAll('canvas')).map((canvas, index) => {
+        const rect = canvas.getBoundingClientRect();
+        return {
+          index,
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+        };
+      });
+
+      const visibleElements = Array.from(document.body.querySelectorAll('*')).filter((element) => {
+        const style = window.getComputedStyle(element);
+        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+        const rect = element.getBoundingClientRect();
+        return rect.width >= 4 && rect.height >= 4;
+      });
+      const bounds = visibleElements.reduce(
+        (acc, element) => {
+          const rect = element.getBoundingClientRect();
+          return {
+            left: Math.min(acc.left, rect.left),
+            top: Math.min(acc.top, rect.top),
+            right: Math.max(acc.right, rect.right),
+            bottom: Math.max(acc.bottom, rect.bottom),
+          };
+        },
+        { left: Infinity, top: Infinity, right: 0, bottom: 0 }
+      );
+      const visibleBounds = Number.isFinite(bounds.left)
+        ? {
+            left: Math.round(bounds.left),
+            top: Math.round(bounds.top),
+            right: Math.round(bounds.right),
+            bottom: Math.round(bounds.bottom),
+            width: Math.round(bounds.right - bounds.left),
+            height: Math.round(bounds.bottom - bounds.top),
+          }
+        : null;
+      return {
+        viewport,
+        canvases,
+        scrollWidth: Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0),
+        scrollHeight: Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0),
+        visibleBounds,
+      };
+    });
+    const choice = chooseViewportFromProbe(probe, viewport);
+    return { ...probe, choice };
+  } finally {
+    await browser.close();
+  }
+}
+
 async function checkoutRunwave(job, runwaveDir, env = process.env) {
   await run('git', ['clone', job.runwaveRepo || 'https://github.com/parsewave/runwave', runwaveDir], { env });
   if (job.runwaveRef) {
@@ -367,6 +504,15 @@ async function main() {
     const url = `http://127.0.0.1:${port}/`;
     await waitForHttp(url, Number(job.httpTimeoutMs || 60000));
 
+    if (!job.viewport && job.autoViewport !== false) {
+      const probe = await probeViewport(job, dirs, url, runnerEnv);
+      job.viewport = probe.choice.viewport;
+      job.videoSize = job.videoSize || probe.choice.viewport;
+      summary.viewportProbe = probe;
+      fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
+      log('viewport.probe', { jobId, choice: probe.choice });
+    }
+
     const playtest = await runRunwave(job, dirs, url, runnerEnv);
     if (playtest) {
       summary.playtest = {
@@ -403,7 +549,13 @@ async function main() {
   if (summary.status !== 'passed') process.exitCode = 1;
 }
 
-main().catch((error) => {
-  log('fatal', { error: error.message, stack: error.stack });
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    log('fatal', { error: error.message, stack: error.stack });
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  chooseViewportFromProbe,
+};
