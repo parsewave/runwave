@@ -79,6 +79,7 @@ node ops/orchestrate-playtests.js \
   --total-attempts 20 \
   --play-mode agent \
   --playtest-duration-ms 120000 \
+  --agent-min-playtest-ms 110000 \
   --concurrency-per-server 3
 ```
 
@@ -89,6 +90,10 @@ least 20 concurrent slots.
 Only browser games whose `start.sh` serves HTTP are scheduled by default.
 Unity/editor-only projects are installed on the machines but skipped because
 runwave drives browser targets.
+
+For agent jobs, if `--agent-min-playtest-ms` is not provided, the orchestrator
+sets it to `--playtest-duration-ms - 10000`. A 120 second run therefore requires
+about 110 seconds of play before the agent is allowed to stop.
 
 ## Agent Mode
 

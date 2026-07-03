@@ -100,6 +100,8 @@ node ops/orchestrate-playtests.js \
   --games-s3-uri s3://pw-cruft/games \
   --runwave-ref main \
   --playtest-duration-ms 120000 \
+  --agent-min-playtest-ms 110000 \
+  --agent \
   --concurrency-per-server 3
 ```
 
@@ -108,6 +110,10 @@ The orchestrator refuses a 20-job run if capacity is below `20`. It assigns uniq
 ```text
 s3://pw-cruft/playtests/<run-id>/<game>/attempt-001/
 ```
+
+For agent jobs, if `--agent-min-playtest-ms` is omitted, the orchestrator sets
+it to `--playtest-duration-ms - 10000`. A 120 second run therefore requires
+about 110 seconds of agent play before early stop is allowed.
 
 ## Local Fallback
 

@@ -20,6 +20,7 @@ function parseArgs(argv) {
     requiredConcurrency: 20,
     basePort: 8900,
     playtestDurationMs: 120000,
+    agentMinPlaytestMs: null,
     playMode: 'scripted',
     skipPlaywrightInstall: false,
     runId: `run-${new Date().toISOString().replace(/[:.]/g, '-')}`,
@@ -42,6 +43,7 @@ function parseArgs(argv) {
     else if (arg === '--require-concurrency') args.requiredConcurrency = Number(next());
     else if (arg === '--base-port') args.basePort = Number(next());
     else if (arg === '--playtest-duration-ms') args.playtestDurationMs = Number(next());
+    else if (arg === '--agent-min-playtest-ms') args.agentMinPlaytestMs = Number(next());
     else if (arg === '--play-mode') args.playMode = next();
     else if (arg === '--agent') args.playMode = 'agent';
     else if (arg === '--skip-playwright-install') args.skipPlaywrightInstall = true;
@@ -70,6 +72,7 @@ function usage() {
     '  --require-concurrency N',
     '  --base-port N',
     '  --playtest-duration-ms N',
+    '  --agent-min-playtest-ms N',
     '  --play-mode scripted|agent',
     '  --agent',
     '  --skip-playwright-install',
@@ -217,11 +220,17 @@ function discoverS3Games(args) {
   return { games, skipped };
 }
 
+function agentMinPlaytestMs(args) {
+  if (Number.isFinite(args.agentMinPlaytestMs)) return Math.max(0, args.agentMinPlaytestMs);
+  const durationMs = Number.isFinite(args.playtestDurationMs) ? args.playtestDurationMs : 120000;
+  return Math.max(0, durationMs - 10000);
+}
+
 function buildJobs(args, games) {
   const jobs = [];
   const addJob = (game, attempt) => {
     const jobId = `${args.runId}-${game}-attempt-${String(attempt).padStart(3, '0')}`;
-    jobs.push({
+    const job = {
       jobId,
       runId: args.runId,
       game,
@@ -232,7 +241,9 @@ function buildJobs(args, games) {
       skipPlaywrightInstall: args.skipPlaywrightInstall,
       playtestDurationMs: args.playtestDurationMs,
       s3Uri: `${args.s3Uri.replace(/\/+$/, '')}/${args.runId}/${game}/attempt-${String(attempt).padStart(3, '0')}`,
-    });
+    };
+    if (args.playMode === 'agent') job.agentMinPlaytestMs = agentMinPlaytestMs(args);
+    jobs.push(job);
   };
 
   if (args.totalAttempts > 0) {
@@ -383,7 +394,15 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.stack || error.message);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  agentMinPlaytestMs,
+  buildJobs,
+  parseArgs,
+};
