@@ -1,8 +1,8 @@
-# MM Action Harness
+# Runwave
 
-Reusable Playwright CLI harness for browser games and canvas apps.
+Runwave is a reusable Playwright CLI for browser games and canvas apps.
 
-This package is the task-neutral version of the PR145 action harness. It only
+This package is the task-neutral version of the PR145 browser runner. It only
 provides browser control and artifact capture. It does not include a VLM
 playtester, frame picker, or judge.
 
@@ -18,29 +18,29 @@ npm test
 From a private GitHub repo in a task Dockerfile:
 
 ```dockerfile
-RUN npm install -g git+ssh://git@github.com/OWNER/mm-action-harness.git
+RUN npm install -g https://github.com/parsewave/runwave.git
 RUN npx playwright install --with-deps chromium
 ```
 
 The installed CLI is:
 
 ```sh
-action-harness '<json>'
+runwave '<json>'
 ```
 
 ## Workspace And Outputs
 
 Relative `file`, `outputRoot`, and `outDir` paths resolve from:
 
-1. `ACTION_HARNESS_WORKSPACE`, when set.
+1. `RUNWAVE_WORKSPACE`, when set.
 2. The current working directory.
 
 Useful environment variables:
 
-- `ACTION_HARNESS_WORKSPACE`: base directory for relative paths.
-- `ACTION_HARNESS_SESSION_FILE`: active session JSON path. Defaults to
-  `<workspace>/.action-harness-session.json`.
-- `ACTION_HARNESS_SESSION_WAIT_MS`: startup wait for the daemon session file.
+- `RUNWAVE_WORKSPACE`: base directory for relative paths.
+- `RUNWAVE_SESSION_FILE`: active session JSON path. Defaults to
+  `<workspace>/.runwave-session.json`.
+- `RUNWAVE_SESSION_WAIT_MS`: startup wait for the daemon session file.
   Defaults to `60000`.
 
 Each command must include `action_name`. By default, command artifacts are
@@ -55,7 +55,7 @@ state/output/<action_name>/
 Start from a local file:
 
 ```sh
-action-harness '{
+runwave '{
   "action": "start",
   "action_name": "run-start",
   "file": "game/index.html",
@@ -73,7 +73,7 @@ action-harness '{
 Start from a URL:
 
 ```sh
-action-harness '{
+runwave '{
   "action": "start",
   "action_name": "run-start",
   "url": "http://localhost:3000",
@@ -93,7 +93,7 @@ Useful `start` options:
 - `keyAliases`: maps semantic names used in steps to real Playwright keys.
 - `stateExpression`: optional JavaScript expression evaluated in the page.
 - `outputRoot`: defaults to `state/output`.
-- `outDir`: defaults to `recordings/action-harness-run-<timestamp>`.
+- `outDir`: defaults to `recordings/runwave-run-<timestamp>`.
 - `sessionWaitMs`: overrides daemon startup wait for this start command.
 
 ## Commands
@@ -101,19 +101,19 @@ Useful `start` options:
 Inspect state:
 
 ```sh
-action-harness '{"action":"state","action_name":"turn-001-state"}'
+runwave '{"action":"state","action_name":"turn-001-state"}'
 ```
 
 Capture a screenshot:
 
 ```sh
-action-harness '{"action":"screenshot","action_name":"turn-001-screen","name":"screen"}'
+runwave '{"action":"screenshot","action_name":"turn-001-screen","name":"screen"}'
 ```
 
 Execute timed keyboard controls:
 
 ```sh
-action-harness '{
+runwave '{
   "action": "step",
   "action_name": "turn-002-jump-right",
   "duration": 1200,
@@ -129,7 +129,7 @@ action-harness '{
 Click:
 
 ```sh
-action-harness '{
+runwave '{
   "action": "step",
   "action_name": "turn-003-click-start",
   "duration": 500,
@@ -142,7 +142,7 @@ action-harness '{
 Move the mouse without clicking for camera control:
 
 ```sh
-action-harness '{
+runwave '{
   "action": "step",
   "action_name": "turn-004-look-around",
   "duration": 1200,
@@ -154,18 +154,18 @@ action-harness '{
 
 `view_moves` use relative CSS-pixel deltas. Positive `dx` moves right,
 negative `dx` moves left, positive `dy` moves down, and negative `dy` moves up.
-The harness also accepts `viewMoves`, `mouse_moves`, and `mouseMoves`.
+Runwave also accepts `viewMoves`, `mouse_moves`, and `mouseMoves`.
 
 Navigate or reset:
 
 ```sh
-action-harness '{"action":"reset","action_name":"reset-001"}'
+runwave '{"action":"reset","action_name":"reset-001"}'
 ```
 
 Stop and finalize the recording:
 
 ```sh
-action-harness '{"action":"stop","action_name":"run-stop"}'
+runwave '{"action":"stop","action_name":"run-stop"}'
 ```
 
 ## State
@@ -198,5 +198,5 @@ Each turn writes:
 - `*.png`: screenshots captured during that command.
 - `NNN-<action_name>.json`: detailed step log for `step` actions.
 
-The active session is tracked in `.action-harness-session.json` by default and
+The active session is tracked in `.runwave-session.json` by default and
 is removed by `stop`.

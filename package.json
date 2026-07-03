@@ -1,15 +1,15 @@
 {
-  "name": "mm-action-harness",
+  "name": "runwave",
   "version": "0.1.0",
-  "description": "Reusable Playwright action harness for browser-game benchmark playtesting.",
+  "description": "Runwave browser automation and artifact capture for game benchmark playtesting.",
   "private": true,
   "type": "commonjs",
   "main": "src/cli.js",
   "bin": {
-    "action-harness": "bin/action-harness.js"
+    "runwave": "bin/runwave.js"
   },
   "scripts": {
-    "cli": "node bin/action-harness.js",
+    "cli": "node bin/runwave.js",
     "smoke": "node --test test/smoke.test.js",
     "test": "node --test"
   },

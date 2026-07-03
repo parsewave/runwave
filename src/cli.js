@@ -23,7 +23,7 @@ function readInput() {
 
 function currentSession() {
   if (!fs.existsSync(sessionFile)) {
-    throw new Error('action harness is not running; start it first');
+    throw new Error('runwave is not running; start it first');
   }
   return readJson(sessionFile);
 }
@@ -34,7 +34,7 @@ function positiveNumber(value, fallback) {
 }
 
 function sessionWaitMs(input) {
-  return positiveNumber(input.sessionWaitMs ?? process.env.ACTION_HARNESS_SESSION_WAIT_MS, DEFAULT_SESSION_WAIT_MS);
+  return positiveNumber(input.sessionWaitMs ?? process.env.RUNWAVE_SESSION_WAIT_MS, DEFAULT_SESSION_WAIT_MS);
 }
 
 async function waitForSession(pid, timeoutMs = DEFAULT_SESSION_WAIT_MS) {
@@ -46,7 +46,7 @@ async function waitForSession(pid, timeoutMs = DEFAULT_SESSION_WAIT_MS) {
     }
     await sleep(100);
   }
-  throw new Error('timed out waiting for action harness session');
+  throw new Error('timed out waiting for runwave session');
 }
 
 async function existingSessionStart(input) {

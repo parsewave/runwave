@@ -4,12 +4,12 @@ const { workspaceRoot } = require('./paths');
 
 function usage() {
   return {
-    usage: `action-harness '<json>'`,
+    usage: `runwave '<json>'`,
     notes: [
       'Every command must include action_name.',
       'Use start with either url or file.',
       'Each command writes artifacts to state/output/<action_name>/ by default.',
-      'Relative file and output paths resolve from ACTION_HARNESS_WORKSPACE or the current working directory.',
+      'Relative file and output paths resolve from RUNWAVE_WORKSPACE or the current working directory.',
     ],
     examples: [
       {
@@ -41,7 +41,7 @@ function usage() {
 
 function assertActionName(input) {
   if (!input || !input.action_name) {
-    throw new Error('action_name is required for every harness command');
+    throw new Error('action_name is required for every runwave command');
   }
 }
 

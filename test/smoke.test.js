@@ -6,7 +6,7 @@ const { spawnSync } = require('child_process');
 const test = require('node:test');
 
 const packageRoot = path.resolve(__dirname, '..');
-const cli = path.join(packageRoot, 'bin', 'action-harness.js');
+const cli = path.join(packageRoot, 'bin', 'runwave.js');
 
 async function chromiumLaunchConfig(t) {
   let chromium;
@@ -38,7 +38,7 @@ async function chromiumLaunchConfig(t) {
   return null;
 }
 
-function harnessLaunchOptions(launchConfig) {
+function runwaveLaunchOptions(launchConfig) {
   if (launchConfig.channel) return { channel: launchConfig.channel };
   if (launchConfig.executablePath) return { executablePath: launchConfig.executablePath };
   return {};
@@ -48,11 +48,11 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
   const launchConfig = await chromiumLaunchConfig(t);
   if (!launchConfig) return;
 
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'action-harness-smoke-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-smoke-'));
   const env = {
     ...process.env,
-    ACTION_HARNESS_SESSION_FILE: path.join(tmpDir, 'session.json'),
-    ACTION_HARNESS_WORKSPACE: packageRoot,
+    RUNWAVE_SESSION_FILE: path.join(tmpDir, 'session.json'),
+    RUNWAVE_WORKSPACE: packageRoot,
   };
   const outputRoot = path.join(tmpDir, 'state');
   const recordingDir = path.join(tmpDir, 'recording');
@@ -60,7 +60,7 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
     "() => ({ clicks: window.clicks || 0, status: document.getElementById('status').textContent })";
 
   try {
-    const start = runHarness(
+    const start = runCli(
       {
         action: 'start',
         action_name: 'smoke-start',
@@ -78,14 +78,14 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
         gridScreenshots: false,
         stateExpression,
         sessionWaitMs: 20000,
-        ...harnessLaunchOptions(launchConfig),
+        ...runwaveLaunchOptions(launchConfig),
       },
       { cwd: tmpDir, env }
     );
     assert.equal(start.ok, true);
     assert.ok(fs.existsSync(start.output.screenshot));
 
-    const step = runHarness(
+    const step = runCli(
       {
         action: 'step',
         action_name: 'smoke-click',
@@ -102,7 +102,7 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
     assert.ok(step.captures.length >= 1);
     assert.ok(fs.existsSync(step.captures[0].path));
 
-    const stop = runHarness(
+    const stop = runCli(
       {
         action: 'stop',
         action_name: 'smoke-stop',
@@ -114,18 +114,18 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
     assert.ok(stop.video);
     assert.ok(fs.existsSync(stop.video));
   } finally {
-    if (fs.existsSync(env.ACTION_HARNESS_SESSION_FILE)) {
+    if (fs.existsSync(env.RUNWAVE_SESSION_FILE)) {
       try {
-        runHarness({ action: 'stop', action_name: 'smoke-cleanup', finalScreenshot: false }, { cwd: tmpDir, env });
+        runCli({ action: 'stop', action_name: 'smoke-cleanup', finalScreenshot: false }, { cwd: tmpDir, env });
       } catch {
-        fs.rmSync(env.ACTION_HARNESS_SESSION_FILE, { force: true });
+        fs.rmSync(env.RUNWAVE_SESSION_FILE, { force: true });
       }
     }
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
 
-function runHarness(payload, options) {
+function runCli(payload, options) {
   const proc = spawnSync(process.execPath, [cli, JSON.stringify(payload)], {
     cwd: options.cwd,
     env: options.env,

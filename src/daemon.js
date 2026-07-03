@@ -13,7 +13,7 @@ const { ensureDir, timestamp, writeJson } = require('./file-utils');
 function buildPaths(config) {
   const runDir = config.outDir
     ? path.resolve(workspaceRoot, config.outDir)
-    : path.join(defaultRecordingRoot, `action-harness-run-${timestamp()}`);
+    : path.join(defaultRecordingRoot, `runwave-run-${timestamp()}`);
   const outputRoot = config.outputRoot ? path.resolve(workspaceRoot, config.outputRoot) : defaultOutputRoot;
   return { runDir, outputRoot };
 }

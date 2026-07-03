@@ -1,15 +1,15 @@
 const path = require('path');
 
-const harnessRoot = path.resolve(__dirname, '..');
-const workspaceRoot = process.env.ACTION_HARNESS_WORKSPACE
-  ? path.resolve(process.env.ACTION_HARNESS_WORKSPACE)
+const runwaveRoot = path.resolve(__dirname, '..');
+const workspaceRoot = process.env.RUNWAVE_WORKSPACE
+  ? path.resolve(process.env.RUNWAVE_WORKSPACE)
   : process.cwd();
-const sessionFile = process.env.ACTION_HARNESS_SESSION_FILE
-  ? path.resolve(process.env.ACTION_HARNESS_SESSION_FILE)
-  : path.join(workspaceRoot, '.action-harness-session.json');
+const sessionFile = process.env.RUNWAVE_SESSION_FILE
+  ? path.resolve(process.env.RUNWAVE_SESSION_FILE)
+  : path.join(workspaceRoot, '.runwave-session.json');
 
 module.exports = {
-  harnessRoot,
+  runwaveRoot,
   workspaceRoot,
   sessionFile,
   defaultOutputRoot: path.join(workspaceRoot, 'state', 'output'),
