@@ -93,6 +93,8 @@ runwave drives browser targets.
 
 After downloading artifacts, build a local video viewer:
 
+![Runwave playtest viewer showing multiple recorded game videos](assets/playtest-viewer.png)
+
 ```sh
 node ops/build-playtest-viewer.js \
   --artifacts cruft/playtests/<run-id>/s3-artifacts \

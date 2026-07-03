@@ -1,0 +1,218 @@
+---
+name: runwave-playtest-fleet
+description: Run 20 or more simultaneous browser-game playtests with runwave using games from s3://pw-cruft/games, Hetzner workers or a local fallback, S3 artifact upload/download, and a generated browser video viewer. Use when asked to launch, test, orchestrate, monitor, or review a many-game runwave playtest batch.
+---
+
+# Runwave Playtest Fleet
+
+Use this skill to run a many-game browser playtest batch end to end: discover games from S3, run one isolated runwave job per game, upload artifacts to S3, download artifacts into `cruft/playtests`, and build a video viewer.
+
+## Defaults
+
+- Game source: `s3://pw-cruft/games`
+- Result S3 prefix: `s3://pw-cruft/playtests/<run-id>/`
+- Local artifact root: `cruft/playtests/<run-id>/`
+- Viewer path: `cruft/playtests/<run-id>/viewer/index.html`
+- Playtest duration: `120000` ms per game
+- Fleet size target: `8 x ccx43`, `3` jobs per server, `24` concurrent slots
+- Runwave repo: `https://github.com/parsewave/runwave`
+- SSH key: `~/.ssh/id_louka`
+- Secrets may come from environment variables, local shell profiles, CI secrets,
+  or `~/.c.yaml`; never print secret values
+
+## Required Secrets
+
+Required for S3 game discovery, artifact upload, and artifact download:
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_DEFAULT_REGION`, optional but recommended; use `us-east-1` when absent
+- `AWS_SESSION_TOKEN`, only when using temporary AWS credentials
+
+Required for Hetzner provisioning:
+
+- `HCLOUD_TOKEN` or `HETZNER_API_KEY`
+
+Required for SSH access to workers:
+
+- Private key path, usually `~/.ssh/id_louka`
+- Hetzner SSH key name injected during provisioning, usually `hetzner-id_louka`
+
+Often required by the playtester or runwave-adjacent agent layer, depending on
+the selected planner/model:
+
+- `OPENAI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `OPENROUTER_API_KEY`
+- `PARSEWAVE_API_TOKEN`
+- `GITHUB_ACCESS_TOKEN` or `GH_TOKEN`, if private runwave refs/repos are used
+
+Prefer already-exported environment variables. If they are not set and a
+project-specific secret file exists, source or parse only the keys needed for the
+current operation.
+
+## Preflight
+
+From the repo root:
+
+```sh
+node --check ops/orchestrate-playtests.js
+node --check ops/remote/run-playtest.js
+node --check ops/build-playtest-viewer.js
+bash -n ops/provision-hetzner.sh
+bash -n ops/bootstrap-servers.sh
+bash -n ops/remote/bootstrap-runner.sh
+```
+
+Check S3 game discovery after AWS credentials are available:
+
+```sh
+AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+export AWS_DEFAULT_REGION
+aws s3api list-objects-v2 --bucket pw-cruft --prefix games/ --delimiter / --output json |
+  jq -r '.CommonPrefixes[].Prefix'
+```
+
+Skip hidden prefixes such as `games/.run/`. Schedule only directories with a `start.sh` that serves HTTP unless explicitly told otherwise.
+
+## Preferred Remote Run
+
+Use this path when Hetzner creation and SSH are working.
+
+1. Provision the fleet:
+
+```sh
+SERVER_TYPE=ccx43 SERVER_COUNT=8 LOCATION=hel1 ops/provision-hetzner.sh
+```
+
+2. Bootstrap servers. This syncs `s3://pw-cruft/games` to `/opt/runwave/games` on every worker and installs runner dependencies:
+
+```sh
+ops/bootstrap-servers.sh ops/inventory/<batch>.json
+```
+
+3. Launch one playtest per discovered browser game:
+
+```sh
+node ops/orchestrate-playtests.js \
+  --inventory ops/inventory/<batch>.json \
+  --s3-uri s3://pw-cruft/playtests \
+  --games-s3-uri s3://pw-cruft/games \
+  --runwave-ref main \
+  --playtest-duration-ms 120000 \
+  --concurrency-per-server 3
+```
+
+The orchestrator refuses a 20-job run if capacity is below `20`. It assigns unique ports per server and uploads each job to:
+
+```text
+s3://pw-cruft/playtests/<run-id>/<game>/attempt-001/
+```
+
+## Local Fallback
+
+Use the local fallback when Hetzner is not provisionable, public IPs are blocked, or SSH is unavailable. Keep concurrency conservative, usually `4`.
+
+1. Sync games locally:
+
+```sh
+mkdir -p cruft/playtests/_games-cache
+aws s3 sync s3://pw-cruft/games/ cruft/playtests/_games-cache/ --delete --only-show-errors
+```
+
+2. Install per-game npm dependencies:
+
+```sh
+while IFS= read -r package_json; do
+  game_dir=$(dirname "$package_json")
+  npm install --prefix "$game_dir" --no-audit --no-fund
+done < <(find cruft/playtests/_games-cache -mindepth 2 -maxdepth 2 -name package.json | sort)
+```
+
+3. Generate job JSON files under `cruft/playtests/<run-id>/job-specs`. Each job needs:
+
+```json
+{
+  "jobId": "<run-id>-<game>-attempt-001",
+  "runId": "<run-id>",
+  "game": "<game>",
+  "attempt": 1,
+  "port": 9300,
+  "runwaveRepo": "https://github.com/parsewave/runwave",
+  "runwaveRef": "main",
+  "playtestDurationMs": 120000,
+  "s3Uri": "s3://pw-cruft/playtests/<run-id>/<game>/attempt-001",
+  "viewport": { "width": 960, "height": 540 },
+  "videoSize": { "width": 960, "height": 540 }
+}
+```
+
+4. Run jobs with:
+
+```sh
+RUNWAVE_GAMES_ROOT="$PWD/cruft/playtests/_games-cache" \
+RUNWAVE_JOBS_ROOT="$PWD/cruft/playtests/<run-id>/local-jobs" \
+node ops/remote/run-playtest.js --job cruft/playtests/<run-id>/job-specs/<job>.json
+```
+
+For local parallel execution, spawn up to four of these commands at a time. Capture each job’s stdout/stderr to `cruft/playtests/<run-id>/<jobId>.log`, and write a `results.json` containing `{jobId, game, code, log, s3Uri}` for every job.
+
+## Download And Viewer
+
+After all jobs finish, download artifacts:
+
+```sh
+aws s3 sync \
+  s3://pw-cruft/playtests/<run-id>/ \
+  cruft/playtests/<run-id>/s3-artifacts/ \
+  --delete --only-show-errors
+```
+
+Build the viewer:
+
+```sh
+node ops/build-playtest-viewer.js \
+  --artifacts cruft/playtests/<run-id>/s3-artifacts \
+  --out cruft/playtests/<run-id>/viewer/index.html
+```
+
+The viewer is static HTML with filterable cards, embedded WebM videos, screenshot strips, and links to each `summary.json`.
+
+## Verification
+
+Before reporting success, verify:
+
+```sh
+RUN_ID=<run-id>
+jq '{total:length, failed: map(select(.code != 0))}' "cruft/playtests/$RUN_ID/results.json"
+find "cruft/playtests/$RUN_ID/s3-artifacts" -name summary.json | wc -l
+find "cruft/playtests/$RUN_ID/s3-artifacts" -name '*.webm' | wc -l
+find "cruft/playtests/$RUN_ID/s3-artifacts" -name '*.png' | wc -l
+```
+
+Validate viewer links:
+
+```sh
+node - "$RUN_ID" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const runId = process.argv[2];
+const viewer = path.resolve('cruft/playtests', runId, 'viewer/index.html');
+const html = fs.readFileSync(viewer, 'utf8');
+const refs = [...html.matchAll(/(?:src|poster|href)="([^"]+)"/g)]
+  .map((match) => match[1])
+  .filter((value) => value && !value.startsWith('#'));
+const missing = refs.filter((ref) => !fs.existsSync(path.resolve(path.dirname(viewer), ref)));
+console.log(JSON.stringify({ viewer, refs: refs.length, missing: missing.length, sampleMissing: missing.slice(0, 5) }, null, 2));
+process.exit(missing.length ? 1 : 0);
+NODE
+```
+
+Report the run id, S3 result prefix, local artifact folder, viewer path, job count, failure count, WebM count, screenshot count, and whether the run used remote workers or local fallback.
+
+## Failure Handling
+
+- If Hetzner returns `permission denied`, do not keep retrying provisioning. Use local fallback and report that fleet provisioning is blocked by token permissions.
+- If existing Hetzner servers have blocked public IPs or SSH timeouts, use local fallback and report that remote workers are unreachable.
+- If a job fails, leave its local workspace and log intact, download whatever uploaded, and include the failed job ids in the result.
+- If S3 has more than 20 runnable browser games, prefer running all of them unless the user explicitly requests exactly 20.
