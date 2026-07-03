@@ -18,6 +18,13 @@ function cleanKey(value) {
   return key || null;
 }
 
+function splitKeyChord(key) {
+  return String(key)
+    .split('+')
+    .map((part) => cleanKey(part))
+    .filter(Boolean);
+}
+
 function cleanCommand(command, durationMs) {
   if (!command || typeof command !== 'object') return null;
   const key = cleanKey(command.key ?? command.button ?? command.press);
@@ -26,7 +33,7 @@ function cleanCommand(command, durationMs) {
   const from = clamp(finiteNumber(command.from ?? command.start, 0), 0, durationMs);
   const to = clamp(finiteNumber(command.to ?? command.end, durationMs), from, durationMs);
   if (to <= from) return null;
-  return { from: Math.round(from), to: Math.round(to), key };
+  return splitKeyChord(key).map((part) => ({ from: Math.round(from), to: Math.round(to), key: part }));
 }
 
 function cleanClick(click, durationMs, viewport) {
@@ -123,7 +130,7 @@ function normalizeDecision(raw, options = {}) {
 
   return {
     durationMs,
-    commands: (data.commands || []).map((command) => cleanCommand(command, durationMs)).filter(Boolean),
+    commands: (data.commands || []).flatMap((command) => cleanCommand(command, durationMs) || []),
     clicks: (data.clicks || []).map((click) => cleanClick(click, durationMs, viewport)).filter(Boolean),
     drags: asArray(data.drags || data.drag).map((drag) => cleanDrag(drag, durationMs, viewport)).filter(Boolean),
     viewMoves: asArray(data.view_moves || data.viewMoves).map((move) => cleanViewMove(move, durationMs)).filter(Boolean),

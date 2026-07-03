@@ -15,7 +15,7 @@ test('normalizes model actions into harness steps', () => {
   const decision = normalizeDecision(
     {
       duration_ms: 9000,
-      commands: [{ from: 0, to: 5000, key: 'ArrowRight' }],
+      commands: [{ from: 0, to: 5000, key: 'ArrowRight' }, { from: 100, to: 900, key: 'Shift+ArrowRight+Space' }],
       clicks: [{ at: 50, x: 0.5, y: 0.25 }],
       drags: [{ at: 100, from: { x: 0.2, y: 0.25 }, to: { x: 0.4, y: 0.25 }, mode: 'html5' }],
       view_moves: [{ from: 0, to: 500, dx: 50, dy: -10 }],
@@ -26,7 +26,12 @@ test('normalizes model actions into harness steps', () => {
   );
 
   assert.equal(decision.durationMs, 8000);
-  assert.deepEqual(decision.commands, [{ from: 0, to: 5000, key: 'ArrowRight' }]);
+  assert.deepEqual(decision.commands, [
+    { from: 0, to: 5000, key: 'ArrowRight' },
+    { from: 100, to: 900, key: 'Shift' },
+    { from: 100, to: 900, key: 'ArrowRight' },
+    { from: 100, to: 900, key: 'Space' },
+  ]);
   assert.equal(decision.clicks[0].x, 500);
   assert.equal(decision.clicks[0].y, 150);
   assert.deepEqual(decision.drags[0], {
