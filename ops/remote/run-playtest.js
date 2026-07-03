@@ -179,6 +179,249 @@ function chooseViewportFromProbe(probe, fallback = { width: 1280, height: 720 })
   };
 }
 
+function normalizeViewport(viewport, limits = {}) {
+  const minWidth = Number(limits.minWidth || 480);
+  const maxWidth = Number(limits.maxWidth || 1280);
+  const minHeight = Number(limits.minHeight || 360);
+  const maxHeight = Number(limits.maxHeight || 1400);
+  return {
+    width: even(clamp(Number(viewport.width || 0), minWidth, maxWidth)),
+    height: even(clamp(Number(viewport.height || 0), minHeight, maxHeight)),
+  };
+}
+
+function largestCanvasFromProbe(probe) {
+  const canvases = Array.isArray(probe.canvases) ? probe.canvases : [];
+  return canvases
+    .filter((canvas) => canvas.width > 0 && canvas.height > 0)
+    .sort((a, b) => b.width * b.height - a.width * a.height)[0] || null;
+}
+
+function viewportCandidatesFromProbe(probe, fallback = { width: 1280, height: 720 }) {
+  const baseViewport = normalizeViewport(probe.viewport || fallback);
+  const deterministic = chooseViewportFromProbe(probe, baseViewport);
+  const visible = probe.visibleBounds || {};
+  const neededHeight = Math.max(
+    Number(probe.scrollHeight || 0),
+    Number(visible.bottom || 0) + 16,
+    baseViewport.height
+  );
+  const largestCanvas = largestCanvasFromProbe(probe);
+  const candidates = [
+    {
+      id: 'default',
+      reason: 'default browser viewport',
+      viewport: baseViewport,
+    },
+    {
+      id: 'probe-choice',
+      reason: deterministic.reason,
+      viewport: normalizeViewport(deterministic.viewport),
+    },
+  ];
+
+  if (largestCanvas) {
+    candidates.push({
+      id: 'canvas-fit',
+      reason: 'largest canvas plus a small margin',
+      viewport: normalizeViewport({
+        width: largestCanvas.width + 16,
+        height: largestCanvas.height + 16,
+      }, { maxHeight: 1000 }),
+    });
+  }
+
+  if (neededHeight > baseViewport.height + 24) {
+    candidates.push({
+      id: 'page-fit',
+      reason: 'full visible page height',
+      viewport: normalizeViewport({
+        width: baseViewport.width,
+        height: neededHeight,
+      }),
+    });
+  }
+
+  if (visible.width > 0 && visible.height > 0) {
+    candidates.push({
+      id: 'content-fit',
+      reason: 'visible content bounds with reduced horizontal whitespace',
+      viewport: normalizeViewport({
+        width: visible.width + 160,
+        height: Math.max(visible.height + Math.max(visible.top, 0) + 32, baseViewport.height),
+      }),
+    });
+  }
+
+  candidates.push({
+    id: 'square-compact',
+    reason: 'compact square-ish viewport for centered games',
+    viewport: normalizeViewport({ width: 900, height: 900 }),
+  });
+
+  const seen = new Set();
+  return candidates.filter((candidate) => {
+    const key = `${candidate.viewport.width}x${candidate.viewport.height}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 6);
+}
+
+async function captureViewportCandidateScreenshots(job, dirs, url, env, candidates) {
+  const outputDir = path.join(dirs.workspace, 'artifacts', 'viewport-preflight');
+  mkdirp(outputDir);
+  const { chromium } = require(path.join(dirs.runwave, 'node_modules', 'playwright'));
+  const launchOptions = {
+    headless: true,
+    args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
+  };
+  if (job.channel) launchOptions.channel = String(job.channel);
+  if (job.executablePath) launchOptions.executablePath = String(job.executablePath);
+
+  const browser = await chromium.launch(launchOptions);
+  try {
+    const captured = [];
+    for (const candidate of candidates) {
+      const context = await browser.newContext({
+        viewport: candidate.viewport,
+        deviceScaleFactor: Number(job.deviceScaleFactor ?? 1),
+      });
+      const page = await context.newPage();
+      await page.goto(url, { waitUntil: job.waitUntil || 'load' });
+      await new Promise((resolve) => setTimeout(resolve, Number(job.waitAfterLoad ?? 700)));
+      const screenshot = path.join(outputDir, `${candidate.id}-${candidate.viewport.width}x${candidate.viewport.height}.png`);
+      await page.screenshot({ path: screenshot, fullPage: false });
+      captured.push({ ...candidate, screenshot });
+      await context.close();
+    }
+    return captured;
+  } finally {
+    await browser.close();
+  }
+}
+
+function normalizeVlmViewportChoice(raw, candidates, fallbackChoice) {
+  const data = raw && typeof raw === 'object' ? raw : {};
+  const choiceId = String(data.choice_id || data.choiceId || data.id || '').trim();
+  const byId = candidates.find((candidate) => candidate.id === choiceId);
+  if (byId) {
+    return {
+      viewport: byId.viewport,
+      reason: data.reason || byId.reason,
+      selectedCandidateId: byId.id,
+      confidence: Number(data.confidence || 0) || null,
+      source: 'vlm',
+    };
+  }
+
+  const requested = data.viewport && typeof data.viewport === 'object' ? normalizeViewport(data.viewport) : null;
+  const byViewport = requested
+    ? candidates.find((candidate) => candidate.viewport.width === requested.width && candidate.viewport.height === requested.height)
+    : null;
+  if (byViewport) {
+    return {
+      viewport: byViewport.viewport,
+      reason: data.reason || byViewport.reason,
+      selectedCandidateId: byViewport.id,
+      confidence: Number(data.confidence || 0) || null,
+      source: 'vlm',
+    };
+  }
+
+  return {
+    ...fallbackChoice,
+    selectedCandidateId: 'probe-choice',
+    source: 'fallback',
+    vlmError: choiceId ? `unknown candidate id: ${choiceId}` : 'missing candidate id',
+  };
+}
+
+function buildViewportPreflightPrompt(candidates, probe) {
+  const lines = [
+    'You are choosing the viewport for recording and playing a browser game.',
+    'Pick the single candidate whose screenshot best shows the playable game area.',
+    '',
+    'Criteria:',
+    '- No important controls, HUD, board, canvas, or instructions are clipped.',
+    '- The game should not be unnecessarily zoomed out with lots of empty page whitespace.',
+    '- Text/buttons should remain readable.',
+    '- Prefer the viewport that would help a VLM game-playing agent understand what to do next.',
+    '',
+    'Return only JSON:',
+    '{ "choice_id": "candidate id", "reason": "short reason", "confidence": 0.0 }',
+    '',
+    'Probe metadata:',
+    JSON.stringify({
+      viewport: probe.viewport,
+      canvases: probe.canvases,
+      scrollWidth: probe.scrollWidth,
+      scrollHeight: probe.scrollHeight,
+      visibleBounds: probe.visibleBounds,
+    }, null, 2),
+    '',
+    'Candidates:',
+    ...candidates.map((candidate) => `${candidate.id}: ${candidate.viewport.width}x${candidate.viewport.height} (${candidate.reason})`),
+  ];
+  return lines.join('\n');
+}
+
+async function chooseViewportWithVlm(job, dirs, url, env, probe) {
+  const candidates = await captureViewportCandidateScreenshots(
+    job,
+    dirs,
+    url,
+    env,
+    viewportCandidatesFromProbe(probe, job.probeViewport || { width: 1280, height: 720 })
+  );
+  const fallbackChoice = {
+    viewport: probe.choice.viewport,
+    reason: probe.choice.reason,
+    selectedCandidateId: 'probe-choice',
+    source: 'probe',
+  };
+  const { chatCompletion, dataUrl } = require(path.join(dirs.runwave, 'agent', 'src', 'model-client.js'));
+  const content = [{ type: 'text', text: buildViewportPreflightPrompt(candidates, probe) }];
+  for (const candidate of candidates) {
+    content.push({
+      type: 'text',
+      text: `Candidate ${candidate.id}: ${candidate.viewport.width}x${candidate.viewport.height}`,
+    });
+    content.push({
+      type: 'image_url',
+      image_url: { url: dataUrl(candidate.screenshot) },
+    });
+  }
+
+  const startedAt = Date.now();
+  try {
+    const result = await chatCompletion({
+      messages: [{ role: 'user', content }],
+      maxTokens: Number(job.viewportPreflightMaxTokens || 700),
+      timeoutMs: Number(job.viewportPreflightTimeoutMs || 120000),
+      temperature: Number(job.viewportPreflightTemperature ?? 0),
+    });
+    const choice = normalizeVlmViewportChoice(result.json, candidates, fallbackChoice);
+    return {
+      enabled: true,
+      elapsedMs: Date.now() - startedAt,
+      model: result.model,
+      choice,
+      rawChoice: result.json,
+      usage: result.usage || null,
+      candidates,
+    };
+  } catch (error) {
+    return {
+      enabled: true,
+      elapsedMs: Date.now() - startedAt,
+      choice: fallbackChoice,
+      error: error.message,
+      candidates,
+    };
+  }
+}
+
 async function probeViewport(job, dirs, url, env = process.env) {
   const viewport = job.probeViewport || { width: 1280, height: 720 };
   const { chromium } = require(path.join(dirs.runwave, 'node_modules', 'playwright'));
@@ -506,22 +749,40 @@ async function main() {
 
     if (!job.viewport && job.autoViewport !== false) {
       const probe = await probeViewport(job, dirs, url, runnerEnv);
-      job.viewport = probe.choice.viewport;
-      job.videoSize = job.videoSize || probe.choice.viewport;
+      let viewportChoice = probe.choice;
+      if (job.vlmViewportPreflight || runnerEnv.RUNWAVE_VLM_VIEWPORT_PREFLIGHT === '1') {
+        const preflight = await chooseViewportWithVlm(job, dirs, url, runnerEnv, probe);
+        summary.viewportVlmPreflight = preflight;
+        viewportChoice = preflight.choice || viewportChoice;
+        log('viewport.vlm_preflight', {
+          jobId,
+          choice: viewportChoice,
+          error: preflight.error,
+          elapsedMs: preflight.elapsedMs,
+        });
+      }
+      job.viewport = viewportChoice.viewport;
+      job.videoSize = job.videoSize || viewportChoice.viewport;
       summary.viewportProbe = probe;
+      summary.viewportChoice = viewportChoice;
       fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
       log('viewport.probe', { jobId, choice: probe.choice });
     }
 
-    const playtest = await runRunwave(job, dirs, url, runnerEnv);
-    if (playtest) {
-      summary.playtest = {
-        mode: playtest.mode,
-        steps: playtest.steps,
-        elapsedMs: playtest.elapsedMs,
-        stoppedByAgent: playtest.stoppedByAgent,
-        outputDir: playtest.outputDir,
-      };
+    if (job.viewportOnly || job.viewportPreflightOnly) {
+      summary.viewportOnly = true;
+      log('viewport.only.done', { jobId, viewport: job.viewport });
+    } else {
+      const playtest = await runRunwave(job, dirs, url, runnerEnv);
+      if (playtest) {
+        summary.playtest = {
+          mode: playtest.mode,
+          steps: playtest.steps,
+          elapsedMs: playtest.elapsedMs,
+          stoppedByAgent: playtest.stoppedByAgent,
+          outputDir: playtest.outputDir,
+        };
+      }
     }
     summary.status = 'passed';
   } catch (error) {
@@ -558,4 +819,6 @@ if (require.main === module) {
 
 module.exports = {
   chooseViewportFromProbe,
+  normalizeVlmViewportChoice,
+  viewportCandidatesFromProbe,
 };
