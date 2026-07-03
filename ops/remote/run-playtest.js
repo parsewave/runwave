@@ -326,6 +326,7 @@ async function main() {
 
   const job = JSON.parse(fs.readFileSync(args.job, 'utf8'));
   const envFile = loadEnvFile('/etc/runwave-runner.env');
+  Object.assign(process.env, envFile);
   const runnerEnv = { ...process.env, ...envFile };
   const runner = runnerPaths(runnerEnv);
   const jobId = safeName(job.jobId || `${job.game}-attempt-${job.attempt || 1}-${Date.now()}`);
