@@ -154,6 +154,8 @@ test('playtester prompt warns when recent actions repeat', () => {
   assert.match(prompt, /Warning:/);
   assert.match(prompt, /Space, Enter, Escape, and P/);
   assert.match(prompt, /drags/);
+  assert.match(prompt, /Single Player/);
+  assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
 });
 
 test('chat completion honors explicit retry attempts for malformed JSON', async () => {
