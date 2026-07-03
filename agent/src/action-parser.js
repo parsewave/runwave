@@ -31,8 +31,23 @@ function cleanCommand(command, durationMs) {
 
 function cleanClick(click, durationMs, viewport) {
   if (!click || typeof click !== 'object') return null;
-  let x = finiteNumber(click.x);
-  let y = finiteNumber(click.y);
+  const point = cleanPoint(click, viewport);
+  if (!point) return null;
+
+  const at = clamp(finiteNumber(click.at ?? click.from, 0), 0, durationMs);
+  return {
+    at: Math.round(at),
+    x: point.x,
+    y: point.y,
+    button: click.button || 'left',
+    clickCount: Math.max(1, Math.round(finiteNumber(click.clickCount, 1))),
+  };
+}
+
+function cleanPoint(point, viewport) {
+  if (!point || typeof point !== 'object') return null;
+  let x = finiteNumber(point.x);
+  let y = finiteNumber(point.y);
   if (x === null || y === null) return null;
 
   if (viewport && x >= 0 && x <= 1 && y >= 0 && y <= 1) {
@@ -45,13 +60,23 @@ function cleanClick(click, durationMs, viewport) {
     y = clamp(y, 0, viewport.height - 1);
   }
 
-  const at = clamp(finiteNumber(click.at ?? click.from, 0), 0, durationMs);
+  return { x: Math.round(x), y: Math.round(y) };
+}
+
+function cleanDrag(drag, durationMs, viewport) {
+  if (!drag || typeof drag !== 'object') return null;
+  const from = cleanPoint(drag.from || drag.start || { x: drag.x1, y: drag.y1 }, viewport);
+  const to = cleanPoint(drag.to || drag.end || { x: drag.x2, y: drag.y2 }, viewport);
+  if (!from || !to) return null;
+
+  const at = clamp(finiteNumber(drag.at ?? drag.fromAt ?? drag.startAt, 0), 0, durationMs);
   return {
     at: Math.round(at),
-    x: Math.round(x),
-    y: Math.round(y),
-    button: click.button || 'left',
-    clickCount: Math.max(1, Math.round(finiteNumber(click.clickCount, 1))),
+    from,
+    to,
+    button: drag.button || 'left',
+    mode: drag.mode === 'html5' ? 'html5' : 'mouse',
+    steps: clamp(Math.round(finiteNumber(drag.steps, 12)), 1, 80),
   };
 }
 
@@ -81,6 +106,11 @@ function unwrapDecision(raw) {
   return raw;
 }
 
+function asArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
 function normalizeDecision(raw, options = {}) {
   const viewport = options.viewport || null;
   const maxDurationMs = Number(options.maxDurationMs || MAX_DURATION_MS);
@@ -95,7 +125,8 @@ function normalizeDecision(raw, options = {}) {
     durationMs,
     commands: (data.commands || []).map((command) => cleanCommand(command, durationMs)).filter(Boolean),
     clicks: (data.clicks || []).map((click) => cleanClick(click, durationMs, viewport)).filter(Boolean),
-    viewMoves: (data.view_moves || data.viewMoves || []).map((move) => cleanViewMove(move, durationMs)).filter(Boolean),
+    drags: asArray(data.drags || data.drag).map((drag) => cleanDrag(drag, durationMs, viewport)).filter(Boolean),
+    viewMoves: asArray(data.view_moves || data.viewMoves).map((move) => cleanViewMove(move, durationMs)).filter(Boolean),
     shouldStop: Boolean(data.should_stop ?? data.shouldStop),
     summary: String(data.summary || data.observation_summary || '').trim().slice(0, 500),
     rationale: String(data.rationale || data.reason || '').trim().slice(0, 1000),

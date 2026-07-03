@@ -80,6 +80,7 @@ function fallbackDecisionAfterInvalidJson({ history, viewport, error }) {
       duration_ms: 1000,
       commands,
       clicks: [],
+      drags: [],
       view_moves: [],
       should_stop: false,
       rationale: `Avoid ending the playtest because of a malformed model response: ${String(error.message || error).slice(0, 200)}`,
@@ -150,6 +151,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       duration,
       commands: decision.commands,
       clicks: decision.clicks,
+      drags: decision.drags,
       view_moves: decision.viewMoves,
       captures: [duration],
       autoCaptures: false,
@@ -173,6 +175,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       modelElapsedMs,
       commandCount: action.commands.length,
       clickCount: action.clicks.length,
+      dragCount: action.drags.length,
       viewMoveCount: action.view_moves.length,
     });
 
@@ -183,6 +186,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       rationale: decision.rationale,
       commands: decision.commands,
       clicks: decision.clicks,
+      drags: decision.drags,
     });
 
     if (consecutiveModelErrors >= maxModelFallbacks) break;

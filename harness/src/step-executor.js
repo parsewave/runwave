@@ -61,6 +61,19 @@ async function executeTimeline({ browser, events, duration, outputDir, prefix, s
         } else {
           await browser.click(event.click);
         }
+      } else if (event.type === 'drag') {
+        if (profiler) {
+          await profiler.time('timeline.event.drag', {
+            ...fields,
+            fromX: event.drag.from.x,
+            fromY: event.drag.from.y,
+            toX: event.drag.to.x,
+            toY: event.drag.to.y,
+            mode: event.drag.mode,
+          }, () => browser.drag(event.drag));
+        } else {
+          await browser.drag(event.drag);
+        }
       } else if (event.type === 'view_move') {
         if (profiler) {
           await profiler.time('timeline.event.view_move', {

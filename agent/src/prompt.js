@@ -7,6 +7,7 @@ function compactHistory(history, limit = 8) {
       const controls = [
         ...(item.commands || []).map((command) => command.key),
         ...(item.clicks || []).map((click) => `click(${click.x},${click.y})`),
+        ...(item.drags || []).map((drag) => `drag(${drag.from.x},${drag.from.y}->${drag.to.x},${drag.to.y},${drag.mode})`),
       ];
       return `step ${item.step}: ${item.summary || item.rationale || 'no summary'}; controls=${controls.join(',') || 'none'}`;
     })
@@ -19,7 +20,10 @@ function repeatedHistoryWarning(history) {
   const signatures = recent.map((item) => {
     const commands = (item.commands || []).map((command) => command.key).join(',');
     const clicks = (item.clicks || []).map((click) => `${Math.round(click.x / 20) * 20},${Math.round(click.y / 20) * 20}`).join(',');
-    return `${commands}|${clicks}`;
+    const drags = (item.drags || [])
+      .map((drag) => `${Math.round(drag.from.x / 20) * 20},${Math.round(drag.from.y / 20) * 20}->${Math.round(drag.to.x / 20) * 20},${Math.round(drag.to.y / 20) * 20}`)
+      .join(',');
+    return `${commands}|${clicks}|${drags}`;
   });
   if (signatures[0] && signatures.every((signature) => signature === signatures[0])) {
     return 'Warning: the recent actions repeated the same controls. Switch strategy now instead of trying the same input again.';
@@ -68,6 +72,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '',
     'Action guidance:',
     '- You may use normalized click coordinates from 0 to 1. For example, x=0.5 and y=0.5 means the center of the current viewport.',
+    '- For drag/swipe games, use drags. Use mode "mouse" for canvas or pointer games; use mode "html5" for browser-native drag/drop elements such as match-3 candy boards.',
     '- If a click did not change the screen, do not repeat the exact same click more than twice. Pick a meaningfully different visible target or try a keyboard control shown by the game.',
     '- If the game says paused, resume, continue, start, or shows tutorial controls, follow that visible instruction before doing anything else.',
     '- Common resume/confirm keys are Space, Enter, Escape, and P. Use them when the screen suggests a paused/menu state and clicks are not working.',
@@ -88,12 +93,13 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '  "duration_ms": 3000,',
     '  "commands": [{"from": 0, "to": 3000, "key": "ArrowRight"}],',
     '  "clicks": [{"at": 100, "x": 640, "y": 360}],',
+    '  "drags": [{"at": 100, "from": {"x": 400, "y": 300}, "to": {"x": 480, "y": 300}, "mode": "mouse", "steps": 12}],',
     '  "view_moves": [{"from": 0, "to": 800, "dx": 120, "dy": 0, "steps": 8}],',
     '  "should_stop": false,',
     '  "rationale": "why this is the next useful playtest action"',
     '}',
     '',
-    'Use duration_ms between 500 and 8000. Use empty arrays when no clicks or view movement are needed.',
+    'Use duration_ms between 500 and 8000. Use empty arrays when no clicks, drags, or view movement are needed.',
   ].join('\n');
 }
 

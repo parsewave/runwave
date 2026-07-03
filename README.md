@@ -152,12 +152,28 @@ runwave '{
 }'
 ```
 
+Drag:
+
+```sh
+runwave '{
+  "action": "step",
+  "action_name": "turn-004-drag",
+  "duration": 700,
+  "drags": [
+    { "at": 100, "from": { "x": 420, "y": 300 }, "to": { "x": 500, "y": 300 }, "mode": "mouse", "steps": 12 }
+  ]
+}'
+```
+
+Use `mode: "mouse"` for canvas and pointer-based games. Use `mode: "html5"`
+for browser-native draggable/drop elements.
+
 Move the mouse without clicking for camera control:
 
 ```sh
 runwave '{
   "action": "step",
-  "action_name": "turn-004-look-around",
+  "action_name": "turn-005-look-around",
   "duration": 1200,
   "view_moves": [
     { "from": 200, "to": 900, "dx": 260, "dy": -40, "steps": 16 }

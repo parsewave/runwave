@@ -123,6 +123,57 @@ class BrowserSession {
     this.mousePosition = { x: click.x, y: click.y };
   }
 
+  async drag(drag) {
+    if (drag.mode === 'html5') {
+      await this.time('browser.drag.html5', {
+        fromX: drag.from.x,
+        fromY: drag.from.y,
+        toX: drag.to.x,
+        toY: drag.to.y,
+      }, () =>
+        this.page.evaluate(({ from, to }) => {
+          const elementAt = (point) => document.elementFromPoint(point.x, point.y) || document.body;
+          const source = elementAt(from);
+          const target = elementAt(to);
+          const dataTransfer = new DataTransfer();
+          const eventOptions = (point) => ({
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            clientX: point.x,
+            clientY: point.y,
+            screenX: point.x,
+            screenY: point.y,
+            dataTransfer,
+          });
+
+          source.dispatchEvent(new MouseEvent('mousedown', eventOptions(from)));
+          source.dispatchEvent(new DragEvent('dragstart', eventOptions(from)));
+          target.dispatchEvent(new DragEvent('dragenter', eventOptions(to)));
+          target.dispatchEvent(new DragEvent('dragover', eventOptions(to)));
+          target.dispatchEvent(new DragEvent('drop', eventOptions(to)));
+          source.dispatchEvent(new DragEvent('dragend', eventOptions(to)));
+          target.dispatchEvent(new MouseEvent('mouseup', eventOptions(to)));
+        }, { from: drag.from, to: drag.to })
+      );
+    } else {
+      await this.time('browser.mouse.drag', {
+        fromX: drag.from.x,
+        fromY: drag.from.y,
+        toX: drag.to.x,
+        toY: drag.to.y,
+        button: drag.button,
+        steps: drag.steps,
+      }, async () => {
+        await this.page.mouse.move(drag.from.x, drag.from.y);
+        await this.page.mouse.down({ button: drag.button });
+        await this.page.mouse.move(drag.to.x, drag.to.y, { steps: drag.steps });
+        await this.page.mouse.up({ button: drag.button });
+      });
+    }
+    this.mousePosition = { x: drag.to.x, y: drag.to.y };
+  }
+
   async moveView(move) {
     const viewport = this.page.viewportSize() || this.config.viewport || { width: 1024, height: 620 };
     const x = Math.max(0, Math.min(viewport.width - 1, this.mousePosition.x + move.dx));

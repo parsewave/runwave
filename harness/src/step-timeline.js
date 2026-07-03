@@ -2,8 +2,9 @@ const eventPriority = {
   up: 0,
   down: 1,
   click: 2,
-  view_move: 3,
-  capture: 4,
+  drag: 3,
+  view_move: 4,
+  capture: 5,
 };
 
 function compareEvents(left, right) {
@@ -19,6 +20,9 @@ function buildStepTimeline(step) {
   }
   for (const click of step.clicks) {
     events.push({ at: click.at, type: 'click', click });
+  }
+  for (const drag of step.drags) {
+    events.push({ at: drag.at, type: 'drag', drag });
   }
   for (const viewMove of step.viewMoves) {
     const steps = Math.max(1, viewMove.steps);

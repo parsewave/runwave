@@ -17,6 +17,7 @@ test('normalizes model actions into harness steps', () => {
       duration_ms: 9000,
       commands: [{ from: 0, to: 5000, key: 'ArrowRight' }],
       clicks: [{ at: 50, x: 0.5, y: 0.25 }],
+      drags: [{ at: 100, from: { x: 0.2, y: 0.25 }, to: { x: 0.4, y: 0.25 }, mode: 'html5' }],
       view_moves: [{ from: 0, to: 500, dx: 50, dy: -10 }],
       should_stop: true,
       summary: 'menu is visible',
@@ -28,6 +29,14 @@ test('normalizes model actions into harness steps', () => {
   assert.deepEqual(decision.commands, [{ from: 0, to: 5000, key: 'ArrowRight' }]);
   assert.equal(decision.clicks[0].x, 500);
   assert.equal(decision.clicks[0].y, 150);
+  assert.deepEqual(decision.drags[0], {
+    at: 100,
+    from: { x: 200, y: 150 },
+    to: { x: 400, y: 150 },
+    button: 'left',
+    mode: 'html5',
+    steps: 12,
+  });
   assert.equal(decision.viewMoves[0].dx, 50);
   assert.equal(decision.shouldStop, true);
 });
@@ -59,6 +68,7 @@ test('agent playtest loop calls model and executes returned action', async () =>
         summary: 'start screen is visible',
         duration_ms: 500,
         clicks: [{ at: 0, x: 320, y: 180 }],
+        drags: [{ at: 50, from: { x: 100, y: 100 }, to: { x: 130, y: 100 }, mode: 'mouse' }],
         commands: [{ from: 0, to: 500, key: 'Enter' }],
         should_stop: true,
       },
@@ -73,6 +83,7 @@ test('agent playtest loop calls model and executes returned action', async () =>
   assert.equal(actions.length, 1);
   assert.equal(actions[0].action, 'step');
   assert.equal(actions[0].commands[0].key, 'Enter');
+  assert.equal(actions[0].drags[0].mode, 'mouse');
   assert.equal(fs.existsSync(path.join(dir, 'agent', 'agent-summary.json')), true);
 });
 
@@ -123,6 +134,7 @@ test('builds a conservative fallback action after invalid model JSON', () => {
   assert.equal(decision.durationMs, 1000);
   assert.equal(decision.commands[0].key, 'ArrowLeft');
   assert.equal(decision.clicks.length, 0);
+  assert.equal(decision.drags.length, 0);
 });
 
 test('playtester prompt warns when recent actions repeat', () => {
@@ -141,6 +153,7 @@ test('playtester prompt warns when recent actions repeat', () => {
 
   assert.match(prompt, /Warning:/);
   assert.match(prompt, /Space, Enter, Escape, and P/);
+  assert.match(prompt, /drags/);
 });
 
 test('chat completion honors explicit retry attempts for malformed JSON', async () => {

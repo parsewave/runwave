@@ -28,6 +28,7 @@ function usage() {
           { from: 150, to: 230, key: 'jump' },
         ],
         clicks: [{ at: 400, x: 512, y: 310 }],
+        drags: [{ at: 600, from: { x: 420, y: 300 }, to: { x: 500, y: 300 }, mode: 'mouse' }],
         view_moves: [{ from: 500, to: 900, dx: 180, dy: -20, steps: 12 }],
         captures: [1200],
         captureIntervalMs: 1000,
