@@ -125,10 +125,12 @@ async function chatCompletion({ messages, maxTokens = 1200, temperature = 0.2, t
 
   const model = process.env.RUNWAVE_AGENT_MODEL || process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
   const baseUrl = process.env.OPENROUTER_BASE_URL || DEFAULT_BASE_URL;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const attempts = Math.max(1, Math.round(Number(process.env.RUNWAVE_AGENT_MODEL_ATTEMPTS || 3)));
+  let lastError = null;
 
-  try {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
       method: 'POST',
       signal: controller.signal,
@@ -146,28 +148,40 @@ async function chatCompletion({ messages, maxTokens = 1200, temperature = 0.2, t
         stream: false,
         response_format: { type: 'json_object' },
       }),
-    });
+    }).finally(() => clearTimeout(timeout));
 
     const body = await response.text();
-    if (!response.ok) {
-      throw new Error(`OpenRouter HTTP ${response.status}: ${body.slice(0, 1200)}`);
+    try {
+      if (!response.ok) {
+        throw new Error(`OpenRouter HTTP ${response.status}: ${body.slice(0, 1200)}`);
+      }
+
+      const payload = JSON.parse(body);
+      const choice = (payload.choices || [])[0] || {};
+      const text = responseText(choice.message || {});
+      if (!text.trim()) throw new Error('empty model response');
+
+      return {
+        model,
+        text,
+        json: parseJsonResponse(text),
+        usage: payload.usage || null,
+        raw: payload,
+      };
+    } catch (error) {
+      lastError = error;
+      const retryable = attempt < attempts;
+      if (!retryable) {
+        if (body && !String(error.message).startsWith('OpenRouter HTTP')) {
+          error.message = `${error.message}; response excerpt=${body.slice(0, 1200)}`;
+        }
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(1500 * attempt, 5000)));
     }
-
-    const payload = JSON.parse(body);
-    const choice = (payload.choices || [])[0] || {};
-    const text = responseText(choice.message || {});
-    if (!text.trim()) throw new Error('empty model response');
-
-    return {
-      model,
-      text,
-      json: parseJsonResponse(text),
-      usage: payload.usage || null,
-      raw: payload,
-    };
-  } finally {
-    clearTimeout(timeout);
   }
+
+  throw lastError || new Error('OpenRouter request failed');
 }
 
 module.exports = {
