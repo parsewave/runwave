@@ -6,3 +6,4 @@ recordings/
 state/
 *.log
 cruft
+logbook.md
