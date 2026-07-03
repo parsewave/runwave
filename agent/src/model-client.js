@@ -145,7 +145,7 @@ function dataUrl(file) {
   return `data:${mimeType(file)};base64,${encoded}`;
 }
 
-async function chatCompletion({ messages, maxTokens = 1200, temperature = 0.2, timeoutMs = 120000 }) {
+async function chatCompletion({ messages, maxTokens = 1200, temperature = 0.2, timeoutMs = 120000, attempts = null }) {
   const apiKey = openRouterApiKey();
   if (!apiKey) {
     throw new Error(`OPENROUTER_API_KEY not found in environment or ${configPath()}`);
@@ -153,11 +153,11 @@ async function chatCompletion({ messages, maxTokens = 1200, temperature = 0.2, t
 
   const model = process.env.RUNWAVE_AGENT_MODEL || process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
   const baseUrl = process.env.OPENROUTER_BASE_URL || DEFAULT_BASE_URL;
-  const attempts = Math.max(1, Math.round(Number(process.env.RUNWAVE_AGENT_MODEL_ATTEMPTS || 3)));
+  const attemptCount = Math.max(1, Math.round(Number(attempts || process.env.RUNWAVE_AGENT_MODEL_ATTEMPTS || 3)));
   let lastError = null;
   let requestMessages = messages;
 
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+  for (let attempt = 1; attempt <= attemptCount; attempt += 1) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -200,7 +200,7 @@ async function chatCompletion({ messages, maxTokens = 1200, temperature = 0.2, t
       };
     } catch (error) {
       lastError = error;
-      const retryable = attempt < attempts;
+      const retryable = attempt < attemptCount;
       if (!retryable) {
         if (body && !String(error.message).startsWith('OpenRouter HTTP')) {
           error.message = `${error.message}; response excerpt=${body.slice(0, 1200)}`;

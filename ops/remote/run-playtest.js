@@ -394,17 +394,20 @@ async function chooseViewportWithVlm(job, dirs, url, env, probe) {
   }
 
   const startedAt = Date.now();
+  const attempts = Math.max(1, Math.round(Number(job.viewportPreflightAttempts || job.viewportPreflightModelAttempts || 2)));
   try {
     const result = await chatCompletion({
       messages: [{ role: 'user', content }],
       maxTokens: Number(job.viewportPreflightMaxTokens || 700),
       timeoutMs: Number(job.viewportPreflightTimeoutMs || 120000),
       temperature: Number(job.viewportPreflightTemperature ?? 0),
+      attempts,
     });
     const choice = normalizeVlmViewportChoice(result.json, candidates, fallbackChoice);
     return {
       enabled: true,
       elapsedMs: Date.now() - startedAt,
+      attempts,
       model: result.model,
       choice,
       rawChoice: result.json,
@@ -415,6 +418,7 @@ async function chooseViewportWithVlm(job, dirs, url, env, probe) {
     return {
       enabled: true,
       elapsedMs: Date.now() - startedAt,
+      attempts,
       choice: fallbackChoice,
       error: error.message,
       candidates,

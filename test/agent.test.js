@@ -8,7 +8,7 @@ const test = require('node:test');
 
 const { normalizeDecision } = require('../agent/src/action-parser');
 const { fallbackDecisionAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
-const { parseJsonResponse } = require('../agent/src/model-client');
+const { chatCompletion, parseJsonResponse } = require('../agent/src/model-client');
 const { buildPlaytesterPrompt } = require('../agent/src/prompt');
 
 test('normalizes model actions into harness steps', () => {
@@ -141,4 +141,46 @@ test('playtester prompt warns when recent actions repeat', () => {
 
   assert.match(prompt, /Warning:/);
   assert.match(prompt, /Space, Enter, Escape, and P/);
+});
+
+test('chat completion honors explicit retry attempts for malformed JSON', async () => {
+  const originalFetch = global.fetch;
+  const originalKey = process.env.OPENROUTER_API_KEY;
+  let calls = 0;
+  const requestBodies = [];
+  process.env.OPENROUTER_API_KEY = 'test-key';
+  global.fetch = async (_url, options) => {
+    calls += 1;
+    requestBodies.push(JSON.parse(options.body));
+    return {
+      ok: true,
+      text: async () =>
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: calls === 1 ? '{"summary": "bad" trailing' : '{"summary": "ok", "commands": []}',
+              },
+            },
+          ],
+          usage: { total_tokens: 1 },
+        }),
+    };
+  };
+
+  try {
+    const result = await chatCompletion({
+      messages: [{ role: 'user', content: 'return JSON' }],
+      attempts: 2,
+      timeoutMs: 1000,
+    });
+
+    assert.equal(calls, 2);
+    assert.equal(result.json.summary, 'ok');
+    assert.equal(requestBodies[1].messages.length, 2);
+  } finally {
+    global.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = originalKey;
+  }
 });
