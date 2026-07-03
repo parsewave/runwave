@@ -49,6 +49,37 @@ function responseText(message) {
     .join('\n');
 }
 
+function balancedJsonObject(text) {
+  const start = text.indexOf('{');
+  if (start < 0) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i += 1) {
+    const char = text[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (char === '\\') {
+      escape = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
 function parseJsonResponse(text) {
   try {
     const parsed = JSON.parse(text);
@@ -57,11 +88,19 @@ function parseJsonResponse(text) {
     // Try fenced or embedded JSON below.
   }
 
-  const fenced = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-  if (fenced) return JSON.parse(fenced[1]);
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fenced) {
+    const fencedBody = fenced[1].trim();
+    try {
+      return JSON.parse(fencedBody);
+    } catch (_) {
+      const balanced = balancedJsonObject(fencedBody);
+      if (balanced) return JSON.parse(balanced);
+    }
+  }
 
-  const embedded = text.match(/\{[\s\S]*\}/);
-  if (embedded) return JSON.parse(embedded[0]);
+  const embedded = balancedJsonObject(text);
+  if (embedded) return JSON.parse(embedded);
   throw new Error('model response did not contain a JSON object');
 }
 

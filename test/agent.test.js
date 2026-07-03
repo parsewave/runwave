@@ -8,6 +8,7 @@ const test = require('node:test');
 
 const { normalizeDecision } = require('../agent/src/action-parser');
 const { runAgenticPlaytest } = require('../agent/src/agent-player');
+const { parseJsonResponse } = require('../agent/src/model-client');
 
 test('normalizes model actions into harness steps', () => {
   const decision = normalizeDecision(
@@ -72,4 +73,23 @@ test('agent playtest loop calls model and executes returned action', async () =>
   assert.equal(actions[0].action, 'step');
   assert.equal(actions[0].commands[0].key, 'Enter');
   assert.equal(fs.existsSync(path.join(dir, 'agent', 'agent-summary.json')), true);
+});
+
+test('parses fenced nested JSON responses from vision models', () => {
+  const parsed = parseJsonResponse(`
+Here is the next action:
+\`\`\`json
+{
+  "summary": "title screen is visible",
+  "duration_ms": 1000,
+  "commands": [{"from": 0, "to": 500, "key": "Enter"}],
+  "clicks": [{"at": 100, "x": 320, "y": 180}],
+  "should_stop": false
+}
+\`\`\`
+`);
+
+  assert.equal(parsed.summary, 'title screen is visible');
+  assert.equal(parsed.commands[0].key, 'Enter');
+  assert.equal(parsed.clicks[0].x, 320);
 });
