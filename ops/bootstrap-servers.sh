@@ -82,7 +82,7 @@ fi
 server_count="$(jq '.servers | length' "${INVENTORY}")"
 echo "Bootstrapping ${server_count} servers"
 
-jq -r '.servers[] | [.name, .ipv4] | @tsv' "${INVENTORY}" | while IFS=$'\t' read -r name ip; do
+while IFS=$'\t' read -r name ip; do
   echo "Bootstrapping ${name} (${ip})"
   ssh_opts=(-i "${SSH_KEY}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=15)
   scp_files=(
@@ -94,7 +94,7 @@ jq -r '.servers[] | [.name, .ipv4] | @tsv' "${INVENTORY}" | while IFS=$'\t' read
     scp_files+=("${games_tar}")
   fi
   scp "${ssh_opts[@]}" "${scp_files[@]}" "${SSH_USER}@${ip}:/tmp/"
-  ssh "${ssh_opts[@]}" "${SSH_USER}@${ip}" "GAMES_S3_URI='${GAMES_S3_URI}' bash /tmp/bootstrap-runner.sh"
-done
+  ssh -n "${ssh_opts[@]}" "${SSH_USER}@${ip}" "GAMES_S3_URI='${GAMES_S3_URI}' bash /tmp/bootstrap-runner.sh"
+done < <(jq -r '.servers[] | [.name, .ipv4] | @tsv' "${INVENTORY}")
 
 echo "Bootstrap complete"
