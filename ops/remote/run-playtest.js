@@ -42,10 +42,10 @@ function safeName(value) {
     .slice(0, 120);
 }
 
-function runnerPaths() {
+function runnerPaths(env = process.env) {
   return {
-    gamesRoot: process.env.RUNWAVE_GAMES_ROOT || '/opt/runwave/games',
-    jobsRoot: process.env.RUNWAVE_JOBS_ROOT || '/var/lib/runwave/jobs',
+    gamesRoot: env.RUNWAVE_GAMES_ROOT || '/opt/runwave/games',
+    jobsRoot: env.RUNWAVE_JOBS_ROOT || '/var/lib/runwave/jobs',
   };
 }
 
@@ -121,22 +121,22 @@ function waitForHttp(url, timeoutMs) {
   });
 }
 
-async function checkoutRunwave(job, runwaveDir) {
-  await run('git', ['clone', job.runwaveRepo || 'https://github.com/parsewave/runwave', runwaveDir]);
+async function checkoutRunwave(job, runwaveDir, env = process.env) {
+  await run('git', ['clone', job.runwaveRepo || 'https://github.com/parsewave/runwave', runwaveDir], { env });
   if (job.runwaveRef) {
-    await run('git', ['fetch', '--depth', '1', 'origin', job.runwaveRef], { cwd: runwaveDir });
-    await run('git', ['checkout', '--detach', 'FETCH_HEAD'], { cwd: runwaveDir });
+    await run('git', ['fetch', '--depth', '1', 'origin', job.runwaveRef], { cwd: runwaveDir, env });
+    await run('git', ['checkout', '--detach', 'FETCH_HEAD'], { cwd: runwaveDir, env });
   }
   if (fs.existsSync(path.join(runwaveDir, 'package-lock.json'))) {
-    await run('npm', ['ci'], { cwd: runwaveDir });
+    await run('npm', ['ci'], { cwd: runwaveDir, env });
   } else {
-    await run('npm', ['install'], { cwd: runwaveDir });
+    await run('npm', ['install'], { cwd: runwaveDir, env });
   }
-  if (job.skipPlaywrightInstall || process.env.RUNWAVE_SKIP_PLAYWRIGHT_INSTALL === '1') {
+  if (job.skipPlaywrightInstall || env.RUNWAVE_SKIP_PLAYWRIGHT_INSTALL === '1') {
     log('playwright.install.skip', { runwaveDir });
     return;
   }
-  await run('npx', ['playwright', 'install', 'chromium'], { cwd: runwaveDir });
+  await run('npx', ['playwright', 'install', 'chromium'], { cwd: runwaveDir, env });
 }
 
 function defaultPlan(durationMs = 120000) {
@@ -263,10 +263,10 @@ async function runAgentPlan(job, dirs, initialResponse, runAction) {
   });
 }
 
-async function runRunwave(job, dirs, url) {
+async function runRunwave(job, dirs, url, runnerEnv = process.env) {
   const runwaveBin = path.join(dirs.runwave, 'bin', 'runwave.js');
   const env = {
-    ...process.env,
+    ...runnerEnv,
     RUNWAVE_WORKSPACE: dirs.workspace,
     RUNWAVE_SESSION_FILE: path.join(dirs.workspace, '.runwave-session.json'),
   };
@@ -326,7 +326,8 @@ async function main() {
 
   const job = JSON.parse(fs.readFileSync(args.job, 'utf8'));
   const envFile = loadEnvFile('/etc/runwave-runner.env');
-  const runner = runnerPaths();
+  const runnerEnv = { ...process.env, ...envFile };
+  const runner = runnerPaths(runnerEnv);
   const jobId = safeName(job.jobId || `${job.game}-attempt-${job.attempt || 1}-${Date.now()}`);
   const port = Number(job.port || 8800 + Math.floor(Math.random() * 800));
   const root = path.join(runner.jobsRoot, jobId);
@@ -356,16 +357,16 @@ async function main() {
   let gameProcess = null;
   try {
     log('job.start', { jobId, game: job.game, port });
-    await checkoutRunwave(job, dirs.runwave);
+    await checkoutRunwave(job, dirs.runwave, runnerEnv);
 
     gameProcess = spawnLong('bash', ['start.sh'], {
       cwd: gameDir,
-      env: { ...process.env, PORT: String(port) },
+      env: { ...runnerEnv, PORT: String(port) },
     });
     const url = `http://127.0.0.1:${port}/`;
     await waitForHttp(url, Number(job.httpTimeoutMs || 60000));
 
-    const playtest = await runRunwave(job, dirs, url);
+    const playtest = await runRunwave(job, dirs, url, runnerEnv);
     if (playtest) {
       summary.playtest = {
         mode: playtest.mode,
@@ -387,7 +388,7 @@ async function main() {
     if (gameProcess && !gameProcess.killed) gameProcess.kill('SIGTERM');
     if (job.s3Uri) summary.uploadedTo = job.s3Uri.replace(/\/+$/, '');
     fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
-    const uploadedTo = await uploadWorkspace(job, dirs, envFile).catch((error) => {
+    const uploadedTo = await uploadWorkspace(job, dirs, runnerEnv).catch((error) => {
       log('upload.error', { jobId, error: error.message });
       summary.uploadError = error.message;
       fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
