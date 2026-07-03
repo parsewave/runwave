@@ -358,7 +358,16 @@ async function main() {
     const url = `http://127.0.0.1:${port}/`;
     await waitForHttp(url, Number(job.httpTimeoutMs || 60000));
 
-    await runRunwave(job, dirs, url);
+    const playtest = await runRunwave(job, dirs, url);
+    if (playtest) {
+      summary.playtest = {
+        mode: playtest.mode,
+        steps: playtest.steps,
+        elapsedMs: playtest.elapsedMs,
+        stoppedByAgent: playtest.stoppedByAgent,
+        outputDir: playtest.outputDir,
+      };
+    }
     summary.status = 'passed';
   } catch (error) {
     summary.status = 'failed';
