@@ -3,7 +3,7 @@
 const path = require('path');
 const { normalizeDecision } = require('./action-parser');
 const { AgentRecorder } = require('./history');
-const { chatCompletion, dataUrl } = require('./model-client');
+const { chatCompletion, dataUrl, isModelJsonParseError } = require('./model-client');
 const { buildPlaytesterPrompt } = require('./prompt');
 
 const STOP_RESERVE_MS = 5000;
@@ -61,6 +61,33 @@ async function decideNextAction({ job, screenshot, state, history, elapsedMs, ma
   };
 }
 
+function fallbackDecisionAfterInvalidJson({ history, viewport, error }) {
+  const lastWithCommands = history
+    .slice()
+    .reverse()
+    .find((item) => Array.isArray(item.commands) && item.commands.length);
+  const commands = lastWithCommands
+    ? lastWithCommands.commands.slice(0, 2).map((command) => ({
+        from: 0,
+        to: Math.max(500, Math.min(1500, Number(command.to || 1000) - Number(command.from || 0))),
+        key: command.key,
+      }))
+    : [{ from: 0, to: 600, key: 'Space' }];
+
+  return normalizeDecision(
+    {
+      summary: 'The model returned invalid JSON, so the harness is continuing with a conservative fallback action.',
+      duration_ms: 1000,
+      commands,
+      clicks: [],
+      view_moves: [],
+      should_stop: false,
+      rationale: `Avoid ending the playtest because of a malformed model response: ${String(error.message || error).slice(0, 200)}`,
+    },
+    { viewport }
+  );
+}
+
 async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, modelClient = chatCompletion, log = () => {} }) {
   const maxMs = Number(job.playtestDurationMs ?? 120000);
   const minMs = Number(job.agentMinPlaytestMs ?? Math.min(30000, maxMs));
@@ -70,6 +97,9 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
   let lastResponse = initialResponse;
   let step = 0;
   let stoppedByAgent = false;
+  let modelErrorCount = 0;
+  let consecutiveModelErrors = 0;
+  const maxModelFallbacks = Math.max(1, Math.round(Number(job.agentMaxModelFallbacks || 3)));
 
   while (Date.now() - startedAt < maxMs - STOP_RESERVE_MS) {
     const elapsedMs = Date.now() - startedAt;
@@ -80,15 +110,37 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     const state = responseState(lastResponse);
     recorder.observation({ step, elapsedMs, screenshot, state });
 
-    const { decision, model, modelElapsedMs, rawText, usage } = await decideNextAction({
-      job,
-      screenshot,
-      state,
-      history,
-      elapsedMs,
-      maxMs,
-      modelClient,
-    });
+    let decision;
+    let model;
+    let modelElapsedMs;
+    let rawText;
+    let usage;
+    try {
+      ({ decision, model, modelElapsedMs, rawText, usage } = await decideNextAction({
+        job,
+        screenshot,
+        state,
+        history,
+        elapsedMs,
+        maxMs,
+        modelClient,
+      }));
+      consecutiveModelErrors = 0;
+    } catch (error) {
+      if (!isModelJsonParseError(error)) throw error;
+      modelErrorCount += 1;
+      consecutiveModelErrors += 1;
+      log('agent.model_json_error', {
+        step: step + 1,
+        consecutiveModelErrors,
+        error: String(error.message || error).slice(0, 500),
+      });
+      decision = fallbackDecisionAfterInvalidJson({ history, viewport: viewportFor(job), error });
+      model = 'fallback-after-invalid-json';
+      modelElapsedMs = 0;
+      rawText = String(error.responseText || error.message || '').slice(0, 8000);
+      usage = null;
+    }
 
     const duration = Math.max(100, Math.min(decision.durationMs, remainingMs));
     step += 1;
@@ -133,6 +185,8 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       clicks: decision.clicks,
     });
 
+    if (consecutiveModelErrors >= maxModelFallbacks) break;
+
     if (decision.shouldStop && Date.now() - startedAt >= minMs) {
       stoppedByAgent = true;
       break;
@@ -146,6 +200,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     stoppedByAgent,
     maxMs,
     minMs,
+    modelErrorCount,
     history,
   };
   recorder.summary(summary);
@@ -158,6 +213,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
 
 module.exports = {
   decideNextAction,
+  fallbackDecisionAfterInvalidJson,
   latestScreenshot,
   responseState,
   runAgenticPlaytest,

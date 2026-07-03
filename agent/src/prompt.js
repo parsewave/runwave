@@ -13,6 +13,28 @@ function compactHistory(history, limit = 8) {
     .join('\n');
 }
 
+function repeatedHistoryWarning(history) {
+  const recent = history.slice(-3);
+  if (recent.length < 3) return '';
+  const signatures = recent.map((item) => {
+    const commands = (item.commands || []).map((command) => command.key).join(',');
+    const clicks = (item.clicks || []).map((click) => `${Math.round(click.x / 20) * 20},${Math.round(click.y / 20) * 20}`).join(',');
+    return `${commands}|${clicks}`;
+  });
+  if (signatures[0] && signatures.every((signature) => signature === signatures[0])) {
+    return 'Warning: the recent actions repeated the same controls. Switch strategy now instead of trying the same input again.';
+  }
+
+  const summaries = recent.map((item) => String(item.summary || '').toLowerCase());
+  if (summaries.every((summary) => summary.includes('paused'))) {
+    return 'Warning: the game still appears paused. Try a different visible resume/control input instead of repeating the same click.';
+  }
+  if (summaries.every((summary) => summary.includes('menu') || summary.includes('title') || summary.includes('start'))) {
+    return 'Warning: the recent actions did not clearly leave the menu/title flow. Use the visible start instruction or a different common confirm key.';
+  }
+  return '';
+}
+
 function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history }) {
   const secondsLeft = Math.max(0, Math.round((maxMs - elapsedMs) / 1000));
   const controls = job.agentControls || [
@@ -28,6 +50,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     'KeyS',
     'KeyD',
   ];
+  const warning = repeatedHistoryWarning(history);
 
   return [
     'You are an agentic browser-game playtester. Your job is to create a useful gameplay video, not to judge the game.',
@@ -46,10 +69,13 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     'Action guidance:',
     '- You may use normalized click coordinates from 0 to 1. For example, x=0.5 and y=0.5 means the center of the current viewport.',
     '- If a click did not change the screen, do not repeat the exact same click more than twice. Pick a meaningfully different visible target or try a keyboard control shown by the game.',
+    '- If the game says paused, resume, continue, start, or shows tutorial controls, follow that visible instruction before doing anything else.',
+    '- Common resume/confirm keys are Space, Enter, Escape, and P. Use them when the screen suggests a paused/menu state and clicks are not working.',
     '- If the state JSON reports a canvas, treat that canvas rectangle as the active game area unless the screenshot clearly shows otherwise.',
     '- If you die, reset, or return to a map/title screen, re-enter gameplay and change strategy instead of repeating the same failed action.',
     '- Avoid idle waiting. Each step should do something visible or useful for the gameplay video.',
     '',
+    warning ? `${warning}\n` : '',
     'Recent history:',
     compactHistory(history) || 'none',
     '',

@@ -7,8 +7,9 @@ const path = require('path');
 const test = require('node:test');
 
 const { normalizeDecision } = require('../agent/src/action-parser');
-const { runAgenticPlaytest } = require('../agent/src/agent-player');
+const { fallbackDecisionAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
 const { parseJsonResponse } = require('../agent/src/model-client');
+const { buildPlaytesterPrompt } = require('../agent/src/prompt');
 
 test('normalizes model actions into harness steps', () => {
   const decision = normalizeDecision(
@@ -92,4 +93,52 @@ Here is the next action:
   assert.equal(parsed.summary, 'title screen is visible');
   assert.equal(parsed.commands[0].key, 'Enter');
   assert.equal(parsed.clicks[0].x, 320);
+});
+
+test('tags malformed model JSON parse errors', () => {
+  assert.throws(
+    () => parseJsonResponse('{"summary": "almost valid", "commands": [] trailing'),
+    (error) => {
+      assert.equal(error.code, 'RUNWAVE_MODEL_JSON_PARSE');
+      assert.match(error.message, /JSON/);
+      return true;
+    }
+  );
+});
+
+test('builds a conservative fallback action after invalid model JSON', () => {
+  const decision = fallbackDecisionAfterInvalidJson({
+    viewport: { width: 640, height: 360 },
+    error: Object.assign(new Error('bad JSON'), { code: 'RUNWAVE_MODEL_JSON_PARSE' }),
+    history: [
+      {
+        step: 1,
+        summary: 'board changed',
+        commands: [{ from: 0, to: 1000, key: 'ArrowLeft' }],
+        clicks: [],
+      },
+    ],
+  });
+
+  assert.equal(decision.durationMs, 1000);
+  assert.equal(decision.commands[0].key, 'ArrowLeft');
+  assert.equal(decision.clicks.length, 0);
+});
+
+test('playtester prompt warns when recent actions repeat', () => {
+  const prompt = buildPlaytesterPrompt({
+    job: {},
+    elapsedMs: 10000,
+    maxMs: 120000,
+    viewport: { width: 1280, height: 720 },
+    state: {},
+    history: [
+      { step: 1, summary: 'game is paused', commands: [], clicks: [{ x: 960, y: 719 }] },
+      { step: 2, summary: 'game is paused', commands: [], clicks: [{ x: 963, y: 719 }] },
+      { step: 3, summary: 'game is paused', commands: [], clicks: [{ x: 963, y: 719 }] },
+    ],
+  });
+
+  assert.match(prompt, /Warning:/);
+  assert.match(prompt, /Space, Enter, Escape, and P/);
 });

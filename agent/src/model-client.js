@@ -6,6 +6,19 @@ const path = require('path');
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
 const DEFAULT_MODEL = 'google/gemini-3.5-flash';
 
+function modelJsonParseError(message, text, cause = null) {
+  const error = new Error(message);
+  error.name = 'ModelJsonParseError';
+  error.code = 'RUNWAVE_MODEL_JSON_PARSE';
+  error.responseText = String(text || '').slice(0, 8000);
+  if (cause) error.cause = cause;
+  return error;
+}
+
+function isModelJsonParseError(error) {
+  return Boolean(error && error.code === 'RUNWAVE_MODEL_JSON_PARSE');
+}
+
 function parseFlatYamlValue(file, key) {
   if (!file || !fs.existsSync(file)) return null;
   const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
@@ -81,10 +94,12 @@ function balancedJsonObject(text) {
 }
 
 function parseJsonResponse(text) {
+  let lastParseError = null;
   try {
     const parsed = JSON.parse(text);
     if (parsed && typeof parsed === 'object') return parsed;
-  } catch (_) {
+  } catch (error) {
+    lastParseError = error;
     // Try fenced or embedded JSON below.
   }
 
@@ -93,15 +108,28 @@ function parseJsonResponse(text) {
     const fencedBody = fenced[1].trim();
     try {
       return JSON.parse(fencedBody);
-    } catch (_) {
+    } catch (error) {
+      lastParseError = error;
       const balanced = balancedJsonObject(fencedBody);
-      if (balanced) return JSON.parse(balanced);
+      if (balanced) {
+        try {
+          return JSON.parse(balanced);
+        } catch (balancedError) {
+          throw modelJsonParseError('model response contained malformed JSON', text, balancedError);
+        }
+      }
     }
   }
 
   const embedded = balancedJsonObject(text);
-  if (embedded) return JSON.parse(embedded);
-  throw new Error('model response did not contain a JSON object');
+  if (embedded) {
+    try {
+      return JSON.parse(embedded);
+    } catch (error) {
+      throw modelJsonParseError('model response contained malformed JSON', text, error);
+    }
+  }
+  throw modelJsonParseError('model response did not contain a JSON object', text, lastParseError);
 }
 
 function mimeType(file) {
@@ -127,6 +155,7 @@ async function chatCompletion({ messages, maxTokens = 1200, temperature = 0.2, t
   const baseUrl = process.env.OPENROUTER_BASE_URL || DEFAULT_BASE_URL;
   const attempts = Math.max(1, Math.round(Number(process.env.RUNWAVE_AGENT_MODEL_ATTEMPTS || 3)));
   let lastError = null;
+  let requestMessages = messages;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const controller = new AbortController();
@@ -142,8 +171,8 @@ async function chatCompletion({ messages, maxTokens = 1200, temperature = 0.2, t
       },
       body: JSON.stringify({
         model,
-        messages,
-        temperature,
+        messages: requestMessages,
+        temperature: attempt === 1 ? temperature : 0,
         max_tokens: maxTokens,
         stream: false,
         response_format: { type: 'json_object' },
@@ -161,10 +190,11 @@ async function chatCompletion({ messages, maxTokens = 1200, temperature = 0.2, t
       const text = responseText(choice.message || {});
       if (!text.trim()) throw new Error('empty model response');
 
+      const json = parseJsonResponse(text);
       return {
         model,
         text,
-        json: parseJsonResponse(text),
+        json,
         usage: payload.usage || null,
         raw: payload,
       };
@@ -177,6 +207,16 @@ async function chatCompletion({ messages, maxTokens = 1200, temperature = 0.2, t
         }
         throw error;
       }
+      if (isModelJsonParseError(error)) {
+        requestMessages = [
+          ...messages,
+          {
+            role: 'user',
+            content:
+              'The previous answer was invalid JSON. Return exactly one valid JSON object matching the requested schema. Do not include markdown, prose, comments, or trailing text.',
+          },
+        ];
+      }
       await new Promise((resolve) => setTimeout(resolve, Math.min(1500 * attempt, 5000)));
     }
   }
@@ -187,6 +227,7 @@ async function chatCompletion({ messages, maxTokens = 1200, temperature = 0.2, t
 module.exports = {
   chatCompletion,
   dataUrl,
+  isModelJsonParseError,
   openRouterApiKey,
   parseJsonResponse,
 };

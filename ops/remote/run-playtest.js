@@ -166,7 +166,7 @@ function chooseViewportFromProbe(probe, fallback = { width: 1280, height: 720 })
     return {
       viewport: {
         width: even(clamp(viewport.width, 640, 1280)),
-        height: even(clamp(neededHeight, viewport.height, 1100)),
+        height: even(clamp(neededHeight, viewport.height, 1400)),
       },
       reason: 'fit-page-height',
       visibleBounds: visible,

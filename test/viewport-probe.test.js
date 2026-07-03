@@ -38,3 +38,15 @@ test('viewport probe grows height for tall non-canvas games', () => {
   assert.equal(result.reason, 'fit-page-height');
   assert.deepEqual(result.viewport, { width: 1280, height: 860 });
 });
+
+test('viewport probe fits 2048-style tall pages without clipping the bottom', () => {
+  const result = chooseViewportFromProbe({
+    viewport: { width: 1280, height: 720 },
+    canvases: [],
+    scrollHeight: 1220,
+    visibleBounds: { left: 390, top: 80, right: 890, bottom: 1140, width: 500, height: 1060 },
+  });
+
+  assert.equal(result.reason, 'fit-page-height');
+  assert.deepEqual(result.viewport, { width: 1280, height: 1220 });
+});
