@@ -21,6 +21,7 @@ function parseArgs(argv) {
     basePort: 8900,
     playtestDurationMs: 120000,
     playMode: 'scripted',
+    skipPlaywrightInstall: false,
     runId: `run-${new Date().toISOString().replace(/[:.]/g, '-')}`,
   };
   for (let i = 2; i < argv.length; i += 1) {
@@ -43,6 +44,7 @@ function parseArgs(argv) {
     else if (arg === '--playtest-duration-ms') args.playtestDurationMs = Number(next());
     else if (arg === '--play-mode') args.playMode = next();
     else if (arg === '--agent') args.playMode = 'agent';
+    else if (arg === '--skip-playwright-install') args.skipPlaywrightInstall = true;
     else if (arg === '--run-id') args.runId = next();
     else if (arg === '--include-nonbrowser') args.includeNonbrowser = true;
     else if (arg === '--local-games') args.gamesS3Uri = '';
@@ -70,6 +72,7 @@ function usage() {
     '  --playtest-duration-ms N',
     '  --play-mode scripted|agent',
     '  --agent',
+    '  --skip-playwright-install',
     '  --dry-run',
   ].join('\n');
 }
@@ -226,6 +229,7 @@ function buildJobs(args, games) {
       runwaveRepo: args.runwaveRepo,
       runwaveRef: args.runwaveRef,
       playMode: args.playMode,
+      skipPlaywrightInstall: args.skipPlaywrightInstall,
       playtestDurationMs: args.playtestDurationMs,
       s3Uri: `${args.s3Uri.replace(/\/+$/, '')}/${args.runId}/${game}/attempt-${String(attempt).padStart(3, '0')}`,
     });

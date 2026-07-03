@@ -11,7 +11,7 @@
   "scripts": {
     "cli": "node bin/runwave.js",
     "smoke": "node --test test/smoke.test.js",
-    "test": "node --test"
+    "test": "node --test test/*.test.js"
   },
   "files": [
     "bin",

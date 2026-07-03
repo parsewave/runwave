@@ -132,6 +132,10 @@ async function checkoutRunwave(job, runwaveDir) {
   } else {
     await run('npm', ['install'], { cwd: runwaveDir });
   }
+  if (job.skipPlaywrightInstall || process.env.RUNWAVE_SKIP_PLAYWRIGHT_INSTALL === '1') {
+    log('playwright.install.skip', { runwaveDir });
+    return;
+  }
   await run('npx', ['playwright', 'install', 'chromium'], { cwd: runwaveDir });
 }
 
@@ -266,6 +270,8 @@ async function runRunwave(job, dirs, url) {
     url,
     record: true,
     headless: true,
+    channel: job.channel,
+    executablePath: job.executablePath,
     viewport: job.viewport || { width: 1280, height: 720 },
     videoSize: job.videoSize || job.viewport || { width: 1280, height: 720 },
     outputRoot: 'artifacts/state/output',
