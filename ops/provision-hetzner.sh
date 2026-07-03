@@ -7,8 +7,22 @@ SERVER_TYPE="${SERVER_TYPE:-ccx43}"
 SERVER_COUNT="${SERVER_COUNT:-8}"
 LOCATION="${LOCATION:-hel1}"
 IMAGE="${IMAGE:-ubuntu-24.04}"
-SSH_KEY_NAME="${SSH_KEY_NAME:-hetzner-id_louka}"
+SSH_KEY_NAME="${RUNWAVE_SSH_KEY_NAME:-${SSH_KEY_NAME:-}}"
 BATCH="${BATCH:-runwave-$(date -u +%Y%m%d-%H%M%S)}"
+
+default_ssh_key() {
+  if [ -n "${RUNWAVE_SSH_KEY:-}" ]; then
+    printf '%s\n' "${RUNWAVE_SSH_KEY}"
+  elif [ -n "${SSH_KEY:-}" ]; then
+    printf '%s\n' "${SSH_KEY}"
+  elif [ -f "${HOME}/.ssh/id_ed25519" ]; then
+    printf '%s\n' "${HOME}/.ssh/id_ed25519"
+  elif [ -f "${HOME}/.ssh/id_rsa" ]; then
+    printf '%s\n' "${HOME}/.ssh/id_rsa"
+  else
+    printf '%s\n' "${HOME}/.ssh/id_ed25519"
+  fi
+}
 
 token_from_yaml() {
   awk -F':[[:space:]]*' '/HETZNER_API_KEY/ {
@@ -32,6 +46,33 @@ command -v jq >/dev/null 2>&1 || {
   echo "jq is required" >&2
   exit 1
 }
+
+ssh_key_name_from_local_key() {
+  local key pub fingerprint
+  key="$(default_ssh_key)"
+  pub="${key}.pub"
+  if [ ! -f "${pub}" ]; then
+    return 1
+  fi
+  fingerprint="$(ssh-keygen -E md5 -lf "${pub}" | awk '{print $2}' | sed 's/^MD5://')"
+  if [ -z "${fingerprint}" ]; then
+    return 1
+  fi
+  HCLOUD_TOKEN="${HCLOUD_TOKEN}" hcloud ssh-key list -o json |
+    jq -r --arg fingerprint "${fingerprint}" 'first(.[] | select(.fingerprint == $fingerprint) | .name) // empty'
+}
+
+if [ -z "${SSH_KEY_NAME}" ]; then
+  command -v ssh-keygen >/dev/null 2>&1 || {
+    echo "ssh-keygen is required to infer RUNWAVE_SSH_KEY_NAME from a local public key" >&2
+    exit 1
+  }
+  SSH_KEY_NAME="$(ssh_key_name_from_local_key || true)"
+fi
+if [ -z "${SSH_KEY_NAME}" ]; then
+  echo "Missing RUNWAVE_SSH_KEY_NAME/SSH_KEY_NAME and could not infer it from the local SSH public key" >&2
+  exit 1
+fi
 
 mkdir -p "${INVENTORY_DIR}"
 

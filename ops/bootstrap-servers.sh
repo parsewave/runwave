@@ -3,10 +3,25 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INVENTORY="${1:-}"
-SSH_KEY="${SSH_KEY:-${HOME}/.ssh/id_louka}"
 SSH_USER="${SSH_USER:-root}"
 GAMES_S3_URI="${GAMES_S3_URI:-s3://pw-cruft/games}"
 GAMES_DIR="${GAMES_DIR:-${ROOT_DIR}/cruft/games}"
+
+default_ssh_key() {
+  if [ -n "${RUNWAVE_SSH_KEY:-}" ]; then
+    printf '%s\n' "${RUNWAVE_SSH_KEY}"
+  elif [ -n "${SSH_KEY:-}" ]; then
+    printf '%s\n' "${SSH_KEY}"
+  elif [ -f "${HOME}/.ssh/id_ed25519" ]; then
+    printf '%s\n' "${HOME}/.ssh/id_ed25519"
+  elif [ -f "${HOME}/.ssh/id_rsa" ]; then
+    printf '%s\n' "${HOME}/.ssh/id_rsa"
+  else
+    printf '%s\n' "${HOME}/.ssh/id_ed25519"
+  fi
+}
+
+SSH_KEY="$(default_ssh_key)"
 
 if [ -z "${INVENTORY}" ] || [ ! -f "${INVENTORY}" ]; then
   echo "Usage: ops/bootstrap-servers.sh ops/inventory/<batch>.json" >&2
@@ -67,7 +82,7 @@ fi
 server_count="$(jq '.servers | length' "${INVENTORY}")"
 echo "Bootstrapping ${server_count} servers"
 
-jq -r '.servers[] | [.name, .ipv4] | @tsv' "${INVENTORY}" | while IFS=$'\t' read -r name ip; do
+while IFS=$'\t' read -r name ip; do
   echo "Bootstrapping ${name} (${ip})"
   ssh_opts=(-i "${SSH_KEY}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=15)
   scp_files=(
@@ -79,7 +94,7 @@ jq -r '.servers[] | [.name, .ipv4] | @tsv' "${INVENTORY}" | while IFS=$'\t' read
     scp_files+=("${games_tar}")
   fi
   scp "${ssh_opts[@]}" "${scp_files[@]}" "${SSH_USER}@${ip}:/tmp/"
-  ssh "${ssh_opts[@]}" "${SSH_USER}@${ip}" "GAMES_S3_URI='${GAMES_S3_URI}' bash /tmp/bootstrap-runner.sh"
-done
+  ssh -n "${ssh_opts[@]}" "${SSH_USER}@${ip}" "GAMES_S3_URI='${GAMES_S3_URI}' bash /tmp/bootstrap-runner.sh"
+done < <(jq -r '.servers[] | [.name, .ipv4] | @tsv' "${INVENTORY}")
 
 echo "Bootstrap complete"

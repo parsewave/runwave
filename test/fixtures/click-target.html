@@ -44,10 +44,21 @@
     <div id="status">Clicks: 0</div>
     <script>
       window.clicks = 0;
+      window.drags = 0;
       const status = document.getElementById('status');
+      let pointerStart = null;
       document.getElementById('target').addEventListener('click', () => {
         window.clicks += 1;
         status.textContent = `Clicks: ${window.clicks}`;
+      });
+      document.getElementById('target').addEventListener('pointerdown', (event) => {
+        pointerStart = { x: event.clientX, y: event.clientY };
+      });
+      document.getElementById('target').addEventListener('pointerup', (event) => {
+        if (!pointerStart) return;
+        const distance = Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y);
+        if (distance > 20) window.drags += 1;
+        pointerStart = null;
       });
     </script>
   </body>

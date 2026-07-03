@@ -57,7 +57,7 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
   const outputRoot = path.join(tmpDir, 'state');
   const recordingDir = path.join(tmpDir, 'recording');
   const stateExpression =
-    "() => ({ clicks: window.clicks || 0, status: document.getElementById('status').textContent })";
+    "() => ({ clicks: window.clicks || 0, drags: window.drags || 0, status: document.getElementById('status').textContent })";
 
   try {
     const start = runCli(
@@ -101,6 +101,21 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
     assert.equal(step.endState.custom.status, 'Clicks: 1');
     assert.ok(step.captures.length >= 1);
     assert.ok(fs.existsSync(step.captures[0].path));
+
+    const drag = runCli(
+      {
+        action: 'step',
+        action_name: 'smoke-drag',
+        duration: 300,
+        drags: [{ at: 50, from: { x: 260, y: 210 }, to: { x: 380, y: 210 }, mode: 'mouse', steps: 6 }],
+        captures: [300],
+        autoCaptures: false,
+      },
+      { cwd: tmpDir, env }
+    );
+    assert.equal(drag.ok, true);
+    assert.equal(drag.endState.custom.drags, 1);
+    assert.equal(drag.drags[0].mode, 'mouse');
 
     const stop = runCli(
       {

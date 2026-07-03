@@ -16,7 +16,8 @@ Use this skill to run a many-game browser playtest batch end to end: discover ga
 - Playtest duration: `120000` ms per game
 - Fleet size target: `8 x ccx43`, `3` jobs per server, `24` concurrent slots
 - Runwave repo: `https://github.com/parsewave/runwave`
-- SSH key: `~/.ssh/id_louka`
+- SSH key: `RUNWAVE_SSH_KEY` / `SSH_KEY`, or an auto-detected local
+  `~/.ssh/id_ed25519` / `~/.ssh/id_rsa`
 - Secrets may come from environment variables, local shell profiles, CI secrets,
   or `~/.c.yaml`; never print secret values
 
@@ -35,8 +36,9 @@ Required for Hetzner provisioning:
 
 Required for SSH access to workers:
 
-- Private key path, usually `~/.ssh/id_louka`
-- Hetzner SSH key name injected during provisioning, usually `hetzner-id_louka`
+- Private key path via `RUNWAVE_SSH_KEY` or `SSH_KEY`
+- Hetzner SSH key name via `RUNWAVE_SSH_KEY_NAME` / `SSH_KEY_NAME`, or inferred
+  from the matching local public key
 
 Often required by the playtester or runwave-adjacent agent layer, depending on
 the selected planner/model:
@@ -82,6 +84,9 @@ Use this path when Hetzner creation and SSH are working.
 1. Provision the fleet:
 
 ```sh
+export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
+# Optional if the Hetzner key name cannot be inferred from RUNWAVE_SSH_KEY.pub:
+# export RUNWAVE_SSH_KEY_NAME="<hetzner-ssh-key-name>"
 SERVER_TYPE=ccx43 SERVER_COUNT=8 LOCATION=hel1 ops/provision-hetzner.sh
 ```
 
@@ -94,12 +99,18 @@ ops/bootstrap-servers.sh ops/inventory/<batch>.json
 3. Launch one playtest per discovered browser game:
 
 ```sh
+export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
 node ops/orchestrate-playtests.js \
   --inventory ops/inventory/<batch>.json \
   --s3-uri s3://pw-cruft/playtests \
   --games-s3-uri s3://pw-cruft/games \
-  --runwave-ref main \
+  --runwave-ref runwave-agentic-player \
   --playtest-duration-ms 120000 \
+  --agent-min-playtest-ms 110000 \
+  --vlm-viewport-preflight \
+  --viewport-preflight-attempts 2 \
+  --ssh-key "$RUNWAVE_SSH_KEY" \
+  --agent \
   --concurrency-per-server 3
 ```
 
@@ -108,6 +119,15 @@ The orchestrator refuses a 20-job run if capacity is below `20`. It assigns uniq
 ```text
 s3://pw-cruft/playtests/<run-id>/<game>/attempt-001/
 ```
+
+For agent jobs, if `--agent-min-playtest-ms` is omitted, the orchestrator sets
+it to `--playtest-duration-ms - 10000`. A 120 second run therefore requires
+about 110 seconds of agent play before early stop is allowed.
+
+Use `--vlm-viewport-preflight --viewport-preflight-attempts 2` when visual
+framing matters. This asks the VLM to choose among deterministic viewport
+candidates before the agent starts playing, with one retry before deterministic
+fallback.
 
 ## Local Fallback
 

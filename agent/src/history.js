@@ -1,0 +1,38 @@
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+
+function ensureDir(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function appendJsonl(file, payload) {
+  fs.appendFileSync(file, `${JSON.stringify(payload)}\n`);
+}
+
+class AgentRecorder {
+  constructor(outputDir) {
+    this.outputDir = ensureDir(outputDir);
+    this.actionsPath = path.join(this.outputDir, 'agent-actions.jsonl');
+    this.observationsPath = path.join(this.outputDir, 'agent-observations.jsonl');
+    this.summaryPath = path.join(this.outputDir, 'agent-summary.json');
+  }
+
+  observation(payload) {
+    appendJsonl(this.observationsPath, { ts: new Date().toISOString(), ...payload });
+  }
+
+  action(payload) {
+    appendJsonl(this.actionsPath, { ts: new Date().toISOString(), ...payload });
+  }
+
+  summary(payload) {
+    fs.writeFileSync(this.summaryPath, `${JSON.stringify(payload, null, 2)}\n`);
+  }
+}
+
+module.exports = {
+  AgentRecorder,
+};

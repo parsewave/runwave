@@ -14,11 +14,28 @@ else
 fi
 
 apt-get update
-apt-get install -y ca-certificates curl gnupg git jq python3 python3-pip rsync unzip awscli
+apt-get install -y ca-certificates curl gnupg git jq python3 python3-pip rsync unzip
 
 if [ "${need_node_install}" -eq 1 ]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y nodejs
+fi
+
+if ! command -v aws >/dev/null 2>&1; then
+  arch="$(uname -m)"
+  case "${arch}" in
+    x86_64|amd64) aws_arch="x86_64" ;;
+    aarch64|arm64) aws_arch="aarch64" ;;
+    *)
+      echo "Unsupported architecture for AWS CLI installer: ${arch}" >&2
+      exit 1
+      ;;
+  esac
+  tmp_dir="$(mktemp -d)"
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}.zip" -o "${tmp_dir}/awscliv2.zip"
+  unzip -q "${tmp_dir}/awscliv2.zip" -d "${tmp_dir}"
+  "${tmp_dir}/aws/install" --update
+  rm -rf "${tmp_dir}"
 fi
 
 install -d -m 0755 /opt/runwave/bin /opt/runwave/games /var/lib/runwave/jobs /var/log/runwave

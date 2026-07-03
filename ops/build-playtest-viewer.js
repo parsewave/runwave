@@ -5,15 +5,21 @@ const fs = require('fs');
 const path = require('path');
 
 function parseArgs(argv) {
-  const args = {};
+  const args = { exclude: new Set() };
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = () => argv[++i];
     if (arg === '--artifacts') args.artifacts = next();
     else if (arg === '--out') args.out = next();
+    else if (arg === '--exclude') {
+      for (const game of next().split(',')) {
+        const trimmed = game.trim();
+        if (trimmed) args.exclude.add(trimmed);
+      }
+    }
     else throw new Error(`unknown argument: ${arg}`);
   }
-  if (!args.artifacts) throw new Error('usage: build-playtest-viewer.js --artifacts <dir> [--out <file>]');
+  if (!args.artifacts) throw new Error('usage: build-playtest-viewer.js --artifacts <dir> [--out <file>] [--exclude game-a,game-b]');
   args.artifacts = path.resolve(args.artifacts);
   args.out = path.resolve(args.out || path.join(args.artifacts, 'index.html'));
   return args;
@@ -49,16 +55,17 @@ function readJson(file) {
   }
 }
 
-function collectRuns(artifacts, outFile) {
+function collectRuns(artifacts, outFile, options = {}) {
   const summaries = walk(artifacts, (file) => path.basename(file) === 'summary.json');
   return summaries.map((summaryPath) => {
     const attemptDir = path.dirname(summaryPath);
     const relative = path.relative(artifacts, attemptDir).split(path.sep);
     const summary = readJson(summaryPath);
+    const game = relative[0] || summary.game || 'unknown';
     const videos = walk(attemptDir, (file) => file.endsWith('.webm')).sort();
     const screenshots = walk(attemptDir, (file) => file.endsWith('.png')).sort();
     return {
-      game: relative[0] || summary.game || 'unknown',
+      game,
       attempt: relative[1] || 'attempt',
       status: summary.status || 'unknown',
       startedAt: summary.startedAt || '',
@@ -69,7 +76,9 @@ function collectRuns(artifacts, outFile) {
       screenshots: screenshots.map((file) => rel(outFile, file)),
       summary: rel(outFile, summaryPath),
     };
-  }).sort((a, b) => `${a.game}/${a.attempt}`.localeCompare(`${b.game}/${b.attempt}`));
+  })
+    .filter((run) => !options.exclude?.has(run.game))
+    .sort((a, b) => `${a.game}/${a.attempt}`.localeCompare(`${b.game}/${b.attempt}`));
 }
 
 function render(runs, artifacts) {
@@ -82,7 +91,9 @@ function render(runs, artifacts) {
         </div>
         <a href="${escapeHtml(run.summary)}">summary</a>
       </header>
-      ${run.video ? `<video controls preload="metadata" ${run.poster ? `poster="${escapeHtml(run.poster)}"` : ''} src="${escapeHtml(run.video)}"></video>` : '<div class="missing">No video found</div>'}
+      <div class="media">
+        ${run.video ? `<video controls preload="metadata" ${run.poster ? `poster="${escapeHtml(run.poster)}"` : ''} src="${escapeHtml(run.video)}"></video>` : '<div class="missing">No video found</div>'}
+      </div>
       <div class="strip">
         ${run.screenshots.slice(0, 8).map((shot) => `<a href="${escapeHtml(shot)}"><img src="${escapeHtml(shot)}" loading="lazy" alt=""></a>`).join('')}
       </div>
@@ -115,10 +126,12 @@ function render(runs, artifacts) {
     .card header, .card footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; }
     h2 { margin: 0; font-size: 15px; font-weight: 650; }
     p { margin: 3px 0 0; color: #aaa; font-size: 12px; }
-    video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
-    .missing { display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 9; background: #050505; color: #aaa; }
+    .media { aspect-ratio: 1 / 1; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    video { display: block; width: 100%; height: 100%; background: #000; object-fit: contain; }
+    .missing { display: grid; place-items: center; width: 100%; height: 100%; background: #050505; color: #aaa; }
     .strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; padding: 2px; background: #0b0b0b; }
-    .strip img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+    .strip a { align-items: center; aspect-ratio: 1 / 1; background: #050505; display: flex; justify-content: center; overflow: hidden; }
+    .strip img { display: block; max-height: 100%; max-width: 100%; object-fit: contain; }
     footer span { color: #aaa; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .hidden { display: none; }
     @media (max-width: 640px) {
@@ -162,7 +175,7 @@ function render(runs, artifacts) {
 
 function main() {
   const args = parseArgs(process.argv);
-  const runs = collectRuns(args.artifacts, args.out);
+  const runs = collectRuns(args.artifacts, args.out, { exclude: args.exclude });
   fs.mkdirSync(path.dirname(args.out), { recursive: true });
   fs.writeFileSync(args.out, render(runs, args.artifacts));
   console.log(JSON.stringify({ out: args.out, runs: runs.length }, null, 2));

@@ -56,6 +56,35 @@ function normalizeClick(click, duration) {
   };
 }
 
+function normalizePoint(point, label) {
+  const x = Number(point && point.x);
+  const y = Number(point && point.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    throw new Error(`${label} requires numeric x and y: ${JSON.stringify(point)}`);
+  }
+  return { x, y };
+}
+
+function normalizeDrag(drag, duration) {
+  const at = readNumber(drag.at, drag.fromAt ?? drag.startAt ?? 0);
+  const from = normalizePoint(drag.from || drag.start || { x: drag.x1, y: drag.y1 }, 'drag.from');
+  const to = normalizePoint(drag.to || drag.end || { x: drag.x2, y: drag.y2 }, 'drag.to');
+  const steps = Math.max(1, Math.min(80, Math.round(readNumber(drag.steps, 12))));
+
+  if (!Number.isFinite(at) || at < 0 || at > duration) {
+    throw new Error(`invalid drag time: ${JSON.stringify(drag)}`);
+  }
+
+  return {
+    at,
+    from,
+    to,
+    button: drag.button || 'left',
+    mode: drag.mode === 'html5' ? 'html5' : 'mouse',
+    steps,
+  };
+}
+
 function normalizeViewMove(viewMove, duration) {
   const from = readNumber(viewMove.from, viewMove.start ?? viewMove.at ?? 0);
   const to = readNumber(viewMove.to, viewMove.end ?? from);
@@ -102,6 +131,7 @@ function normalizeStep(input, config, nextStepIndex) {
   const aliases = { ...defaultKeyAliases, ...(config.keyAliases || {}) };
   const duration = normalizeDuration(input);
   const viewMoves = input.viewMoves || input.view_moves || input.mouseMoves || input.mouse_moves || [];
+  const drags = input.drags || input.drag || [];
 
   return {
     index: nextStepIndex,
@@ -109,6 +139,7 @@ function normalizeStep(input, config, nextStepIndex) {
     duration,
     commands: (input.commands || []).map((command) => normalizeCommand(command, aliases)),
     clicks: (input.clicks || []).map((click) => normalizeClick(click, duration)),
+    drags: (Array.isArray(drags) ? drags : [drags]).map((drag) => normalizeDrag(drag, duration)),
     viewMoves: viewMoves.map((viewMove) => normalizeViewMove(viewMove, duration)),
     captures: normalizeCaptures(input, config, duration),
   };
