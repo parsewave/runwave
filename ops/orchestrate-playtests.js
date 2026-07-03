@@ -6,11 +6,22 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
+function defaultSshKey() {
+  if (process.env.RUNWAVE_SSH_KEY) return process.env.RUNWAVE_SSH_KEY;
+  if (process.env.SSH_KEY) return process.env.SSH_KEY;
+  const sshDir = path.join(os.homedir(), '.ssh');
+  for (const name of ['id_ed25519', 'id_rsa']) {
+    const candidate = path.join(sshDir, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return path.join(sshDir, 'id_ed25519');
+}
+
 function parseArgs(argv) {
   const args = {
     gamesDir: path.resolve(process.cwd(), 'cruft/games'),
     gamesS3Uri: 's3://pw-cruft/games',
-    sshKey: path.join(os.homedir(), '.ssh/id_louka'),
+    sshKey: defaultSshKey(),
     sshUser: 'root',
     runwaveRepo: 'https://github.com/parsewave/runwave',
     runwaveRef: 'main',
@@ -21,6 +32,8 @@ function parseArgs(argv) {
     basePort: 8900,
     playtestDurationMs: 120000,
     agentMinPlaytestMs: null,
+    vlmViewportPreflight: false,
+    viewportPreflightAttempts: null,
     playMode: 'scripted',
     skipPlaywrightInstall: false,
     runId: `run-${new Date().toISOString().replace(/[:.]/g, '-')}`,
@@ -44,6 +57,8 @@ function parseArgs(argv) {
     else if (arg === '--base-port') args.basePort = Number(next());
     else if (arg === '--playtest-duration-ms') args.playtestDurationMs = Number(next());
     else if (arg === '--agent-min-playtest-ms') args.agentMinPlaytestMs = Number(next());
+    else if (arg === '--vlm-viewport-preflight') args.vlmViewportPreflight = true;
+    else if (arg === '--viewport-preflight-attempts') args.viewportPreflightAttempts = Number(next());
     else if (arg === '--play-mode') args.playMode = next();
     else if (arg === '--agent') args.playMode = 'agent';
     else if (arg === '--skip-playwright-install') args.skipPlaywrightInstall = true;
@@ -67,12 +82,15 @@ function usage() {
     '  --games game-a,game-b',
     '  --games-s3-uri s3://bucket/prefix',
     '  --local-games',
+    '  --ssh-key PATH',
     '  --runwave-ref REF',
     '  --concurrency-per-server N',
     '  --require-concurrency N',
     '  --base-port N',
     '  --playtest-duration-ms N',
     '  --agent-min-playtest-ms N',
+    '  --vlm-viewport-preflight',
+    '  --viewport-preflight-attempts N',
     '  --play-mode scripted|agent',
     '  --agent',
     '  --skip-playwright-install',
@@ -243,6 +261,10 @@ function buildJobs(args, games) {
       s3Uri: `${args.s3Uri.replace(/\/+$/, '')}/${args.runId}/${game}/attempt-${String(attempt).padStart(3, '0')}`,
     };
     if (args.playMode === 'agent') job.agentMinPlaytestMs = agentMinPlaytestMs(args);
+    if (args.vlmViewportPreflight) job.vlmViewportPreflight = true;
+    if (Number.isFinite(args.viewportPreflightAttempts)) {
+      job.viewportPreflightAttempts = Math.max(1, Math.round(args.viewportPreflightAttempts));
+    }
     jobs.push(job);
   };
 

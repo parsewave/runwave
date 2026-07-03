@@ -14,6 +14,9 @@ running many browser-game playtests across Hetzner servers.
 - Per playtest: clone the requested runwave repo/ref, install dependencies, run
   a browser playtest in an isolated workspace for 2 minutes by default, then
   upload the full workspace to S3.
+- SSH: set `RUNWAVE_SSH_KEY` to the local private key used for workers. During
+  provisioning, set `RUNWAVE_SSH_KEY_NAME` if the Hetzner key name cannot be
+  inferred from the matching local public key.
 
 The runner can drive the browser harness with either the default scripted
 exploration plan or an agentic OpenRouter planner. The harness still only
@@ -24,7 +27,10 @@ controls the browser; the agent planner lives separately under `agent/`.
 Create the maximum-safety fleet:
 
 ```sh
-ops/provision-hetzner.sh
+export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
+# Optional if the Hetzner key name cannot be inferred from RUNWAVE_SSH_KEY.pub:
+# export RUNWAVE_SSH_KEY_NAME="<hetzner-ssh-key-name>"
+SERVER_TYPE=ccx43 SERVER_COUNT=8 LOCATION=hel1 ops/provision-hetzner.sh
 ```
 
 Defaults:
@@ -32,7 +38,8 @@ Defaults:
 - `SERVER_TYPE=ccx43`
 - `SERVER_COUNT=8`
 - `LOCATION=hel1`
-- `SSH_KEY_NAME=hetzner-id_louka`
+- `RUNWAVE_SSH_KEY_NAME` / `SSH_KEY_NAME`, or inferred from
+  `RUNWAVE_SSH_KEY.pub` / `SSH_KEY.pub`
 
 The script writes an inventory file under `ops/inventory/`.
 
@@ -60,26 +67,31 @@ Run one attempt per detected browser game:
 ```sh
 node ops/orchestrate-playtests.js \
   --inventory ops/inventory/<batch>.json \
-  --s3-uri s3://YOUR_BUCKET/runwave-playtests \
-  --runwave-ref main
+  --s3-uri s3://pw-cruft/playtests \
+  --games-s3-uri s3://pw-cruft/games \
+  --runwave-ref runwave-agentic-player \
+  --agent
 ```
 
-With 20 browser games in `s3://pw-cruft/games`, that command schedules 20
-playtests.
-By default the local orchestrator discovers that game list from
+With 22 browser games in `s3://pw-cruft/games`, that command schedules one
+playtest per discovered browser game. By default the local orchestrator discovers that game list from
 `s3://pw-cruft/games`, not from the local checkout.
 
-Run 20 total attempts spread over the detected browser games:
+Run one agentic attempt for every discovered browser game:
 
 ```sh
+export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
 node ops/orchestrate-playtests.js \
   --inventory ops/inventory/<batch>.json \
-  --s3-uri s3://YOUR_BUCKET/runwave-playtests \
-  --runwave-ref main \
-  --total-attempts 20 \
+  --s3-uri s3://pw-cruft/playtests \
+  --games-s3-uri s3://pw-cruft/games \
+  --runwave-ref runwave-agentic-player \
   --play-mode agent \
   --playtest-duration-ms 120000 \
   --agent-min-playtest-ms 110000 \
+  --vlm-viewport-preflight \
+  --viewport-preflight-attempts 2 \
+  --ssh-key "$RUNWAVE_SSH_KEY" \
   --concurrency-per-server 3
 ```
 
@@ -94,6 +106,11 @@ runwave drives browser targets.
 For agent jobs, if `--agent-min-playtest-ms` is not provided, the orchestrator
 sets it to `--playtest-duration-ms - 10000`. A 120 second run therefore requires
 about 110 seconds of play before the agent is allowed to stop.
+
+Add `--vlm-viewport-preflight` to let the model choose among viewport candidate
+screenshots before gameplay starts. The generated job sets
+`vlmViewportPreflight: true`; `--viewport-preflight-attempts 2` gives the model
+one retry before falling back to the deterministic viewport probe.
 
 ## Agent Mode
 
