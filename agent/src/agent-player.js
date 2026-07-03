@@ -33,6 +33,7 @@ async function decideNextAction({ job, screenshot, state, history, elapsedMs, ma
   if (!screenshot) throw new Error('agent cannot decide without a screenshot');
   const viewport = viewportFor(job);
   const prompt = buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history });
+  const modelStartedAt = Date.now();
   const result = await modelClient({
     messages: [
       {
@@ -54,6 +55,8 @@ async function decideNextAction({ job, screenshot, state, history, elapsedMs, ma
       maxDurationMs: Number(job.agentMaxActionMs || 8000),
     }),
     model: result.model,
+    modelElapsedMs: Date.now() - modelStartedAt,
+    rawText: String(result.text || '').slice(0, 8000),
     usage: result.usage,
   };
 }
@@ -77,7 +80,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     const state = responseState(lastResponse);
     recorder.observation({ step, elapsedMs, screenshot, state });
 
-    const { decision, model, usage } = await decideNextAction({
+    const { decision, model, modelElapsedMs, rawText, usage } = await decideNextAction({
       job,
       screenshot,
       state,
@@ -107,9 +110,19 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       decision,
       action,
       model,
+      modelElapsedMs,
+      rawText,
       usage,
     });
-    log('agent.action', { step, duration, commandCount: action.commands.length, clickCount: action.clicks.length });
+    log('agent.action', {
+      step,
+      duration,
+      model,
+      modelElapsedMs,
+      commandCount: action.commands.length,
+      clickCount: action.clicks.length,
+      viewMoveCount: action.view_moves.length,
+    });
 
     lastResponse = await runAction(action);
     history.push({

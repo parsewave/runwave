@@ -235,8 +235,15 @@ function parseActionResponse(result, action) {
   return response;
 }
 
-async function runRunwaveAction(base, dirs, env, action) {
-  const result = await run(base[0], [base[1], JSON.stringify(action)], { cwd: dirs.workspace, env });
+function runwaveCliArgs(base, action, job) {
+  const args = [base[1]];
+  if (job.verboseRunwave || process.env.RUNWAVE_VERBOSE === '1') args.push('-v');
+  args.push(JSON.stringify(action));
+  return args;
+}
+
+async function runRunwaveAction(base, dirs, env, job, action) {
+  const result = await run(base[0], runwaveCliArgs(base, action, job), { cwd: dirs.workspace, env });
   return parseActionResponse(result, action);
 }
 
@@ -283,7 +290,7 @@ async function runRunwave(job, dirs, url) {
     sessionWaitMs: 120000,
   };
 
-  const runAction = (action) => runRunwaveAction(base, dirs, env, action);
+  const runAction = (action) => runRunwaveAction(base, dirs, env, job, action);
   const initialResponse = await runAction(start);
   let playtestResult = null;
   try {

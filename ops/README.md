@@ -112,6 +112,10 @@ node ops/remote/run-playtest.js --job ops/examples/job-agent-mario.local.json
 On machines with Chrome already installed and Playwright downloads blocked, set
 `skipPlaywrightInstall: true` and `channel: "chrome"` in the job JSON.
 
+For a server-side one-game agent run, use
+`ops/examples/job-agent-mario.server.json`. It runs agent mode for a 3-minute
+safety window and enables verbose harness timing logs.
+
 ## Viewer
 
 After downloading artifacts, build a local video viewer:
