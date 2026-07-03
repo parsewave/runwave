@@ -15,9 +15,9 @@ running many browser-game playtests across Hetzner servers.
   a browser playtest in an isolated workspace for 2 minutes by default, then
   upload the full workspace to S3.
 
-The current runner drives the runwave browser harness directly with a default
-exploration plan. If a separate detective/VLM planner is added later, plug it in
-at the runner boundary where the action plan is produced.
+The runner can drive the browser harness with either the default scripted
+exploration plan or an agentic OpenRouter planner. The harness still only
+controls the browser; the agent planner lives separately under `agent/`.
 
 ## Provision
 
@@ -77,6 +77,7 @@ node ops/orchestrate-playtests.js \
   --s3-uri s3://YOUR_BUCKET/runwave-playtests \
   --runwave-ref main \
   --total-attempts 20 \
+  --play-mode agent \
   --playtest-duration-ms 120000 \
   --concurrency-per-server 3
 ```

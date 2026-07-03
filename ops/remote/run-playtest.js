@@ -218,6 +218,40 @@ function defaultPlan(durationMs = 120000) {
   return actions;
 }
 
+function parseActionResponse(result, action) {
+  let response;
+  try {
+    response = JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`runwave returned non-JSON output for ${action.action_name || action.action}: ${result.stdout.slice(-2000)}`);
+  }
+  if (!response || response.ok === false) {
+    throw new Error(`runwave action failed for ${action.action_name || action.action}: ${JSON.stringify(response).slice(0, 2000)}`);
+  }
+  return response;
+}
+
+async function runRunwaveAction(base, dirs, env, action) {
+  const result = await run(base[0], [base[1], JSON.stringify(action)], { cwd: dirs.workspace, env });
+  return parseActionResponse(result, action);
+}
+
+function useAgentMode(job) {
+  return job.playMode === 'agent' || job.agent === true;
+}
+
+async function runAgentPlan(job, dirs, initialResponse, runAction) {
+  const agentModule = path.join(dirs.runwave, 'agent', 'src', 'agent-player.js');
+  const { runAgenticPlaytest } = require(agentModule);
+  return runAgenticPlaytest({
+    job,
+    initialResponse,
+    runAction,
+    outputDir: path.join(dirs.workspace, 'artifacts', 'agent'),
+    log,
+  });
+}
+
 async function runRunwave(job, dirs, url) {
   const runwaveBin = path.join(dirs.runwave, 'bin', 'runwave.js');
   const env = {
@@ -237,19 +271,30 @@ async function runRunwave(job, dirs, url) {
     outputRoot: 'artifacts/state/output',
     outDir: 'artifacts/recordings/session',
     initialScreenshot: true,
+    gridScreenshots: job.gridScreenshots,
+    keyAliases: job.keyAliases,
     force: true,
     sessionWaitMs: 120000,
   };
 
-  await run(base[0], [base[1], JSON.stringify(start)], { cwd: dirs.workspace, env });
-  const plan = Array.isArray(job.actionPlan) && job.actionPlan.length ? job.actionPlan : defaultPlan(job.playtestDurationMs);
-  for (const action of plan) {
-    await run(base[0], [base[1], JSON.stringify(action)], { cwd: dirs.workspace, env });
+  const runAction = (action) => runRunwaveAction(base, dirs, env, action);
+  const initialResponse = await runAction(start);
+  let playtestResult = null;
+  try {
+    if (useAgentMode(job)) {
+      playtestResult = await runAgentPlan(job, dirs, initialResponse, runAction);
+    } else {
+      const plan = Array.isArray(job.actionPlan) && job.actionPlan.length ? job.actionPlan : defaultPlan(job.playtestDurationMs);
+      for (const action of plan) {
+        await runAction(action);
+      }
+    }
+  } finally {
+    await runAction({ action: 'stop', action_name: 'stop' }).catch((error) => {
+      log('runwave.stop.error', { error: error.message });
+    });
   }
-  await run(base[0], [base[1], JSON.stringify({ action: 'stop', action_name: 'stop' })], {
-    cwd: dirs.workspace,
-    env,
-  });
+  return playtestResult;
 }
 
 async function uploadWorkspace(job, dirs, env) {
