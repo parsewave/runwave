@@ -115,10 +115,11 @@ function render(runs, artifacts) {
     .card header, .card footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; }
     h2 { margin: 0; font-size: 15px; font-weight: 650; }
     p { margin: 3px 0 0; color: #aaa; font-size: 12px; }
-    video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+    video { display: block; width: 100%; max-height: 72vh; background: #000; object-fit: contain; }
     .missing { display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 9; background: #050505; color: #aaa; }
     .strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; padding: 2px; background: #0b0b0b; }
-    .strip img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+    .strip a { align-items: center; aspect-ratio: 16 / 9; background: #050505; display: flex; justify-content: center; overflow: hidden; }
+    .strip img { display: block; max-height: 100%; max-width: 100%; object-fit: contain; }
     footer span { color: #aaa; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .hidden { display: none; }
     @media (max-width: 640px) {
