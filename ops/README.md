@@ -90,6 +90,28 @@ Only browser games whose `start.sh` serves HTTP are scheduled by default.
 Unity/editor-only projects are installed on the machines but skipped because
 runwave drives browser targets.
 
+## Agent Mode
+
+Agent mode uses the browser harness as the hands and the `agent/` package as the
+model-calling planner. The planner currently uses OpenRouter, reading
+`OPENROUTER_API_KEY` from the environment or `~/.c.yaml`. Override the model with
+`RUNWAVE_AGENT_MODEL` or `OPENROUTER_MODEL`.
+
+For a single local game smoke:
+
+```sh
+aws s3 sync s3://pw-cruft/games/mario-html5/ \
+  cruft/playtests/_games-cache/mario-html5/ \
+  --delete --only-show-errors
+
+RUNWAVE_GAMES_ROOT="$PWD/cruft/playtests/_games-cache" \
+RUNWAVE_JOBS_ROOT="$PWD/cruft/playtests/local-agent-smoke/jobs" \
+node ops/remote/run-playtest.js --job ops/examples/job-agent-mario.local.json
+```
+
+On machines with Chrome already installed and Playwright downloads blocked, set
+`skipPlaywrightInstall: true` and `channel: "chrome"` in the job JSON.
+
 ## Viewer
 
 After downloading artifacts, build a local video viewer:
