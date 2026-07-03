@@ -22,11 +22,21 @@ if [ "${need_node_install}" -eq 1 ]; then
 fi
 
 install -d -m 0755 /opt/runwave/bin /opt/runwave/games /var/lib/runwave/jobs /var/log/runwave
-rm -rf /opt/runwave/games/*
-tar -xzf /tmp/games.tar.gz -C /opt/runwave/games
-
 install -m 0755 /tmp/run-playtest.js /opt/runwave/bin/run-playtest.js
 install -m 0600 /tmp/runwave-runner.env /etc/runwave-runner.env
+
+# shellcheck disable=SC1091
+source /etc/runwave-runner.env
+
+rm -rf /opt/runwave/games/*
+if [ -n "${GAMES_S3_URI:-}" ]; then
+  aws s3 sync "${GAMES_S3_URI%/}/" /opt/runwave/games/ --delete --only-show-errors
+elif [ -f /tmp/games.tar.gz ]; then
+  tar -xzf /tmp/games.tar.gz -C /opt/runwave/games
+else
+  echo "Missing GAMES_S3_URI and /tmp/games.tar.gz" >&2
+  exit 1
+fi
 
 # Install browser system dependencies once; each job installs the exact runwave
 # package and browser revision requested by that runwave checkout.

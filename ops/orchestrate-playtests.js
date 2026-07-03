@@ -4,11 +4,12 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 function parseArgs(argv) {
   const args = {
     gamesDir: path.resolve(process.cwd(), 'cruft/games'),
+    gamesS3Uri: 's3://pw-cruft/games',
     sshKey: path.join(os.homedir(), '.ssh/id_louka'),
     sshUser: 'root',
     runwaveRepo: 'https://github.com/parsewave/runwave',
@@ -18,6 +19,7 @@ function parseArgs(argv) {
     concurrencyPerServer: 3,
     requiredConcurrency: 20,
     basePort: 8900,
+    playtestDurationMs: 120000,
     runId: `run-${new Date().toISOString().replace(/[:.]/g, '-')}`,
   };
   for (let i = 2; i < argv.length; i += 1) {
@@ -25,6 +27,7 @@ function parseArgs(argv) {
     const next = () => argv[++i];
     if (arg === '--inventory') args.inventory = next();
     else if (arg === '--s3-uri') args.s3Uri = next();
+    else if (arg === '--games-s3-uri') args.gamesS3Uri = next();
     else if (arg === '--games-dir') args.gamesDir = path.resolve(next());
     else if (arg === '--games') args.games = next().split(',').map((v) => v.trim()).filter(Boolean);
     else if (arg === '--ssh-key') args.sshKey = next();
@@ -36,8 +39,10 @@ function parseArgs(argv) {
     else if (arg === '--concurrency-per-server') args.concurrencyPerServer = Number(next());
     else if (arg === '--require-concurrency') args.requiredConcurrency = Number(next());
     else if (arg === '--base-port') args.basePort = Number(next());
+    else if (arg === '--playtest-duration-ms') args.playtestDurationMs = Number(next());
     else if (arg === '--run-id') args.runId = next();
     else if (arg === '--include-nonbrowser') args.includeNonbrowser = true;
+    else if (arg === '--local-games') args.gamesS3Uri = '';
     else if (arg === '--dry-run') args.dryRun = true;
     else throw new Error(`unknown argument: ${arg}`);
   }
@@ -53,12 +58,51 @@ function usage() {
     '  --total-attempts N',
     '  --attempts-per-game N',
     '  --games game-a,game-b',
+    '  --games-s3-uri s3://bucket/prefix',
+    '  --local-games',
     '  --runwave-ref REF',
     '  --concurrency-per-server N',
     '  --require-concurrency N',
     '  --base-port N',
+    '  --playtest-duration-ms N',
     '  --dry-run',
   ].join('\n');
+}
+
+function loadCredentialEnv() {
+  const file = path.join(os.homedir(), '.c.yaml');
+  const env = {};
+  if (!fs.existsSync(file)) return env;
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const match = line.match(/^\s*"?([A-Za-z_][A-Za-z0-9_]*)"?\s*:\s*"?([^"]*)"?\s*$/);
+    if (!match) continue;
+    if (/^(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AWS_DEFAULT_REGION)$/.test(match[1])) {
+      env[match[1]] = match[2].trim();
+    }
+  }
+  if (!env.AWS_DEFAULT_REGION) env.AWS_DEFAULT_REGION = 'us-east-1';
+  return env;
+}
+
+function runCapture(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    encoding: 'utf8',
+    env: { ...process.env, ...loadCredentialEnv(), ...(options.env || {}) },
+    maxBuffer: 20 * 1024 * 1024,
+  });
+  if (result.status !== 0 && !options.allowFailure) {
+    throw new Error(`${command} ${args.join(' ')} failed: ${result.stderr || result.stdout}`);
+  }
+  return result;
+}
+
+function parseS3Uri(uri) {
+  const match = String(uri || '').match(/^s3:\/\/([^/]+)\/?(.*)$/);
+  if (!match) throw new Error(`invalid S3 URI: ${uri}`);
+  return {
+    bucket: match[1],
+    prefix: match[2].replace(/^\/+|\/+$/g, ''),
+  };
 }
 
 function loadInventory(file) {
@@ -74,6 +118,8 @@ function loadInventory(file) {
 }
 
 function discoverGames(args) {
+  if (args.gamesS3Uri) return discoverS3Games(args);
+
   const entries = fs.readdirSync(args.gamesDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
@@ -105,6 +151,64 @@ function discoverGames(args) {
   return { games, skipped };
 }
 
+function discoverS3Games(args) {
+  const { bucket, prefix } = parseS3Uri(args.gamesS3Uri);
+  const normalizedPrefix = prefix ? `${prefix}/` : '';
+  const result = runCapture('aws', [
+    's3api',
+    'list-objects-v2',
+    '--bucket',
+    bucket,
+    '--prefix',
+    normalizedPrefix,
+    '--delimiter',
+    '/',
+    '--output',
+    'json',
+  ]);
+  const payload = JSON.parse(result.stdout || '{}');
+  const requested = args.games ? new Set(args.games) : null;
+  const entries = (payload.CommonPrefixes || [])
+    .map((item) => item.Prefix)
+    .filter(Boolean)
+    .map((item) => item.slice(normalizedPrefix.length).replace(/\/+$/g, ''))
+    .filter(Boolean)
+    .sort();
+
+  const games = [];
+  const skipped = [];
+  for (const name of entries) {
+    if (requested && !requested.has(name)) continue;
+    if (name.startsWith('.')) {
+      skipped.push({ name, reason: 'hidden S3 prefix' });
+      continue;
+    }
+    const startUri = `${args.gamesS3Uri.replace(/\/+$/, '')}/${name}/start.sh`;
+    const start = runCapture('aws', ['s3', 'cp', startUri, '-'], { allowFailure: true });
+    if (start.status !== 0) {
+      skipped.push({ name, reason: 'missing start.sh' });
+      continue;
+    }
+    const browserGame =
+      start.stdout.includes('http.server') ||
+      start.stdout.includes('localhost') ||
+      start.stdout.includes('127.0.0.1');
+    if (!browserGame && !args.includeNonbrowser) {
+      skipped.push({ name, reason: 'not an HTTP browser start script' });
+      continue;
+    }
+    games.push(name);
+  }
+
+  if (requested) {
+    for (const name of requested) {
+      if (!entries.includes(name)) skipped.push({ name, reason: 'not found in S3 prefix' });
+    }
+  }
+
+  return { games, skipped };
+}
+
 function buildJobs(args, games) {
   const jobs = [];
   const addJob = (game, attempt) => {
@@ -116,6 +220,7 @@ function buildJobs(args, games) {
       attempt,
       runwaveRepo: args.runwaveRepo,
       runwaveRef: args.runwaveRef,
+      playtestDurationMs: args.playtestDurationMs,
       s3Uri: `${args.s3Uri.replace(/\/+$/, '')}/${args.runId}/${game}/attempt-${String(attempt).padStart(3, '0')}`,
     });
   };
@@ -241,8 +346,13 @@ async function main() {
   }
   console.log(`Run id: ${args.runId}`);
   console.log(`Servers: ${servers.map((server) => `${server.name}=${server.ip}`).join(', ')}`);
+  if (args.gamesS3Uri) console.log(`Game source: ${args.gamesS3Uri}`);
+  else console.log(`Game source: ${args.gamesDir}`);
   console.log(`Games: ${games.join(', ')}`);
-  console.log(`Jobs: ${jobs.length}; concurrency per server: ${args.concurrencyPerServer}; fleet capacity: ${capacity}`);
+  console.log(
+    `Jobs: ${jobs.length}; concurrency per server: ${args.concurrencyPerServer}; ` +
+    `fleet capacity: ${capacity}; playtest duration: ${args.playtestDurationMs}ms`
+  );
   if (args.dryRun) {
     let serverIndex = 0;
     const ports = new Map(servers.map((server) => [server.name, args.basePort]));

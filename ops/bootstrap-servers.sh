@@ -5,13 +5,14 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INVENTORY="${1:-}"
 SSH_KEY="${SSH_KEY:-${HOME}/.ssh/id_louka}"
 SSH_USER="${SSH_USER:-root}"
+GAMES_S3_URI="${GAMES_S3_URI:-s3://pw-cruft/games}"
 GAMES_DIR="${GAMES_DIR:-${ROOT_DIR}/cruft/games}"
 
 if [ -z "${INVENTORY}" ] || [ ! -f "${INVENTORY}" ]; then
   echo "Usage: ops/bootstrap-servers.sh ops/inventory/<batch>.json" >&2
   exit 1
 fi
-if [ ! -d "${GAMES_DIR}" ]; then
+if [ -z "${GAMES_S3_URI}" ] && [ ! -d "${GAMES_DIR}" ]; then
   echo "Missing games directory: ${GAMES_DIR}" >&2
   exit 1
 fi
@@ -27,17 +28,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
-games_tar="${tmp_dir}/games.tar.gz"
 env_file="${tmp_dir}/runwave-runner.env"
 
-echo "Packing games from ${GAMES_DIR}"
-tar \
-  --exclude='.git' \
-  --exclude='node_modules' \
-  --exclude='Library' \
-  --exclude='Temp' \
-  -czf "${games_tar}" \
-  -C "${GAMES_DIR}" .
+if [ -z "${GAMES_S3_URI}" ]; then
+  games_tar="${tmp_dir}/games.tar.gz"
+  echo "Packing games from ${GAMES_DIR}"
+  tar \
+    --exclude='.git' \
+    --exclude='node_modules' \
+    --exclude='Library' \
+    --exclude='Temp' \
+    -czf "${games_tar}" \
+    -C "${GAMES_DIR}" .
+else
+  games_tar=""
+  echo "Remote servers will sync games from ${GAMES_S3_URI}"
+fi
 
 awk -F':[[:space:]]*' '
   /^[[:space:]]*#/ { next }
@@ -64,14 +70,16 @@ echo "Bootstrapping ${server_count} servers"
 jq -r '.servers[] | [.name, .ipv4] | @tsv' "${INVENTORY}" | while IFS=$'\t' read -r name ip; do
   echo "Bootstrapping ${name} (${ip})"
   ssh_opts=(-i "${SSH_KEY}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=15)
-  scp "${ssh_opts[@]}" \
+  scp_files=(
     "${ROOT_DIR}/ops/remote/bootstrap-runner.sh" \
     "${ROOT_DIR}/ops/remote/run-playtest.js" \
-    "${games_tar}" \
     "${env_file}" \
-    "${SSH_USER}@${ip}:/tmp/"
-  ssh "${ssh_opts[@]}" "${SSH_USER}@${ip}" "bash /tmp/bootstrap-runner.sh"
+  )
+  if [ -n "${games_tar}" ]; then
+    scp_files+=("${games_tar}")
+  fi
+  scp "${ssh_opts[@]}" "${scp_files[@]}" "${SSH_USER}@${ip}:/tmp/"
+  ssh "${ssh_opts[@]}" "${SSH_USER}@${ip}" "GAMES_S3_URI='${GAMES_S3_URI}' bash /tmp/bootstrap-runner.sh"
 done
 
 echo "Bootstrap complete"
-

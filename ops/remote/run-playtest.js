@@ -42,6 +42,13 @@ function safeName(value) {
     .slice(0, 120);
 }
 
+function runnerPaths() {
+  return {
+    gamesRoot: process.env.RUNWAVE_GAMES_ROOT || '/opt/runwave/games',
+    jobsRoot: process.env.RUNWAVE_JOBS_ROOT || '/var/lib/runwave/jobs',
+  };
+}
+
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     log('command.start', { command, args, cwd: options.cwd });
@@ -128,8 +135,35 @@ async function checkoutRunwave(job, runwaveDir) {
   await run('npx', ['playwright', 'install', 'chromium'], { cwd: runwaveDir });
 }
 
-function defaultPlan() {
-  return [
+function defaultPlan(durationMs = 120000) {
+  const totalDuration = Math.max(5000, Number(durationMs) || 120000);
+  const focusDuration = Math.min(2500, Math.max(1000, Math.round(totalDuration * 0.02)));
+  const remaining = Math.max(1000, totalDuration - focusDuration);
+  const segmentMs = 10000;
+  const patterns = [
+    [
+      { from: 0, to: 6200, key: 'ArrowRight' },
+      { from: 1200, to: 7600, key: 'ArrowUp' },
+      { from: 8200, to: 8450, key: 'Space' },
+    ],
+    [
+      { from: 0, to: 5200, key: 'ArrowLeft' },
+      { from: 2500, to: 9200, key: 'ArrowDown' },
+      { from: 5600, to: 5750, key: 'Enter' },
+    ],
+    [
+      { from: 0, to: 6500, key: 'KeyW' },
+      { from: 1000, to: 8200, key: 'KeyD' },
+      { from: 7800, to: 8050, key: 'Space' },
+    ],
+    [
+      { from: 0, to: 6000, key: 'KeyA' },
+      { from: 2600, to: 8600, key: 'KeyS' },
+      { from: 7000, to: 7250, key: 'Space' },
+    ],
+  ];
+
+  const actions = [
     {
       action: 'screenshot',
       action_name: 'screen-001-open',
@@ -144,46 +178,44 @@ function defaultPlan() {
         { from: 250, to: 350, key: 'Space' },
         { from: 500, to: 650, key: 'Enter' },
       ],
-      captures: [900],
-    },
-    {
-      action: 'step',
-      action_name: 'step-003-right-up',
-      duration: 2500,
-      commands: [
-        { from: 0, to: 1800, key: 'ArrowRight' },
-        { from: 400, to: 2300, key: 'ArrowUp' },
-      ],
-      captures: [1250, 2500],
-    },
-    {
-      action: 'step',
-      action_name: 'step-004-left-down',
-      duration: 2500,
-      commands: [
-        { from: 0, to: 1600, key: 'ArrowLeft' },
-        { from: 700, to: 2400, key: 'ArrowDown' },
-      ],
-      captures: [1250, 2500],
-    },
-    {
-      action: 'step',
-      action_name: 'step-005-wasd-action',
-      duration: 3000,
-      commands: [
-        { from: 0, to: 1200, key: 'KeyW' },
-        { from: 600, to: 2200, key: 'KeyD' },
-        { from: 1600, to: 2900, key: 'KeyA' },
-        { from: 2300, to: 2450, key: 'Space' },
-      ],
-      captures: [1500, 3000],
-    },
-    {
-      action: 'screenshot',
-      action_name: 'screen-006-final',
-      name: 'final',
+      duration: focusDuration,
+      captures: [focusDuration],
+      autoCaptures: false,
     },
   ];
+
+  let elapsed = 0;
+  let segmentIndex = 0;
+  while (elapsed < remaining) {
+    const duration = Math.min(segmentMs, remaining - elapsed);
+    const pattern = patterns[segmentIndex % patterns.length]
+      .map((command) => ({
+        ...command,
+        to: Math.min(command.to, Math.max(0, duration - 200)),
+      }))
+      .filter((command) => command.to > command.from);
+    actions.push({
+      action: 'step',
+      action_name: `step-${String(segmentIndex + 3).padStart(3, '0')}-play`,
+      duration,
+      commands: pattern,
+      clicks: segmentIndex % 3 === 2 ? [{ at: Math.min(500, duration), x: 640, y: 360 }] : [],
+      view_moves: segmentIndex % 4 === 1 ? [{ from: 800, to: Math.min(2500, duration), dx: 180, dy: -35, steps: 12 }] : [],
+      captures: [duration],
+      autoCaptures: false,
+    });
+    elapsed += duration;
+    segmentIndex += 1;
+  }
+
+  actions.push(
+    {
+      action: 'screenshot',
+      action_name: 'screen-final',
+      name: 'final',
+    },
+  );
+  return actions;
 }
 
 async function runRunwave(job, dirs, url) {
@@ -210,7 +242,7 @@ async function runRunwave(job, dirs, url) {
   };
 
   await run(base[0], [base[1], JSON.stringify(start)], { cwd: dirs.workspace, env });
-  const plan = Array.isArray(job.actionPlan) && job.actionPlan.length ? job.actionPlan : defaultPlan();
+  const plan = Array.isArray(job.actionPlan) && job.actionPlan.length ? job.actionPlan : defaultPlan(job.playtestDurationMs);
   for (const action of plan) {
     await run(base[0], [base[1], JSON.stringify(action)], { cwd: dirs.workspace, env });
   }
@@ -236,9 +268,10 @@ async function main() {
 
   const job = JSON.parse(fs.readFileSync(args.job, 'utf8'));
   const envFile = loadEnvFile('/etc/runwave-runner.env');
+  const runner = runnerPaths();
   const jobId = safeName(job.jobId || `${job.game}-attempt-${job.attempt || 1}-${Date.now()}`);
   const port = Number(job.port || 8800 + Math.floor(Math.random() * 800));
-  const root = path.join('/var/lib/runwave/jobs', jobId);
+  const root = path.join(runner.jobsRoot, jobId);
   const dirs = {
     root,
     workspace: path.join(root, 'workspace'),
@@ -257,7 +290,7 @@ async function main() {
   fs.writeFileSync(path.join(root, 'job.json'), JSON.stringify(job, null, 2));
   fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
 
-  const gameDir = path.join('/opt/runwave/games', job.game);
+  const gameDir = path.join(runner.gamesRoot, job.game);
   if (!fs.existsSync(path.join(gameDir, 'start.sh'))) {
     throw new Error(`game has no start.sh: ${job.game}`);
   }
