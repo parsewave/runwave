@@ -28,6 +28,19 @@ The installed CLI is:
 runwave '<json>'
 ```
 
+Use verbose mode to create profiling logs:
+
+```sh
+runwave -v '{"action":"start","action_name":"run-start","file":"game/index.html"}'
+runwave -v '{"action":"state","action_name":"turn-001-state"}'
+```
+
+Verbose mode writes newline-delimited JSON timing events to
+`<sessionDir>/runwave-verbose.ndjson` and includes that path as `verboseLog` in
+verbose command responses. The log records CLI, daemon, browser, output writing,
+state, screenshot, navigation, step timeline, input-event, capture, and cleanup
+timings.
+
 ## Workspace And Outputs
 
 Relative `file`, `outputRoot`, and `outDir` paths resolve from:

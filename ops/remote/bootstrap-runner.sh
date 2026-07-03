@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+need_node_install=0
+if ! command -v node >/dev/null 2>&1; then
+  need_node_install=1
+else
+  major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+  if [ "${major}" -lt 20 ]; then
+    need_node_install=1
+  fi
+fi
+
+apt-get update
+apt-get install -y ca-certificates curl gnupg git jq python3 python3-pip rsync unzip awscli
+
+if [ "${need_node_install}" -eq 1 ]; then
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  apt-get install -y nodejs
+fi
+
+install -d -m 0755 /opt/runwave/bin /opt/runwave/games /var/lib/runwave/jobs /var/log/runwave
+rm -rf /opt/runwave/games/*
+tar -xzf /tmp/games.tar.gz -C /opt/runwave/games
+
+install -m 0755 /tmp/run-playtest.js /opt/runwave/bin/run-playtest.js
+install -m 0600 /tmp/runwave-runner.env /etc/runwave-runner.env
+
+# Install browser system dependencies once; each job installs the exact runwave
+# package and browser revision requested by that runwave checkout.
+npx -y playwright@1.61.1 install-deps chromium
+
+node --version
+npm --version
+aws --version
+echo "Installed games:"
+find /opt/runwave/games -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
+
+echo "Installing per-game npm dependencies:"
+while IFS= read -r package_json; do
+  game_dir="$(dirname "${package_json}")"
+  echo "npm install in ${game_dir}"
+  npm install --prefix "${game_dir}"
+done < <(find /opt/runwave/games -mindepth 2 -maxdepth 2 -name package.json | sort)
