@@ -41,9 +41,11 @@ test('normalizes model sequences into harness steps', () => {
   const viewMove = sequence.actions.find((action) => action.type === 'view_move');
   assert.equal(click.x, 500);
   assert.equal(click.y, 150);
+  assert.equal(click.end, 100);
   assert.deepEqual(drag, {
     type: 'drag',
     start: 100,
+    end: 150,
     from: { x: 200, y: 150 },
     to: { x: 400, y: 150 },
     button: 'left',
@@ -74,14 +76,18 @@ test('normalizes grid-cell model actions into concrete pointer events', () => {
   assert.equal(clicks.length, 11);
   assert.ok(clicks.every((click) => !Object.hasOwn(click, 'clickMode')));
   assert.equal(clicks[0].cells[0], 9);
+  assert.equal(clicks[0].end, 150);
   assert.ok(clicks[0].x >= 100 && clicks[0].x <= 199);
   assert.ok(clicks[0].y >= 100 && clicks[0].y <= 199);
   assert.deepEqual(clicks.slice(1).map((click) => click.start), [200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100]);
-  assert.ok(clicks.slice(1).every((click) => click.x >= 200 && click.x <= 399));
-  assert.ok(clicks.slice(1).every((click) => click.y >= 200 && click.y <= 299));
+  assert.deepEqual(clicks.slice(1).map((click) => click.end), [250, 350, 450, 550, 650, 750, 850, 950, 1050, 1150]);
+  assert.ok(clicks.slice(1).every((click) => click.x >= 200 && click.x <= 400));
+  assert.ok(clicks.slice(1).every((click) => click.y >= 200 && click.y <= 300));
   assert.deepEqual(drag.from.cells, [34]);
   assert.deepEqual(drag.to.cells, [35]);
+  assert.equal(drag.end, 350);
   assert.deepEqual(cursorMove.cells, [27]);
+  assert.equal(cursorMove.end, 450);
 
   const step = normalizeStep({ actions: sequence.actions }, { viewport: { width: 800, height: 800 } }, 1);
   assert.equal(step.clicks.length, 11);
@@ -102,6 +108,23 @@ test('rejects model sequence fields outside the canonical schema', () => {
   );
 });
 
+test('drops model actions with invalid short-action timing', () => {
+  const sequence = normalizeSequence(
+    {
+      actions: [
+        { type: 'click', start: 0, end: 500, x: 10, y: 10 },
+        { type: 'drag', start: 0, end: 2501, from: { x: 0, y: 0 }, to: { x: 10, y: 10 } },
+        { type: 'cursor_move', start: 0, end: 2501, to: { x: 10, y: 10 } },
+        { type: 'key', start: 0, end: 5000, key: 'ArrowRight' },
+      ],
+    },
+    { viewport: { width: 800, height: 800 } }
+  );
+
+  assert.deepEqual(sequence.actions.map((action) => action.type), ['key']);
+  assert.equal(sequence.durationMs, 5000);
+});
+
 test('normalizes harness grid-cell steps into concrete pointer events', () => {
   const step = normalizeStep(
     {
@@ -116,8 +139,10 @@ test('normalizes harness grid-cell steps into concrete pointer events', () => {
     1
   );
 
+  assert.equal(step.duration, 450);
   assert.equal(step.clicks.length, 4);
   assert.deepEqual(step.clicks.slice(1).map((click) => click.start), [200, 300, 400]);
+  assert.deepEqual(step.clicks.slice(1).map((click) => click.end), [250, 350, 450]);
   assert.ok(step.clicks[0].x >= 0 && step.clicks[0].x <= 99);
   assert.ok(step.clicks[0].y >= 0 && step.clicks[0].y <= 99);
   assert.ok(step.clicks.slice(1).every((click) => click.x >= 700 && click.x <= 799));
@@ -140,8 +165,8 @@ test('infers harness duration from action timing fields only', () => {
     1
   );
 
-  assert.equal(step.duration, 1000);
-  assert.deepEqual(step.captures, [1000]);
+  assert.equal(step.duration, 1050);
+  assert.deepEqual(step.captures, [1000, 1050]);
   assert.equal(step.drags.length, 2);
   assert.equal(step.cursorMoves.length, 1);
 });
@@ -159,8 +184,24 @@ test('infers harness duration from key ends and multi-click intervals', () => {
   );
 
   assert.equal(keyStep.duration, 700);
-  assert.equal(multiClickStep.duration, 650);
+  assert.equal(multiClickStep.duration, 700);
   assert.deepEqual(multiClickStep.clicks.map((click) => click.start), [200, 350, 500, 650]);
+  assert.deepEqual(multiClickStep.clicks.map((click) => click.end), [250, 400, 550, 700]);
+});
+
+test('rejects harness short actions with impossible end timings', () => {
+  assert.throws(
+    () => normalizeStep({ actions: [{ type: 'click', start: 0, end: 500, x: 1, y: 1 }] }, { viewport: { width: 800, height: 800 } }, 1),
+    /click action duration exceeds 100ms/
+  );
+  assert.throws(
+    () => normalizeStep(
+      { actions: [{ type: 'drag', start: 0, end: 2501, from: { x: 1, y: 1 }, to: { x: 2, y: 2 } }] },
+      { viewport: { width: 800, height: 800 } },
+      1
+    ),
+    /drag action duration exceeds 2000ms/
+  );
 });
 
 test('rejects harness step fields outside the canonical schema', () => {
@@ -233,6 +274,7 @@ test('agent playtest loop calls model and executes returned sequence', async () 
   assert.deepEqual(harnessSteps[0].captures, [500]);
   assert.equal(harnessSteps[0].actions.find((action) => action.type === 'key').key, 'Enter');
   assert.equal(harnessSteps[0].actions.find((action) => action.type === 'drag').mode, 'mouse');
+  assert.equal(harnessSteps[0].actions.find((action) => action.type === 'drag').end, 100);
   assert.equal(result.history[0].result.ok, true);
   assert.equal(result.history[0].result.screenshot, afterScreenshot);
   assert.equal(result.history[0].result.screenshotChanged, true);

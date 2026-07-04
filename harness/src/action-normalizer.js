@@ -19,6 +19,13 @@ const ACTION_FIELDS = {
   cursor_move: new Set(['type', 'start', 'end', 'to', 'x', 'y', ...CELL_FIELDS, 'steps']),
   view_move: new Set(['type', 'start', 'end', 'dx', 'dy', 'steps']),
 };
+const DEFAULT_IMPLICIT_END_MS = 50;
+const DEFAULT_MULTI_CLICK_INTERVAL_MS = 100;
+const MAX_ACTION_SPAN_MS = {
+  click: 100,
+  drag: 2000,
+  cursor_move: 2000,
+};
 
 function assertAllowedFields(object, allowedFields, label) {
   if (!object || typeof object !== 'object' || Array.isArray(object)) return;
@@ -67,46 +74,76 @@ function splitKeyChord(key) {
     .filter(Boolean);
 }
 
-function timingStart(action, fallback = 0) {
-  return readNumber(action.start, fallback);
-}
-
-function timingEnd(action, fallback = null) {
-  return readNumber(action.end, fallback);
-}
-
 function actionEnd(action) {
   const end = finiteNumber(action.end, null);
   if (end !== null) return end;
-  return finiteNumber(action.start, 0);
+  const start = finiteNumber(action.start, 0);
+  return start + DEFAULT_IMPLICIT_END_MS;
 }
 
-function actionStartEnd(action) {
+function implicitEnd(action, type, start) {
+  if (type === 'multi_click') {
+    const count = Math.max(1, Math.round(finiteNumber(action.count, 10)));
+    const intervalMs = finiteNumber(action.intervalMs, DEFAULT_MULTI_CLICK_INTERVAL_MS);
+    if (Number.isFinite(intervalMs) && intervalMs > 0) {
+      return start + (count - 1) * intervalMs + DEFAULT_IMPLICIT_END_MS;
+    }
+  }
+  return start + DEFAULT_IMPLICIT_END_MS;
+}
+
+function invalidTiming(message, action, options) {
+  if (options.strict) throw new Error(`${message}: ${JSON.stringify(action)}`);
+  return null;
+}
+
+function normalizeTiming(action, type, duration, options) {
   const start = finiteNumber(action.start, null);
-  const end = finiteNumber(action.end, null);
-  if (end !== null) return end;
-  return start;
+  if (!Number.isFinite(start) || start < 0) {
+    return invalidTiming(`invalid ${type} start time`, action, options);
+  }
+
+  const explicitEnd = finiteNumber(action.end, null);
+  let end = explicitEnd === null ? implicitEnd(action, type, start) : explicitEnd;
+  if (!Number.isFinite(end) || end <= start) {
+    return invalidTiming(`invalid ${type} interval`, action, options);
+  }
+
+  const maxSpan = MAX_ACTION_SPAN_MS[type];
+  if (Number.isFinite(maxSpan) && end - start > maxSpan) {
+    return invalidTiming(`${type} action duration exceeds ${maxSpan}ms`, action, options);
+  }
+
+  if (options.strict && Number.isFinite(duration) && end > duration) {
+    return invalidTiming(`${type} action ends after sequence duration`, action, options);
+  }
+
+  const optionMaxDurationMs = Number(options.maxDurationMs);
+  const maxDurationMs = Number.isFinite(optionMaxDurationMs)
+    ? optionMaxDurationMs
+    : Number.isFinite(duration)
+      ? duration
+      : Number.MAX_SAFE_INTEGER;
+  const normalizedStart = options.strict ? start : clamp(start, 0, maxDurationMs);
+  const normalizedEnd = options.strict ? end : clamp(end, normalizedStart, maxDurationMs);
+  if (!Number.isFinite(normalizedEnd) || normalizedEnd <= normalizedStart) {
+    return invalidTiming(`invalid ${type} normalized interval`, action, options);
+  }
+
+  return {
+    start: options.roundTimes ? Math.round(normalizedStart) : normalizedStart,
+    end: options.roundTimes ? Math.round(normalizedEnd) : normalizedEnd,
+  };
 }
 
 function rawActionEnd(action) {
   if (!action || typeof action !== 'object') return null;
   const type = actionType(action);
-
-  if (type === 'multi_click') {
-    const start = finiteNumber(action.start, null);
-    if (start === null || start < 0) return null;
-    const count = Math.max(1, Math.round(finiteNumber(action.count, 10)));
-    const intervalMs = finiteNumber(action.intervalMs, 100);
-    if (Number.isFinite(intervalMs) && intervalMs > 0) return start + (count - 1) * intervalMs;
-    return start;
-  }
-
-  if (type === 'key' || type === 'view_move' || type === 'click' || type === 'drag' || type === 'cursor_move') {
-    const end = actionStartEnd(action);
-    return Number.isFinite(end) && end >= 0 ? end : null;
-  }
-
-  return null;
+  if (!ACTION_FIELDS[type]) return null;
+  const start = finiteNumber(action.start, null);
+  if (!Number.isFinite(start) || start < 0) return null;
+  const end = finiteNumber(action.end, null);
+  return end !== null ? end : implicitEnd(action, type, start);
 }
 
 function inferDurationFromRawActions(actions) {
@@ -171,11 +208,7 @@ function normalizePointerActionPoint(action, label, options) {
   return normalizePoint(pickPointerFields(action), label, options);
 }
 
-function validStart(start, duration) {
-  return Number.isFinite(start) && start >= 0 && start <= duration;
-}
-
-function normalizeKeyAction(action, options) {
+function normalizeKeyAction(action, duration, options) {
   const keyName = action.key;
   const key = (options.aliases || {})[keyName] || keyName;
   if (!key) {
@@ -183,20 +216,15 @@ function normalizeKeyAction(action, options) {
     return [];
   }
 
-  const start = options.strict ? timingStart(action) : clamp(finiteNumber(action.start, 0), 0, options.maxDurationMs);
-  const end = options.strict ? timingEnd(action, start) : clamp(finiteNumber(action.end, start), start, options.maxDurationMs);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) {
-    if (options.strict) throw new Error(`invalid key action interval: ${JSON.stringify(action)}`);
-    return [];
-  }
-  if (!options.strict && end <= start) return [];
+  const timing = normalizeTiming(action, 'key', duration, options);
+  if (!timing) return [];
 
   const parts = options.splitKeyChords ? splitKeyChord(key) : [key];
   return parts.map((part) => {
     const normalized = {
       type: 'key',
-      start: options.roundTimes ? Math.round(start) : start,
-      end: options.roundTimes ? Math.round(end) : end,
+      start: timing.start,
+      end: timing.end,
     };
     if (options.includeKeyName) normalized.keyName = keyName;
     normalized.key = part;
@@ -205,17 +233,16 @@ function normalizeKeyAction(action, options) {
 }
 
 function normalizeClickAction(click, duration, options, forceMulti = false) {
-  const start = options.strict ? timingStart(click) : clamp(finiteNumber(click.start, 0), 0, options.maxDurationMs);
-  if (options.strict && !validStart(start, duration)) {
-    throw new Error(`invalid click start time: ${JSON.stringify(click)}`);
-  }
+  const timing = normalizeTiming(click, forceMulti ? 'multi_click' : 'click', duration, options);
+  if (!timing) return [];
 
   const point = normalizePointerActionPoint(click, 'click', options);
   if (!point) return [];
 
   const base = {
     type: 'click',
-    start: options.roundTimes ? Math.round(start) : start,
+    start: timing.start,
+    end: timing.end,
     x: point.x,
     y: point.y,
     button: click.button || 'left',
@@ -227,12 +254,14 @@ function normalizeClickAction(click, duration, options, forceMulti = false) {
 
   if (!forceMulti) return [base];
 
-  const times = clickBurstTimes(start, duration, finiteNumber(click.count, 10), finiteNumber(click.intervalMs, 100));
+  const times = clickBurstTimes(timing.start, timing.end, finiteNumber(click.count, 10), finiteNumber(click.intervalMs, DEFAULT_MULTI_CLICK_INTERVAL_MS));
   return times.map((clickStart) => {
     const nextPoint = normalizePointerActionPoint(click, 'click', options) || point;
+    const clickEnd = Math.min(timing.end, clickStart + DEFAULT_IMPLICIT_END_MS);
     const action = {
       type: 'click',
       start: clickStart,
+      end: options.roundTimes ? Math.round(clickEnd) : clickEnd,
       x: nextPoint.x,
       y: nextPoint.y,
       button: base.button,
@@ -246,10 +275,8 @@ function normalizeClickAction(click, duration, options, forceMulti = false) {
 }
 
 function normalizeDragAction(drag, duration, options) {
-  const start = options.strict ? timingStart(drag) : clamp(finiteNumber(drag.start, 0), 0, options.maxDurationMs);
-  if (options.strict && !validStart(start, duration)) {
-    throw new Error(`invalid drag start time: ${JSON.stringify(drag)}`);
-  }
+  const timing = normalizeTiming(drag, 'drag', duration, options);
+  if (!timing) return [];
 
   const from = normalizePoint(drag.from || { cells: drag.from_cells }, 'drag.from', options);
   const to = normalizePoint(drag.to || { cells: drag.to_cells }, 'drag.to', options);
@@ -257,7 +284,8 @@ function normalizeDragAction(drag, duration, options) {
 
   return [{
     type: 'drag',
-    start: options.roundTimes ? Math.round(start) : start,
+    start: timing.start,
+    end: timing.end,
     from,
     to,
     button: drag.button || 'left',
@@ -267,17 +295,16 @@ function normalizeDragAction(drag, duration, options) {
 }
 
 function normalizeCursorMoveAction(move, duration, options) {
-  const start = options.strict ? timingStart(move) : clamp(finiteNumber(move.start, 0), 0, options.maxDurationMs);
-  if (options.strict && !validStart(start, duration)) {
-    throw new Error(`invalid cursor move start time: ${JSON.stringify(move)}`);
-  }
+  const timing = normalizeTiming(move, 'cursor_move', duration, options);
+  if (!timing) return [];
 
   const point = normalizePoint(move.to || pickPointerFields(move), 'cursor_move.to', options);
   if (!point) return [];
 
   const action = {
     type: 'cursor_move',
-    start: options.roundTimes ? Math.round(start) : start,
+    start: timing.start,
+    end: timing.end,
     to: options.cursorCellsOnTarget ? point : { x: point.x, y: point.y },
     steps: clamp(Math.round(finiteNumber(move.steps, 8)), 1, 80),
   };
@@ -286,25 +313,20 @@ function normalizeCursorMoveAction(move, duration, options) {
 }
 
 function normalizeViewMoveAction(move, duration, options) {
-  const start = options.strict ? timingStart(move) : clamp(finiteNumber(move.start, 0), 0, options.maxDurationMs);
-  const end = options.strict ? timingEnd(move, start) : clamp(finiteNumber(move.end, start), start, options.maxDurationMs);
+  const timing = normalizeTiming(move, 'view_move', duration, options);
+  if (!timing) return [];
   const dx = options.strict ? readNumber(move.dx, 0) : finiteNumber(move.dx, 0);
   const dy = options.strict ? readNumber(move.dy, 0) : finiteNumber(move.dy, 0);
 
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || (options.strict && end > duration)) {
-    if (options.strict) throw new Error(`invalid view move interval: ${JSON.stringify(move)}`);
-    return [];
-  }
   if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) {
     if (options.strict) throw new Error(`view move action requires numeric dx or dy: ${JSON.stringify(move)}`);
     return [];
   }
-  if (!options.strict && end <= start) return [];
 
   return [{
     type: 'view_move',
-    start: options.roundTimes ? Math.round(start) : start,
-    end: options.roundTimes ? Math.round(end) : end,
+    start: timing.start,
+    end: timing.end,
     dx: options.roundPoints ? Math.round(dx) : dx,
     dy: options.roundPoints ? Math.round(dy) : dy,
     steps: clamp(Math.round(finiteNumber(move.steps, 12)), 1, 80),
@@ -318,7 +340,7 @@ function normalizeAction(action, duration, options) {
   }
 
   const type = assertActionFields(action);
-  if (type === 'key') return normalizeKeyAction(action, options);
+  if (type === 'key') return normalizeKeyAction(action, duration, options);
   if (type === 'click') return normalizeClickAction(action, duration, options);
   if (type === 'multi_click') return normalizeClickAction(action, duration, options, true);
   if (type === 'drag') return normalizeDragAction(action, duration, options);
