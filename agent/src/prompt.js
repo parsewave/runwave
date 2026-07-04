@@ -1,5 +1,7 @@
 'use strict';
 
+const { markGridFromConfig } = require('../../harness/src/mark-grid');
+
 function compactPostSequenceResult(result) {
   if (!result || typeof result !== 'object') return '';
   const parts = [];
@@ -149,6 +151,8 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     'KeyD',
   ];
   const warning = repeatedHistoryWarning(history);
+  const grid = markGridFromConfig(job || {});
+  const maxGridCell = grid.rows * grid.cols - 1;
 
   return [
     'You are an agentic browser-game playtester. Your job is to create a useful gameplay video, not to judge the game.',
@@ -161,7 +165,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '- Do not stop early unless the recording already shows enough real gameplay.',
     '',
     `Time remaining: ${secondsLeft}s.`,
-    `Viewport: ${viewport.width}x${viewport.height}. The screenshot has an 8x8 red mark grid labeled 0 through 63, row-major from top-left to bottom-right.`,
+    `Viewport: ${viewport.width}x${viewport.height}. The screenshot has a ${grid.rows}x${grid.cols} red mark grid labeled 0 through ${maxGridCell}, row-major from top-left to bottom-right.`,
     `Available common controls: ${controls.join(', ')}. You may use literal Playwright keys.`,
     '',
     'Sequence guidance:',

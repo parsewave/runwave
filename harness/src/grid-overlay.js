@@ -1,5 +1,6 @@
 const fs = require('fs');
 const { PNG } = require('pngjs');
+const { DEFAULT_MARK_GRID } = require('./mark-grid');
 
 const FONT = {
   '0': ['111', '101', '101', '101', '111'],
@@ -117,12 +118,13 @@ function drawCoordinateGridOnScreenshot(file) {
 
 function drawMarkGridOnScreenshot(file, config = {}) {
   const png = PNG.sync.read(fs.readFileSync(file));
-  const rows = Math.max(1, Math.round(Number(config.markGridRows ?? config.gridRows ?? 8)));
-  const cols = Math.max(1, Math.round(Number(config.markGridCols ?? config.gridCols ?? 8)));
+  const rows = Math.max(1, Math.round(Number(config.markGridRows ?? config.gridRows ?? DEFAULT_MARK_GRID.rows)));
+  const cols = Math.max(1, Math.round(Number(config.markGridCols ?? config.gridCols ?? DEFAULT_MARK_GRID.cols)));
   const cellWidth = png.width / cols;
   const cellHeight = png.height / rows;
-  const lineColor = [255, 36, 36, 0.48];
-  const labelBg = [0, 0, 0, 0.68];
+  const dense = Math.min(cellWidth, cellHeight) < 36 || rows * cols > 256;
+  const lineColor = dense ? [255, 36, 36, 0.34] : [255, 36, 36, 0.48];
+  const labelBg = dense ? [0, 0, 0, 0.58] : [0, 0, 0, 0.68];
   const labelText = [255, 255, 255, 0.94];
 
   for (let col = 0; col <= cols; col += 1) {
@@ -136,8 +138,8 @@ function drawMarkGridOnScreenshot(file, config = {}) {
     for (let col = 0; col < cols; col += 1) {
       const id = row * cols + col;
       const text = String(id);
-      const scale = 2;
-      const padding = 4;
+      const scale = dense ? 1 : 2;
+      const padding = dense ? 2 : 4;
       const labelWidth = textWidth(text, scale) + padding * 2;
       const labelHeight = 5 * scale + padding * 2;
       const x = Math.round(col * cellWidth + (cellWidth - labelWidth) / 2);

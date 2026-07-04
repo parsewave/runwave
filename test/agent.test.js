@@ -67,7 +67,7 @@ test('normalizes grid-cell model actions into concrete pointer events', () => {
         { type: 'cursor_move', start: 400, cells: [27] },
       ],
     },
-    { viewport: { width: 800, height: 800 } }
+    { viewport: { width: 800, height: 800 }, config: { markGridRows: 8, markGridCols: 8 } }
   );
 
   const clicks = sequence.actions.filter((action) => action.type === 'click');
@@ -135,7 +135,7 @@ test('normalizes harness grid-cell steps into concrete pointer events', () => {
         { type: 'cursor_move', start: 400, cells: [7] },
       ],
     },
-    { viewport: { width: 800, height: 800 } },
+    { viewport: { width: 800, height: 800 }, markGridRows: 8, markGridCols: 8 },
     1
   );
 
@@ -187,6 +187,18 @@ test('infers harness duration from key ends and multi-click intervals', () => {
   assert.equal(multiClickStep.duration, 700);
   assert.deepEqual(multiClickStep.clicks.map((click) => click.start), [200, 350, 500, 650]);
   assert.deepEqual(multiClickStep.clicks.map((click) => click.end), [250, 400, 550, 700]);
+});
+
+test('default mark grid is dense enough for fine pointer targets', () => {
+  const sequence = normalizeSequence(
+    { actions: [{ type: 'click', start: 0, cells: [575] }] },
+    { viewport: { width: 240, height: 240 } }
+  );
+  const click = sequence.actions[0];
+
+  assert.deepEqual(click.cells, [575]);
+  assert.ok(click.x >= 230 && click.x <= 239);
+  assert.ok(click.y >= 230 && click.y <= 239);
 });
 
 test('rejects harness short actions with impossible end timings', () => {
@@ -458,7 +470,8 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.match(prompt, /"type": "drag"/);
   assert.match(prompt, /Single Player/);
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
-  assert.match(prompt, /8x8 red mark grid/);
+  assert.match(prompt, /24x24 red mark grid/);
+  assert.match(prompt, /0 through 575/);
   assert.match(prompt, /"type": "multi_click"/);
   assert.match(prompt, /Each action must have a "type"/);
   assert.match(prompt, /"actions":/);
@@ -468,6 +481,20 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.doesNotMatch(prompt, /duration_ms/);
   assert.doesNotMatch(prompt, /"clicks":/);
   assert.doesNotMatch(prompt, /"multi_clicks":/);
+});
+
+test('playtester prompt describes custom mark grid dimensions', () => {
+  const prompt = buildPlaytesterPrompt({
+    job: { markGridRows: 12, markGridCols: 10 },
+    elapsedMs: 0,
+    maxMs: 120000,
+    viewport: { width: 1000, height: 600 },
+    state: {},
+    history: [],
+  });
+
+  assert.match(prompt, /12x10 red mark grid/);
+  assert.match(prompt, /0 through 119/);
 });
 
 test('playtester prompt warns when recent sequences repeat a control cycle up to 5 steps', () => {

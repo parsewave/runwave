@@ -95,6 +95,7 @@ async function decideNextSequence({ job, screenshot, state, history, elapsedMs, 
   return {
     sequence: normalizeSequence(result.json, {
       viewport,
+      config: job,
       maxDurationMs: Number(job.agentMaxActionMs || 8000),
     }),
     model: result.model,
