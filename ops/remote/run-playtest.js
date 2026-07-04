@@ -6,6 +6,9 @@ const http = require('http');
 const path = require('path');
 const { spawn } = require('child_process');
 
+const DEFAULT_PROCESS_STOP_WAIT_MS = 5000;
+const DEFAULT_PROCESS_KILL_WAIT_MS = 5000;
+
 function parseArgs(argv) {
   const out = {};
   for (let i = 2; i < argv.length; i += 1) {
@@ -91,11 +94,78 @@ function spawnLong(command, args, options = {}) {
     cwd: options.cwd,
     env: options.env || process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: options.detached !== false,
   });
   child.stdout.on('data', (chunk) => process.stdout.write(chunk));
   child.stderr.on('data', (chunk) => process.stderr.write(chunk));
   child.on('close', (code) => log('process.end', { command, code }));
   return child;
+}
+
+function processHasClosed(child) {
+  return Boolean(child && (child.exitCode !== null || child.signalCode !== null));
+}
+
+function signalLongProcess(child, signal, options = {}) {
+  if (!child || !child.pid) return false;
+  const kill = options.kill || process.kill;
+  const platform = options.platform || process.platform;
+  const target = platform === 'win32' ? child.pid : -child.pid;
+  try {
+    kill(target, signal);
+    return true;
+  } catch (error) {
+    if (error && error.code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+function waitForProcessClose(child, timeoutMs) {
+  if (!child || processHasClosed(child)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let timer = null;
+    const done = (closed) => {
+      if (timer) clearTimeout(timer);
+      child.off('close', onClose);
+      resolve(closed);
+    };
+    const onClose = () => done(true);
+    child.once('close', onClose);
+    timer = setTimeout(() => done(processHasClosed(child)), Math.max(0, timeoutMs));
+  });
+}
+
+async function stopLongProcess(child, options = {}) {
+  if (!child) return { stopped: false, reason: 'no-process' };
+  if (processHasClosed(child)) return { stopped: true, reason: 'already-closed', pid: child.pid };
+
+  const label = options.label || 'process';
+  const termWaitMs = Math.max(0, Number(options.termWaitMs ?? DEFAULT_PROCESS_STOP_WAIT_MS));
+  const killWaitMs = Math.max(0, Number(options.killWaitMs ?? DEFAULT_PROCESS_KILL_WAIT_MS));
+  const writeLog = options.log || log;
+  writeLog('process.stop.start', { label, pid: child.pid, termWaitMs, killWaitMs });
+
+  const termSent = signalLongProcess(child, 'SIGTERM', options);
+  if (!termSent) {
+    writeLog('process.stop.not_running', { label, pid: child.pid, signal: 'SIGTERM' });
+    return { stopped: true, reason: 'not-running', pid: child.pid };
+  }
+
+  if (await waitForProcessClose(child, termWaitMs)) {
+    writeLog('process.stop.end', { label, pid: child.pid, signal: 'SIGTERM', escalated: false });
+    return { stopped: true, reason: 'terminated', pid: child.pid, signal: 'SIGTERM', escalated: false };
+  }
+
+  writeLog('process.stop.escalate', { label, pid: child.pid, signal: 'SIGKILL' });
+  const killSent = signalLongProcess(child, 'SIGKILL', options);
+  if (!killSent) {
+    writeLog('process.stop.not_running', { label, pid: child.pid, signal: 'SIGKILL' });
+    return { stopped: true, reason: 'not-running-after-term', pid: child.pid, signal: 'SIGTERM', escalated: true };
+  }
+
+  const stopped = await waitForProcessClose(child, killWaitMs);
+  writeLog('process.stop.end', { label, pid: child.pid, signal: 'SIGKILL', escalated: true, stopped });
+  return { stopped, reason: stopped ? 'killed' : 'kill-timeout', pid: child.pid, signal: 'SIGKILL', escalated: true };
 }
 
 function waitForHttp(url, timeoutMs) {
@@ -797,7 +867,16 @@ async function main() {
   } finally {
     summary.finishedAt = new Date().toISOString();
     fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
-    if (gameProcess && !gameProcess.killed) gameProcess.kill('SIGTERM');
+    if (gameProcess) {
+      summary.gameProcessCleanup = await stopLongProcess(gameProcess, {
+        label: 'game',
+        termWaitMs: Number(job.processStopWaitMs ?? runnerEnv.RUNWAVE_PROCESS_STOP_WAIT_MS ?? DEFAULT_PROCESS_STOP_WAIT_MS),
+        killWaitMs: Number(job.processKillWaitMs ?? runnerEnv.RUNWAVE_PROCESS_KILL_WAIT_MS ?? DEFAULT_PROCESS_KILL_WAIT_MS),
+      }).catch((error) => {
+        log('process.stop.error', { jobId, error: error.message });
+        return { stopped: false, reason: 'error', error: error.message };
+      });
+    }
     if (job.s3Uri) summary.uploadedTo = job.s3Uri.replace(/\/+$/, '');
     fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
     const uploadedTo = await uploadWorkspace(job, dirs, runnerEnv).catch((error) => {
@@ -824,5 +903,8 @@ if (require.main === module) {
 module.exports = {
   chooseViewportFromProbe,
   normalizeVlmViewportChoice,
+  signalLongProcess,
+  stopLongProcess,
   viewportCandidatesFromProbe,
+  waitForProcessClose,
 };

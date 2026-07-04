@@ -159,6 +159,33 @@ to see if it registers."
   assert.equal(parsed.rationale, 'I will try clicking it again.');
 });
 
+test('recovers JSON by dropping duplicated content after a bare fragment tail', () => {
+  const parsed = parseJsonResponse(`{
+  "summary": "The player ship is on the bottom right.",
+  "duration_ms": 2000,
+  "commands": [
+    {"from": 0, "to": 500, "key": "ArrowLeft"},
+    {"from": 600, "to": 800, "key": "Space"}
+  ],
+  "clicks": [],
+  "drags": [],
+  "view_moves": [],
+  "should_stop": false,
+  "rationale": "Moving left while shooting to clear them."
+clear them."
+[
+  {
+    "summary": "duplicate response",
+    "duration_ms": 2000,
+    "commands": []
+  }
+]`);
+
+  assert.equal(parsed.summary, 'The player ship is on the bottom right.');
+  assert.equal(parsed.commands.length, 2);
+  assert.equal(parsed.rationale, 'Moving left while shooting to clear them.');
+});
+
 test('tags malformed model JSON parse errors', () => {
   assert.throws(
     () => parseJsonResponse('{"summary": "almost valid", "commands": [] trailing'),

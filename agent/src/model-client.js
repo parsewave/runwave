@@ -97,9 +97,14 @@ function stripBareFragmentLines(text) {
   const lines = String(text || '').split(/\r?\n/);
   let changed = false;
   const kept = [];
+  let droppingTail = false;
 
   for (const line of lines) {
     const trimmed = line.trim();
+    if (droppingTail) {
+      changed = true;
+      continue;
+    }
     if (!trimmed) {
       kept.push(line);
       continue;
@@ -113,6 +118,7 @@ function stripBareFragmentLines(text) {
 
     if (!startsLikeJson && /"\s*,?$/.test(trimmed)) {
       changed = true;
+      droppingTail = true;
       continue;
     }
 
@@ -120,6 +126,38 @@ function stripBareFragmentLines(text) {
   }
 
   return changed ? kept.join('\n') : null;
+}
+
+function closeOpenJsonContainers(text) {
+  const stack = [];
+  let inString = false;
+  let escape = false;
+
+  for (const char of String(text || '')) {
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (char === '\\') {
+      escape = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+
+    if (char === '{') stack.push('}');
+    else if (char === '[') stack.push(']');
+    else if (char === '}' || char === ']') {
+      if (!stack.length || stack[stack.length - 1] !== char) return null;
+      stack.pop();
+    }
+  }
+
+  if (inString || !stack.length || stack.length > 4) return null;
+  return `${text}\n${stack.reverse().join('')}`;
 }
 
 function parseJsonCandidate(text) {
@@ -135,6 +173,16 @@ function parseJsonCandidate(text) {
   if (repaired) {
     try {
       const parsed = JSON.parse(repaired);
+      if (parsed && typeof parsed === 'object') return { parsed, error: null };
+    } catch (error) {
+      lastParseError = error;
+    }
+  }
+
+  const closed = repaired ? closeOpenJsonContainers(repaired) : null;
+  if (closed) {
+    try {
+      const parsed = JSON.parse(closed);
       if (parsed && typeof parsed === 'object') return { parsed, error: null };
     } catch (error) {
       lastParseError = error;
