@@ -11,7 +11,7 @@ function resultFileName(stepIndex, actionName) {
 function summarizeActions(step) {
   return [
     ...step.keyActions.map(({ start, end, keyName, key }) => ({ type: 'key', start, end, key: keyName, resolvedKey: key })),
-    ...step.clicks.map(({ type, start, x, y, button, clickCount, cells, clickMode }) => ({
+    ...step.clicks.map(({ type, start, x, y, button, clickCount, cells }) => ({
       type,
       start,
       x,
@@ -19,7 +19,6 @@ function summarizeActions(step) {
       button,
       clickCount,
       ...(cells ? { cells } : {}),
-      ...(clickMode ? { clickMode } : {}),
     })),
     ...step.drags.map(({ type, start, from, to, button, mode, steps }) => ({ type, start, from, to, button, mode, steps })),
     ...step.cursorMoves.map(({ type, start, to, steps }) => ({ type, start, to, steps })),

@@ -72,31 +72,33 @@ test('normalizes grid-cell model actions into concrete pointer events', () => {
   const drag = sequence.actions.find((action) => action.type === 'drag');
   const cursorMove = sequence.actions.find((action) => action.type === 'cursor_move');
   assert.equal(clicks.length, 11);
-  assert.equal(clicks[0].clickMode, 'single');
+  assert.ok(clicks.every((click) => !Object.hasOwn(click, 'clickMode')));
   assert.equal(clicks[0].cells[0], 9);
   assert.ok(clicks[0].x >= 100 && clicks[0].x <= 199);
   assert.ok(clicks[0].y >= 100 && clicks[0].y <= 199);
   assert.deepEqual(clicks.slice(1).map((click) => click.start), [200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100]);
-  assert.ok(clicks.slice(1).every((click) => click.clickMode === 'multi'));
   assert.ok(clicks.slice(1).every((click) => click.x >= 200 && click.x <= 399));
   assert.ok(clicks.slice(1).every((click) => click.y >= 200 && click.y <= 299));
   assert.deepEqual(drag.from.cells, [34]);
   assert.deepEqual(drag.to.cells, [35]);
   assert.deepEqual(cursorMove.cells, [27]);
+
+  const step = normalizeStep({ actions: sequence.actions }, { viewport: { width: 800, height: 800 } }, 1);
+  assert.equal(step.clicks.length, 11);
 });
 
-test('rejects removed model sequence fields', () => {
+test('rejects model sequence fields outside the canonical schema', () => {
   assert.throws(
-    () => normalizeSequence({ duration_ms: 1500, actions: [] }, { viewport: { width: 800, height: 800 } }),
-    /removed field "duration_ms"/
+    () => normalizeSequence({ summary: 'ok', actions: [], extra: true }, { viewport: { width: 800, height: 800 } }),
+    /unknown field "extra"/
   );
   assert.throws(
-    () => normalizeSequence({ commands: [{ from: 0, to: 100, key: 'Enter' }] }, { viewport: { width: 800, height: 800 } }),
-    /removed field "commands"/
+    () => normalizeSequence({ actions: [{ type: 'key', start: 0, end: 100, key: 'Enter', power: 2 }] }, { viewport: { width: 800, height: 800 } }),
+    /unknown field "power"/
   );
   assert.throws(
-    () => normalizeSequence({ actions: [{ type: 'key', from: 0, to: 100, key: 'Enter' }] }, { viewport: { width: 800, height: 800 } }),
-    /removed field "from"/
+    () => normalizeSequence({ actions: [{ type: 'wait', start: 0 }] }, { viewport: { width: 800, height: 800 } }),
+    /unknown sequence action type: wait/
   );
 });
 
@@ -125,18 +127,22 @@ test('normalizes harness grid-cell steps into concrete pointer events', () => {
   assert.deepEqual(step.cursorMoves[0].to.cells, [7]);
 });
 
-test('rejects removed harness step fields', () => {
+test('rejects harness step fields outside the canonical schema', () => {
+  const explicit = normalizeStep({ duration: 1000, actions: [], captures: [1000], autoCaptures: false }, {}, 1);
+  assert.equal(explicit.duration, 1000);
+  assert.deepEqual(explicit.captures, [1000]);
+
   assert.throws(
-    () => normalizeStep({ duration: 1000, actions: [] }, {}, 1),
-    /removed field "duration"/
+    () => normalizeStep({ actions: [], surprise: true }, {}, 1),
+    /unknown field "surprise"/
   );
   assert.throws(
-    () => normalizeStep({ commands: [{ from: 100, to: 400, key: 'right' }] }, {}, 1),
-    /removed field "commands"/
+    () => normalizeStep({ actions: [{ type: 'key', start: 100, end: 400, key: 'right', power: 2 }] }, {}, 1),
+    /unknown field "power"/
   );
   assert.throws(
-    () => normalizeStep({ actions: [{ type: 'key', from: 100, to: 400, key: 'right' }] }, {}, 1),
-    /removed field "from"/
+    () => normalizeStep({ actions: [{ type: 'wait', start: 0 }] }, {}, 1),
+    /unknown sequence action type: wait/
   );
 });
 
