@@ -3,7 +3,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { normalizeDecision } = require('./action-parser');
+const { normalizeSequence } = require('./action-parser');
 const { AgentRecorder } = require('./history');
 const { chatCompletion, dataUrl, isModelJsonParseError } = require('./model-client');
 const { buildPlaytesterPrompt } = require('./prompt');
@@ -63,7 +63,7 @@ function postActionResult(response, beforeScreenshot) {
   return result;
 }
 
-async function decideNextAction({ job, screenshot, state, history, elapsedMs, maxMs, modelClient, promptStep = null, onPrompt = null }) {
+async function decideNextSequence({ job, screenshot, state, history, elapsedMs, maxMs, modelClient, promptStep = null, onPrompt = null }) {
   if (!screenshot) throw new Error('agent cannot decide without a screenshot');
   const viewport = viewportFor(job);
   const prompt = buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history });
@@ -93,7 +93,7 @@ async function decideNextAction({ job, screenshot, state, history, elapsedMs, ma
   });
 
   return {
-    decision: normalizeDecision(result.json, {
+    sequence: normalizeSequence(result.json, {
       viewport,
       maxDurationMs: Number(job.agentMaxActionMs || 8000),
     }),
@@ -104,33 +104,45 @@ async function decideNextAction({ job, screenshot, state, history, elapsedMs, ma
   };
 }
 
-function fallbackDecisionAfterInvalidJson({ history, viewport, error }) {
-  const lastWithCommands = history
+function fallbackSequenceAfterInvalidJson({ history, viewport, error }) {
+  const lastWithKeyActions = history
     .slice()
     .reverse()
-    .find((item) => Array.isArray(item.commands) && item.commands.length);
-  const commands = lastWithCommands
-    ? lastWithCommands.commands.slice(0, 2).map((command) => ({
-        from: 0,
-        to: Math.max(500, Math.min(1500, Number(command.to || 1000) - Number(command.from || 0))),
-        key: command.key,
-      }))
-    : [{ from: 0, to: 600, key: 'Space' }];
+    .find((item) => Array.isArray(item.actions) && item.actions.some((action) => action.type === 'key'));
+  const actions = lastWithKeyActions
+    ? lastWithKeyActions.actions
+        .filter((action) => action.type === 'key')
+        .slice(0, 2)
+        .map((action) => ({
+          type: 'key',
+          start: 0,
+          end: Math.max(500, Math.min(1500, Number(action.end || 1000) - Number(action.start || 0))),
+          key: action.key,
+        }))
+    : [{ type: 'key', start: 0, end: 600, key: 'Space' }];
 
-  return normalizeDecision(
+  return normalizeSequence(
     {
-      summary: 'The model returned invalid JSON, so the harness is continuing with a conservative fallback action.',
-      duration_ms: 1000,
-      commands,
-      clicks: [],
-      drags: [],
-      cursor_moves: [],
-      view_moves: [],
+      summary: 'The model returned invalid JSON, so the harness is continuing with a conservative fallback sequence.',
+      actions,
       should_stop: false,
       rationale: `Avoid ending the playtest because of a malformed model response: ${String(error.message || error).slice(0, 200)}`,
     },
     { viewport }
   );
+}
+
+function actionsByType(actions, type) {
+  return actions.filter((action) => action.type === type);
+}
+
+function sequenceBuckets(actions) {
+  return {
+    clicks: actionsByType(actions, 'click'),
+    drags: actionsByType(actions, 'drag'),
+    cursorMoves: actionsByType(actions, 'cursor_move'),
+    viewMoves: actionsByType(actions, 'view_move'),
+  };
 }
 
 async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, modelClient = chatCompletion, log = () => {} }) {
@@ -155,13 +167,13 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     const state = responseState(lastResponse);
     recorder.observation({ step, elapsedMs, screenshot, state });
 
-    let decision;
+    let sequence;
     let model;
     let modelElapsedMs;
     let rawText;
     let usage;
     try {
-      ({ decision, model, modelElapsedMs, rawText, usage } = await decideNextAction({
+      ({ sequence, model, modelElapsedMs, rawText, usage } = await decideNextSequence({
         job,
         screenshot,
         state,
@@ -182,72 +194,69 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
         consecutiveModelErrors,
         error: String(error.message || error).slice(0, 500),
       });
-      decision = fallbackDecisionAfterInvalidJson({ history, viewport: viewportFor(job), error });
+      sequence = fallbackSequenceAfterInvalidJson({ history, viewport: viewportFor(job), error });
       model = 'fallback-after-invalid-json';
       modelElapsedMs = 0;
       rawText = String(error.responseText || error.message || '').slice(0, 8000);
       usage = null;
     }
 
-    if (history.length && decision.previousActionOutcome) {
-      history[history.length - 1].outcomeSummary = decision.previousActionOutcome;
+    if (history.length && sequence.previousSequenceOutcome) {
+      history[history.length - 1].outcomeSummary = sequence.previousSequenceOutcome;
     }
 
-    const duration = Math.max(100, Math.min(decision.durationMs, remainingMs));
+    const duration = Math.max(100, Math.min(sequence.durationMs, remainingMs));
     step += 1;
-    const action = {
+    const harnessStep = {
       action: 'step',
       action_name: `agent-step-${String(step).padStart(3, '0')}`,
-      duration,
-      commands: decision.commands,
-      clicks: decision.clicks,
-      drags: decision.drags,
-      cursor_moves: decision.cursorMoves,
-      view_moves: decision.viewMoves,
+      actions: sequence.actions,
       captures: [duration],
       autoCaptures: false,
     };
+    const buckets = sequenceBuckets(sequence.actions);
 
-    recorder.action({
+    recorder.sequence({
       step,
       elapsedMs,
       screenshot,
-      decision,
-      action,
+      sequence,
+      harnessStep,
       model,
       modelElapsedMs,
       rawText,
       usage,
     });
-    log('agent.action', {
+    log('agent.sequence', {
       step,
       duration,
       model,
       modelElapsedMs,
-      commandCount: action.commands.length,
-      clickCount: action.clicks.length,
-      dragCount: action.drags.length,
-      cursorMoveCount: action.cursor_moves.length,
-      viewMoveCount: action.view_moves.length,
+      actionCount: sequence.actions.length,
+      keyActionCount: actionsByType(sequence.actions, 'key').length,
+      clickCount: buckets.clicks.length,
+      dragCount: buckets.drags.length,
+      cursorMoveCount: buckets.cursorMoves.length,
+      viewMoveCount: buckets.viewMoves.length,
     });
 
-    lastResponse = await runAction(action);
+    lastResponse = await runAction(harnessStep);
     const result = postActionResult(lastResponse, screenshot);
     history.push({
       step,
-      summary: decision.summary,
-      rationale: decision.rationale,
-      commands: decision.commands,
-      clicks: decision.clicks,
-      drags: decision.drags,
-      cursorMoves: decision.cursorMoves,
-      viewMoves: decision.viewMoves,
+      summary: sequence.summary,
+      rationale: sequence.rationale,
+      actions: sequence.actions,
+      clicks: buckets.clicks,
+      drags: buckets.drags,
+      cursorMoves: buckets.cursorMoves,
+      viewMoves: buckets.viewMoves,
       result,
     });
 
     if (consecutiveModelErrors >= maxModelFallbacks) break;
 
-    if (decision.shouldStop && Date.now() - startedAt >= minMs) {
+    if (sequence.shouldStop && Date.now() - startedAt >= minMs) {
       stoppedByAgent = true;
       break;
     }
@@ -272,8 +281,10 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
 }
 
 module.exports = {
-  decideNextAction,
-  fallbackDecisionAfterInvalidJson,
+  decideNextSequence,
+  decideNextAction: decideNextSequence,
+  fallbackSequenceAfterInvalidJson,
+  fallbackDecisionAfterInvalidJson: fallbackSequenceAfterInvalidJson,
   latestScreenshot,
   postActionResult,
   responseState,

@@ -233,16 +233,19 @@ function render(runs, artifacts) {
       const pageCount = Math.max(1, Math.ceil(matchingCards().length / PAGE_SIZE));
       page = (page - 1 + pageCount) % pageCount;
       renderPage();
+      prevPage.blur();
     });
     nextPage.addEventListener('click', () => {
       const pageCount = Math.max(1, Math.ceil(matchingCards().length / PAGE_SIZE));
       page = (page + 1) % pageCount;
       renderPage();
+      nextPage.blur();
     });
     pauseAll.addEventListener('click', () => {
       for (const card of matchingCards().slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)) {
         card.querySelector('video')?.pause();
       }
+      pauseAll.blur();
     });
     document.addEventListener('click', (event) => {
       const play = event.target.closest('[data-play]');

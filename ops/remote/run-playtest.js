@@ -600,24 +600,24 @@ function defaultPlan(durationMs = 120000) {
   const segmentMs = 10000;
   const patterns = [
     [
-      { from: 0, to: 6200, key: 'ArrowRight' },
-      { from: 1200, to: 7600, key: 'ArrowUp' },
-      { from: 8200, to: 8450, key: 'Space' },
+      { type: 'key', start: 0, end: 6200, key: 'ArrowRight' },
+      { type: 'key', start: 1200, end: 7600, key: 'ArrowUp' },
+      { type: 'key', start: 8200, end: 8450, key: 'Space' },
     ],
     [
-      { from: 0, to: 5200, key: 'ArrowLeft' },
-      { from: 2500, to: 9200, key: 'ArrowDown' },
-      { from: 5600, to: 5750, key: 'Enter' },
+      { type: 'key', start: 0, end: 5200, key: 'ArrowLeft' },
+      { type: 'key', start: 2500, end: 9200, key: 'ArrowDown' },
+      { type: 'key', start: 5600, end: 5750, key: 'Enter' },
     ],
     [
-      { from: 0, to: 6500, key: 'KeyW' },
-      { from: 1000, to: 8200, key: 'KeyD' },
-      { from: 7800, to: 8050, key: 'Space' },
+      { type: 'key', start: 0, end: 6500, key: 'KeyW' },
+      { type: 'key', start: 1000, end: 8200, key: 'KeyD' },
+      { type: 'key', start: 7800, end: 8050, key: 'Space' },
     ],
     [
-      { from: 0, to: 6000, key: 'KeyA' },
-      { from: 2600, to: 8600, key: 'KeyS' },
-      { from: 7000, to: 7250, key: 'Space' },
+      { type: 'key', start: 0, end: 6000, key: 'KeyA' },
+      { type: 'key', start: 2600, end: 8600, key: 'KeyS' },
+      { type: 'key', start: 7000, end: 7250, key: 'Space' },
     ],
   ];
 
@@ -630,11 +630,10 @@ function defaultPlan(durationMs = 120000) {
     {
       action: 'step',
       action_name: 'step-002-focus-start',
-      duration: 900,
-      clicks: [{ at: 100, x: 640, y: 360 }],
-      commands: [
-        { from: 250, to: 350, key: 'Space' },
-        { from: 500, to: 650, key: 'Enter' },
+      actions: [
+        { type: 'click', start: 100, x: 640, y: 360 },
+        { type: 'key', start: 250, end: 350, key: 'Space' },
+        { type: 'key', start: 500, end: 650, key: 'Enter' },
       ],
       duration: focusDuration,
       captures: [focusDuration],
@@ -647,18 +646,21 @@ function defaultPlan(durationMs = 120000) {
   while (elapsed < remaining) {
     const duration = Math.min(segmentMs, remaining - elapsed);
     const pattern = patterns[segmentIndex % patterns.length]
-      .map((command) => ({
-        ...command,
-        to: Math.min(command.to, Math.max(0, duration - 200)),
+      .map((action) => ({
+        ...action,
+        end: Math.min(action.end, Math.max(0, duration - 200)),
       }))
-      .filter((command) => command.to > command.from);
+      .filter((action) => action.end > action.start);
     actions.push({
       action: 'step',
       action_name: `step-${String(segmentIndex + 3).padStart(3, '0')}-play`,
-      duration,
-      commands: pattern,
-      clicks: segmentIndex % 3 === 2 ? [{ at: Math.min(500, duration), x: 640, y: 360 }] : [],
-      view_moves: segmentIndex % 4 === 1 ? [{ from: 800, to: Math.min(2500, duration), dx: 180, dy: -35, steps: 12 }] : [],
+      actions: [
+        ...pattern,
+        ...(segmentIndex % 3 === 2 ? [{ type: 'click', start: Math.min(500, duration), x: 640, y: 360 }] : []),
+        ...(segmentIndex % 4 === 1
+          ? [{ type: 'view_move', start: 800, end: Math.min(2500, duration), dx: 180, dy: -35, steps: 12 }]
+          : []),
+      ],
       captures: [duration],
       autoCaptures: false,
     });

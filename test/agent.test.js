@@ -6,85 +6,90 @@ const os = require('os');
 const path = require('path');
 const test = require('node:test');
 
-const { normalizeDecision } = require('../agent/src/action-parser');
-const { fallbackDecisionAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
+const { normalizeSequence } = require('../agent/src/action-parser');
+const { fallbackSequenceAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
 const { chatCompletion, parseJsonResponse } = require('../agent/src/model-client');
 const { buildPlaytesterPrompt, compactHistory } = require('../agent/src/prompt');
 const { normalizeStep } = require('../harness/src/step-normalizer');
 
-test('normalizes model actions into harness steps', () => {
-  const decision = normalizeDecision(
+test('normalizes model sequences into harness steps', () => {
+  const sequence = normalizeSequence(
     {
-      duration_ms: 9000,
-      commands: [
-        { type: 'key', from: 0, to: 5000, key: 'ArrowRight' },
-        { type: 'key', from: 100, to: 900, key: 'Shift+ArrowRight+Space' },
-        { type: 'click', at: 50, x: 0.5, y: 0.25 },
-        { type: 'drag', at: 100, from: { x: 0.2, y: 0.25 }, to: { x: 0.4, y: 0.25 }, mode: 'html5' },
-        { type: 'view_move', from: 0, to: 500, dx: 50, dy: -10 },
+      actions: [
+        { type: 'key', start: 0, end: 5000, key: 'ArrowRight' },
+        { type: 'key', start: 100, end: 900, key: 'Shift+ArrowRight+Space' },
+        { type: 'click', start: 50, x: 0.5, y: 0.25 },
+        { type: 'drag', start: 100, from: { x: 0.2, y: 0.25 }, to: { x: 0.4, y: 0.25 }, mode: 'html5' },
+        { type: 'view_move', start: 0, end: 500, dx: 50, dy: -10 },
       ],
       should_stop: true,
       summary: 'menu is visible',
-      previous_action_outcome: 'Enter opened the menu.',
+      previous_sequence_outcome: 'Enter opened the menu.',
     },
     { viewport: { width: 1000, height: 600 } }
   );
 
-  assert.equal(decision.durationMs, 8000);
-  assert.deepEqual(decision.commands, [
-    { from: 0, to: 5000, key: 'ArrowRight' },
-    { from: 100, to: 900, key: 'Shift' },
-    { from: 100, to: 900, key: 'ArrowRight' },
-    { from: 100, to: 900, key: 'Space' },
+  assert.equal(sequence.durationMs, 5000);
+  assert.deepEqual(sequence.actions.filter((action) => action.type === 'key'), [
+    { type: 'key', start: 0, end: 5000, key: 'ArrowRight' },
+    { type: 'key', start: 100, end: 900, key: 'Shift' },
+    { type: 'key', start: 100, end: 900, key: 'ArrowRight' },
+    { type: 'key', start: 100, end: 900, key: 'Space' },
   ]);
-  assert.equal(decision.clicks[0].x, 500);
-  assert.equal(decision.clicks[0].y, 150);
-  assert.deepEqual(decision.drags[0], {
-    at: 100,
+  const click = sequence.actions.find((action) => action.type === 'click');
+  const drag = sequence.actions.find((action) => action.type === 'drag');
+  const viewMove = sequence.actions.find((action) => action.type === 'view_move');
+  assert.equal(click.x, 500);
+  assert.equal(click.y, 150);
+  assert.deepEqual(drag, {
+    type: 'drag',
+    start: 100,
     from: { x: 200, y: 150 },
     to: { x: 400, y: 150 },
     button: 'left',
     mode: 'html5',
     steps: 12,
   });
-  assert.equal(decision.viewMoves[0].dx, 50);
-  assert.equal(decision.shouldStop, true);
-  assert.equal(decision.previousActionOutcome, 'Enter opened the menu.');
+  assert.equal(viewMove.dx, 50);
+  assert.equal(sequence.shouldStop, true);
+  assert.equal(sequence.previousSequenceOutcome, 'Enter opened the menu.');
 });
 
 test('normalizes grid-cell model actions into concrete pointer events', () => {
-  const decision = normalizeDecision(
+  const sequence = normalizeSequence(
     {
-      duration_ms: 1500,
-      commands: [
-        { type: 'click', at: 100, cells: [9] },
-        { type: 'multi_click', at: 200, cells: [18, 19], count: 10 },
-        { type: 'drag', at: 300, from_cells: [34], to_cells: [35], mode: 'mouse' },
-        { type: 'cursor_move', at: 400, cells: [27] },
+      actions: [
+        { type: 'click', start: 100, cells: [9] },
+        { type: 'multi_click', start: 200, cells: [18, 19], count: 10 },
+        { type: 'drag', start: 300, from_cells: [34], to_cells: [35], mode: 'mouse' },
+        { type: 'cursor_move', start: 400, cells: [27] },
       ],
     },
     { viewport: { width: 800, height: 800 } }
   );
 
-  assert.equal(decision.clicks.length, 11);
-  assert.equal(decision.clicks[0].clickMode, 'single');
-  assert.equal(decision.clicks[0].cells[0], 9);
-  assert.ok(decision.clicks[0].x >= 100 && decision.clicks[0].x <= 199);
-  assert.ok(decision.clicks[0].y >= 100 && decision.clicks[0].y <= 199);
-  assert.deepEqual(decision.clicks.slice(1).map((click) => click.at), [200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100]);
-  assert.ok(decision.clicks.slice(1).every((click) => click.clickMode === 'multi'));
-  assert.ok(decision.clicks.slice(1).every((click) => click.x >= 200 && click.x <= 399));
-  assert.ok(decision.clicks.slice(1).every((click) => click.y >= 200 && click.y <= 299));
-  assert.ok(decision.drags[0].from.x >= 200 && decision.drags[0].from.x <= 299);
-  assert.ok(decision.drags[0].from.y >= 400 && decision.drags[0].from.y <= 499);
-  assert.ok(decision.drags[0].to.x >= 300 && decision.drags[0].to.x <= 399);
-  assert.ok(decision.drags[0].to.y >= 400 && decision.drags[0].to.y <= 499);
-  assert.ok(decision.cursorMoves[0].to.x >= 300 && decision.cursorMoves[0].to.x <= 399);
-  assert.ok(decision.cursorMoves[0].to.y >= 300 && decision.cursorMoves[0].to.y <= 399);
+  const clicks = sequence.actions.filter((action) => action.type === 'click');
+  const drag = sequence.actions.find((action) => action.type === 'drag');
+  const cursorMove = sequence.actions.find((action) => action.type === 'cursor_move');
+  assert.equal(clicks.length, 11);
+  assert.equal(clicks[0].clickMode, 'single');
+  assert.equal(clicks[0].cells[0], 9);
+  assert.ok(clicks[0].x >= 100 && clicks[0].x <= 199);
+  assert.ok(clicks[0].y >= 100 && clicks[0].y <= 199);
+  assert.deepEqual(clicks.slice(1).map((click) => click.start), [200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100]);
+  assert.ok(clicks.slice(1).every((click) => click.clickMode === 'multi'));
+  assert.ok(clicks.slice(1).every((click) => click.x >= 200 && click.x <= 399));
+  assert.ok(clicks.slice(1).every((click) => click.y >= 200 && click.y <= 299));
+  assert.ok(drag.from.x >= 200 && drag.from.x <= 299);
+  assert.ok(drag.from.y >= 400 && drag.from.y <= 499);
+  assert.ok(drag.to.x >= 300 && drag.to.x <= 399);
+  assert.ok(drag.to.y >= 400 && drag.to.y <= 499);
+  assert.ok(cursorMove.to.x >= 300 && cursorMove.to.x <= 399);
+  assert.ok(cursorMove.to.y >= 300 && cursorMove.to.y <= 399);
 });
 
 test('normalizes legacy top-level pointer actions for compatibility', () => {
-  const decision = normalizeDecision(
+  const sequence = normalizeSequence(
     {
       duration_ms: 1500,
       clicks: [{ at: 100, cells: [9] }],
@@ -96,10 +101,17 @@ test('normalizes legacy top-level pointer actions for compatibility', () => {
     { viewport: { width: 800, height: 800 } }
   );
 
-  assert.equal(decision.clicks.length, 3);
-  assert.equal(decision.drags.length, 1);
-  assert.equal(decision.cursorMoves.length, 1);
-  assert.deepEqual(decision.viewMoves[0], { from: 500, to: 800, dx: 10, dy: -5, steps: 12 });
+  assert.equal(sequence.actions.filter((action) => action.type === 'click').length, 3);
+  assert.equal(sequence.actions.filter((action) => action.type === 'drag').length, 1);
+  assert.equal(sequence.actions.filter((action) => action.type === 'cursor_move').length, 1);
+  assert.deepEqual(sequence.actions.find((action) => action.type === 'view_move'), {
+    type: 'view_move',
+    start: 500,
+    end: 800,
+    dx: 10,
+    dy: -5,
+    steps: 12,
+  });
 });
 
 test('normalizes harness grid-cell steps into concrete pointer events', () => {
@@ -116,7 +128,7 @@ test('normalizes harness grid-cell steps into concrete pointer events', () => {
   );
 
   assert.equal(step.clicks.length, 4);
-  assert.deepEqual(step.clicks.slice(1).map((click) => click.at), [200, 300, 400]);
+  assert.deepEqual(step.clicks.slice(1).map((click) => click.start), [200, 300, 400]);
   assert.ok(step.clicks[0].x >= 0 && step.clicks[0].x <= 99);
   assert.ok(step.clicks[0].y >= 0 && step.clicks[0].y <= 99);
   assert.ok(step.clicks.slice(1).every((click) => click.x >= 700 && click.x <= 799));
@@ -129,7 +141,7 @@ test('normalizes harness grid-cell steps into concrete pointer events', () => {
   assert.ok(step.cursorMoves[0].to.y >= 0 && step.cursorMoves[0].to.y <= 99);
 });
 
-test('agent playtest loop calls model and executes returned action', async () => {
+test('agent playtest loop calls model and executes returned sequence', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-test-'));
   const screenshot = path.join(dir, 'screen.png');
   const afterScreenshot = path.join(dir, 'after-screen.png');
@@ -139,7 +151,7 @@ test('agent playtest loop calls model and executes returned action', async () =>
   );
   fs.writeFileSync(afterScreenshot, 'different screenshot bytes');
 
-  const actions = [];
+  const harnessSteps = [];
   const result = await runAgenticPlaytest({
     job: {
       playtestDurationMs: 7000,
@@ -156,24 +168,25 @@ test('agent playtest loop calls model and executes returned action', async () =>
       usage: { total_tokens: 1 },
       json: {
         summary: 'start screen is visible',
-        duration_ms: 500,
-        clicks: [{ at: 0, x: 320, y: 180 }],
-        drags: [{ at: 50, from: { x: 100, y: 100 }, to: { x: 130, y: 100 }, mode: 'mouse' }],
-        commands: [{ from: 0, to: 500, key: 'Enter' }],
+        actions: [
+          { type: 'click', start: 0, x: 320, y: 180 },
+          { type: 'drag', start: 50, from: { x: 100, y: 100 }, to: { x: 130, y: 100 }, mode: 'mouse' },
+          { type: 'key', start: 0, end: 500, key: 'Enter' },
+        ],
         should_stop: true,
       },
     }),
-    runAction: async (action) => {
-      actions.push(action);
+    runAction: async (step) => {
+      harnessSteps.push(step);
       return { ok: true, captures: [{ path: afterScreenshot }], endState: { ok: true } };
     },
   });
 
   assert.equal(result.steps, 1);
-  assert.equal(actions.length, 1);
-  assert.equal(actions[0].action, 'step');
-  assert.equal(actions[0].commands[0].key, 'Enter');
-  assert.equal(actions[0].drags[0].mode, 'mouse');
+  assert.equal(harnessSteps.length, 1);
+  assert.equal(harnessSteps[0].action, 'step');
+  assert.equal(harnessSteps[0].actions.find((action) => action.type === 'key').key, 'Enter');
+  assert.equal(harnessSteps[0].actions.find((action) => action.type === 'drag').mode, 'mouse');
   assert.equal(result.history[0].result.ok, true);
   assert.equal(result.history[0].result.screenshot, afterScreenshot);
   assert.equal(result.history[0].result.screenshotChanged, true);
@@ -297,24 +310,24 @@ test('tags malformed model JSON parse errors', () => {
   );
 });
 
-test('builds a conservative fallback action after invalid model JSON', () => {
-  const decision = fallbackDecisionAfterInvalidJson({
+test('builds a conservative fallback sequence after invalid model JSON', () => {
+  const sequence = fallbackSequenceAfterInvalidJson({
     viewport: { width: 640, height: 360 },
     error: Object.assign(new Error('bad JSON'), { code: 'RUNWAVE_MODEL_JSON_PARSE' }),
     history: [
       {
         step: 1,
         summary: 'board changed',
-        commands: [{ from: 0, to: 1000, key: 'ArrowLeft' }],
+        actions: [{ type: 'key', start: 0, end: 1000, key: 'ArrowLeft' }],
         clicks: [],
       },
     ],
   });
 
-  assert.equal(decision.durationMs, 1000);
-  assert.equal(decision.commands[0].key, 'ArrowLeft');
-  assert.equal(decision.clicks.length, 0);
-  assert.equal(decision.drags.length, 0);
+  assert.equal(sequence.durationMs, 1000);
+  assert.equal(sequence.actions[0].key, 'ArrowLeft');
+  assert.equal(sequence.actions.filter((action) => action.type === 'click').length, 0);
+  assert.equal(sequence.actions.filter((action) => action.type === 'drag').length, 0);
 });
 
 test('playtester prompt warns when recent actions repeat', () => {
@@ -338,7 +351,12 @@ test('playtester prompt warns when recent actions repeat', () => {
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
   assert.match(prompt, /8x8 red mark grid/);
   assert.match(prompt, /"type": "multi_click"/);
-  assert.match(prompt, /Each command must have a "type"/);
+  assert.match(prompt, /Each action must have a "type"/);
+  assert.match(prompt, /"actions":/);
+  assert.match(prompt, /"start": 0/);
+  assert.match(prompt, /"end": 300/);
+  assert.doesNotMatch(prompt, /"commands":/);
+  assert.doesNotMatch(prompt, /duration_ms/);
   assert.doesNotMatch(prompt, /"clicks":/);
   assert.doesNotMatch(prompt, /"multi_clicks":/);
 });
@@ -360,7 +378,7 @@ test('playtester prompt warns when recent actions repeat a control cycle up to 5
     })),
   });
 
-  assert.match(prompt, /Warning: the recent actions repeated a 4-step control cycle/);
+  assert.match(prompt, /Warning: the recent sequences repeated a 4-step control cycle/);
   assert.match(prompt, /ArrowRight -> ArrowUp -> ArrowLeft -> ArrowDown/);
   assert.match(prompt, /Break the loop now/);
 });
@@ -383,7 +401,7 @@ test('compact history includes post-action result signals', () => {
   assert.match(text, /outcome="The ball rolled right and the camera followed into a new corridor\."/);
 });
 
-test('agent loop attaches previous action outcome to the prior history step', async () => {
+test('agent loop attaches previous sequence outcome to the prior history step', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-outcome-test-'));
   const screenshot = path.join(dir, 'screen.png');
   fs.writeFileSync(
@@ -411,16 +429,14 @@ test('agent loop attaches previous action outcome to the prior history step', as
         json: calls === 1
           ? {
               summary: 'ball is in a corridor',
-              previous_action_outcome: '',
-              duration_ms: 500,
-              commands: [{ from: 0, to: 500, key: 'ArrowRight' }],
+              previous_sequence_outcome: '',
+              actions: [{ type: 'key', start: 0, end: 500, key: 'ArrowRight' }],
               should_stop: false,
             }
           : {
               summary: 'ball has moved into the next corridor',
-              previous_action_outcome: 'ArrowRight rolled the ball into a new visible corridor.',
-              duration_ms: 500,
-              commands: [{ from: 0, to: 500, key: 'ArrowRight' }],
+              previous_sequence_outcome: 'ArrowRight rolled the ball into a new visible corridor.',
+              actions: [{ type: 'key', start: 0, end: 500, key: 'ArrowRight' }],
               should_stop: true,
             },
       };

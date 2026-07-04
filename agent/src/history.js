@@ -15,7 +15,8 @@ function appendJsonl(file, payload) {
 class AgentRecorder {
   constructor(outputDir) {
     this.outputDir = ensureDir(outputDir);
-    this.actionsPath = path.join(this.outputDir, 'agent-actions.jsonl');
+    this.sequencesPath = path.join(this.outputDir, 'agent-sequences.jsonl');
+    this.actionsPath = this.sequencesPath;
     this.observationsPath = path.join(this.outputDir, 'agent-observations.jsonl');
     this.promptsPath = path.join(this.outputDir, 'agent-prompts.jsonl');
     this.summaryPath = path.join(this.outputDir, 'agent-summary.json');
@@ -25,8 +26,12 @@ class AgentRecorder {
     appendJsonl(this.observationsPath, { ts: new Date().toISOString(), ...payload });
   }
 
+  sequence(payload) {
+    appendJsonl(this.sequencesPath, { ts: new Date().toISOString(), ...payload });
+  }
+
   action(payload) {
-    appendJsonl(this.actionsPath, { ts: new Date().toISOString(), ...payload });
+    this.sequence(payload);
   }
 
   prompt(payload) {

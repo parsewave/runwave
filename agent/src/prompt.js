@@ -20,11 +20,7 @@ function compactHistory(history, limit = 8) {
     .slice(-limit)
     .map((item) => {
       const controls = [
-        ...(item.commands || []).map((command) => command.key),
-        ...(item.clicks || []).map((click) => `click(${click.x},${click.y})`),
-        ...(item.drags || []).map((drag) => `drag(${drag.from.x},${drag.from.y}->${drag.to.x},${drag.to.y},${drag.mode})`),
-        ...(item.cursorMoves || []).map((move) => `cursor(${move.to.x},${move.to.y})`),
-        ...(item.viewMoves || []).map((move) => `view(${move.dx},${move.dy})`),
+        ...sequenceActions(item).map(actionLabelPart),
       ];
       return `step ${item.step}: ${item.summary || item.rationale || 'no summary'}; controls=${controls.join(',') || 'none'}${compactPostActionResult(item.result)}${compactOutcomeSummary(item.outcomeSummary)}`;
     })
@@ -35,16 +31,38 @@ function roundedPoint(value, quantum = 20) {
   return Math.round(Number(value || 0) / quantum) * quantum;
 }
 
+function sequenceActions(item) {
+  if (Array.isArray(item.actions)) return item.actions;
+  return [
+    ...(item.commands || []).map((command) => ({ type: 'key', ...command })),
+    ...(item.clicks || []).map((click) => ({ type: 'click', ...click })),
+    ...(item.drags || []).map((drag) => ({ type: 'drag', ...drag })),
+    ...(item.cursorMoves || []).map((move) => ({ type: 'cursor_move', ...move })),
+    ...(item.viewMoves || []).map((move) => ({ type: 'view_move', ...move })),
+  ];
+}
+
+function actionLabelPart(action) {
+  if (action.type === 'key') return action.key;
+  if (action.type === 'click') return `click(${action.x},${action.y})`;
+  if (action.type === 'drag') return `drag(${action.from.x},${action.from.y}->${action.to.x},${action.to.y},${action.mode})`;
+  if (action.type === 'cursor_move') return `cursor(${action.to.x},${action.to.y})`;
+  if (action.type === 'view_move') return `view(${action.dx},${action.dy})`;
+  return action.type || 'unknown';
+}
+
 function actionControls(item) {
+  const actions = sequenceActions(item);
   return {
-    commands: (item.commands || []).map((command) => command.key).filter(Boolean),
-    clicks: (item.clicks || []).map((click) => `${roundedPoint(click.x)},${roundedPoint(click.y)}`),
-    drags: (item.drags || []).map(
-      (drag) =>
-        `${roundedPoint(drag.from.x)},${roundedPoint(drag.from.y)}->${roundedPoint(drag.to.x)},${roundedPoint(drag.to.y)}`
-    ),
-    cursorMoves: (item.cursorMoves || []).map((move) => `${roundedPoint(move.to.x)},${roundedPoint(move.to.y)}`),
-    viewMoves: (item.viewMoves || []).map((move) => `${roundedPoint(move.dx)},${roundedPoint(move.dy)}`),
+    keys: actions.filter((action) => action.type === 'key').map((action) => action.key).filter(Boolean),
+    clicks: actions.filter((action) => action.type === 'click').map((click) => `${roundedPoint(click.x)},${roundedPoint(click.y)}`),
+    drags: actions
+      .filter((action) => action.type === 'drag')
+      .map((drag) => `${roundedPoint(drag.from.x)},${roundedPoint(drag.from.y)}->${roundedPoint(drag.to.x)},${roundedPoint(drag.to.y)}`),
+    cursorMoves: actions
+      .filter((action) => action.type === 'cursor_move')
+      .map((move) => `${roundedPoint(move.to.x)},${roundedPoint(move.to.y)}`),
+    viewMoves: actions.filter((action) => action.type === 'view_move').map((move) => `${roundedPoint(move.dx)},${roundedPoint(move.dy)}`),
   };
 }
 
@@ -52,7 +70,7 @@ function actionSignature(item) {
   const controls = actionControls(item);
   if (!Object.values(controls).some((values) => values.length)) return '';
   return [
-    controls.commands.join(','),
+    controls.keys.join(','),
     controls.clicks.join(','),
     controls.drags.join(','),
     controls.cursorMoves.join(','),
@@ -63,7 +81,7 @@ function actionSignature(item) {
 function actionLabel(item) {
   const controls = actionControls(item);
   const labels = [
-    ...controls.commands,
+    ...controls.keys,
     ...controls.clicks.map((click) => `click(${click})`),
     ...controls.drags.map((drag) => `drag(${drag})`),
     ...controls.cursorMoves.map((move) => `cursor(${move})`),
@@ -104,10 +122,10 @@ function repeatedControlCycle(history, maxPeriod = 5) {
 function repeatedHistoryWarning(history) {
   const cycle = repeatedControlCycle(history, 5);
   if (cycle && cycle.period === 1) {
-    return 'Warning: the recent actions repeated the same controls. Switch strategy now instead of trying the same input again.';
+    return 'Warning: the recent sequences repeated the same controls. Switch strategy now instead of trying the same input again.';
   }
   if (cycle) {
-    return `Warning: the recent actions repeated a ${cycle.period}-step control cycle (${cycle.labels.join(' -> ')}). Break the loop now with a different route, a longer committed move, or a different strategy instead of continuing the cycle.`;
+    return `Warning: the recent sequences repeated a ${cycle.period}-step control cycle (${cycle.labels.join(' -> ')}). Break the loop now with a different route, a longer committed move, or a different strategy instead of continuing the cycle.`;
   }
 
   const recent = history.slice(-3);
@@ -146,16 +164,18 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '- If the game is on a menu/title/start screen, get into real gameplay.',
     '- If movement is possible, always strive to explore as much as possible.',
     '- If there is no movement, perform meaningful game actions repeatedly.',
-    '- Try to chain multiple senseible commands at once rather than a single command each time.',
+    '- Try to chain multiple sensible actions in one sequence rather than a single action each time.',
     '- Do not stop early unless the recording already shows enough real gameplay.',
     '',
     `Time remaining: ${secondsLeft}s.`,
     `Viewport: ${viewport.width}x${viewport.height}. The screenshot has an 8x8 red mark grid labeled 0 through 63, row-major from top-left to bottom-right.`,
     `Available common controls: ${controls.join(', ')}. You may use literal Playwright keys.`,
     '',
-    'Action guidance:',
+    'Sequence guidance:',
     '- Prefer grid-cell targeting over raw x/y coordinates. For pointer actions, choose up to 4 relevant grid cell IDs using "cells": [id].',
-    '- Put every input in the "commands" array. Each command must have a "type": "key", "click", "multi_click", "drag", "cursor_move", or "view_move".',
+    '- Put every input in the "actions" array. Each action must have a "type": "key", "click", "multi_click", "drag", "cursor_move", or "view_move".',
+    '- Use "start" and "end" times in milliseconds. Instant actions such as click, multi_click, drag, and cursor_move only need "start".',
+    '- The sequence duration is inferred from the latest action "end", or from "start" for instant actions.',
     '- Use type "click" for a single click in the selected cell area. Use type "multi_click" when a target is imprecise or repeated clicking/tapping is useful; it sends quick clicks at random points inside the selected cells.',
     '- Use type "drag" for drag/swipe games with from_cells and to_cells. Use mode "mouse" for canvas or pointer games; use mode "html5" for browser-native drag/drop elements such as match-3 candy boards.',
     '- Use type "cursor_move" for cursor movement without clicking. Use type "view_move" only for relative camera/mouse-look movement where dx/dy matters.',
@@ -167,7 +187,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '- If the state JSON reports a canvas, treat that canvas rectangle as the active game area unless the screenshot clearly shows otherwise.',
     '- If you die, reset, or return to a map/title screen, re-enter gameplay and change strategy instead of repeating the same failed action.',
     '- Avoid idle waiting. Each step should do something visible or useful for the gameplay video.',
-    '- In previous_action_outcome, summarize what visibly happened after the most recent prior step. If a prior control moved the player, camera, board, score, menu, or level state, say that clearly. On the first step, use an empty string.',
+    '- In previous_sequence_outcome, summarize what visibly happened after the most recent prior sequence. If a prior control moved the player, camera, board, score, menu, or level state, say that clearly. On the first sequence, use an empty string.',
     '',
     warning ? `${warning}\n` : '',
     'Recent history:',
@@ -176,25 +196,24 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     'Browser/game state JSON:',
     JSON.stringify(state || {}, null, 2).slice(0, 5000),
     '',
-    'Return only JSON with this shape:',
+    'Return only JSON for the next sequence with this shape:',
     '{',
     '  "summary": "one sentence describing what is visible now and what happened recently",',
-    '  "previous_action_outcome": "one sentence describing the visible outcome of the previous step, or empty on the first step",',
-    '  "duration_ms": 3000,',
-    '  "commands": [',
-    '    {"type": "key", "from": 0, "to": 300, "key": "ArrowRight"},',
-    '    {"type": "key", "from": 200, "to": 700, "key": "ArrowDown"},',
-    '    {"type": "click", "at": 100, "cells": [27]},',
-    '    {"type": "multi_click", "at": 100, "cells": [27, 28], "count": 10},',
-    '    {"type": "drag", "at": 100, "from_cells": [34], "to_cells": [35], "mode": "mouse", "steps": 12},',
-    '    {"type": "cursor_move", "at": 100, "cells": [27], "steps": 8},',
-    '    {"type": "view_move", "from": 0, "to": 800, "dx": 120, "dy": 0, "steps": 8}',
+    '  "previous_sequence_outcome": "one sentence describing the visible outcome of the previous sequence, or empty on the first sequence",',
+    '  "actions": [',
+    '    {"type": "key", "start": 0, "end": 300, "key": "ArrowRight"},',
+    '    {"type": "key", "start": 200, "end": 700, "key": "ArrowDown"},',
+    '    {"type": "click", "start": 100, "cells": [27]},',
+    '    {"type": "multi_click", "start": 100, "cells": [27, 28], "count": 10},',
+    '    {"type": "drag", "start": 100, "from_cells": [34], "to_cells": [35], "mode": "mouse", "steps": 12},',
+    '    {"type": "cursor_move", "start": 100, "cells": [27], "steps": 8},',
+    '    {"type": "view_move", "start": 0, "end": 800, "dx": 120, "dy": 0, "steps": 8}',
     '  ],',
     '  "should_stop": false,',
-    '  "rationale": "why this is the next useful playtest action."',
+    '  "rationale": "why this is the next useful playtest sequence."',
     '}',
     '',
-    'Use duration_ms between 500 and 8000. Use an empty commands array when no input is needed.',
+    'Keep the latest action end/start between 500 and 8000. Use an empty actions array only when no input is needed.',
   ].join('\n');
 }
 

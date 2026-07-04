@@ -6,9 +6,9 @@ function usage() {
   return {
     usage: `runwave '<json>'`,
     notes: [
-      'Every command must include action_name.',
+      'Every harness operation must include action_name.',
       'Use start with either url or file.',
-      'Each command writes artifacts to state/output/<action_name>/ by default.',
+      'Each operation writes artifacts to state/output/<action_name>/ by default.',
       'Relative file and output paths resolve from RUNWAVE_WORKSPACE or the current working directory.',
     ],
     examples: [
@@ -22,15 +22,11 @@ function usage() {
       {
         action: 'step',
         action_name: 'move-right-001',
-        duration: 1200,
-        commands: [
-          { from: 0, to: 900, key: 'right' },
-          { from: 150, to: 230, key: 'jump' },
+        actions: [
+          { type: 'key', start: 0, end: 900, key: 'right' },
+          { type: 'key', start: 150, end: 230, key: 'jump' },
         ],
-        clicks: [{ at: 400, x: 512, y: 310 }],
-        drags: [{ at: 600, from: { x: 420, y: 300 }, to: { x: 500, y: 300 }, mode: 'mouse' }],
-        view_moves: [{ from: 500, to: 900, dx: 180, dy: -20, steps: 12 }],
-        captures: [1200],
+        captures: [900],
         captureIntervalMs: 1000,
       },
       { action: 'screenshot', action_name: 'inspect-001', name: 'screen' },
@@ -42,7 +38,7 @@ function usage() {
 
 function assertActionName(input) {
   if (!input || !input.action_name) {
-    throw new Error('action_name is required for every runwave command');
+    throw new Error('action_name is required for every runwave operation');
   }
 }
 

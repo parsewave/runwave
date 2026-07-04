@@ -15,24 +15,24 @@ function compareEvents(left, right) {
 function buildStepTimeline(step) {
   const events = [];
 
-  for (const command of step.commands) {
-    events.push({ at: command.from, type: 'down', command });
-    events.push({ at: command.to, type: 'up', command });
+  for (const action of step.keyActions) {
+    events.push({ at: action.start, type: 'down', action });
+    events.push({ at: action.end, type: 'up', action });
   }
   for (const click of step.clicks) {
-    events.push({ at: click.at, type: 'click', click });
+    events.push({ at: click.start, type: 'click', click });
   }
   for (const cursorMove of step.cursorMoves) {
-    events.push({ at: cursorMove.at, type: 'cursor_move', cursorMove });
+    events.push({ at: cursorMove.start, type: 'cursor_move', cursorMove });
   }
   for (const drag of step.drags) {
-    events.push({ at: drag.at, type: 'drag', drag });
+    events.push({ at: drag.start, type: 'drag', drag });
   }
   for (const viewMove of step.viewMoves) {
     const steps = Math.max(1, viewMove.steps);
     for (let index = 0; index < steps; index += 1) {
       const progress = steps === 1 ? 0 : index / (steps - 1);
-      const at = Math.round(viewMove.from + (viewMove.to - viewMove.from) * progress);
+      const at = Math.round(viewMove.start + (viewMove.end - viewMove.start) * progress);
       events.push({
         at,
         type: 'view_move',
