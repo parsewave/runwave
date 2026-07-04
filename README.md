@@ -37,7 +37,7 @@ runwave -v '{"action":"state","action_name":"turn-001-state"}'
 
 Verbose mode writes newline-delimited JSON timing events to
 `<sessionDir>/runwave-verbose.ndjson` and includes that path as `verboseLog` in
-verbose command responses. The log records CLI, daemon, browser, output writing,
+verbose operation responses. The log records CLI, daemon, browser, output writing,
 state, screenshot, navigation, step timeline, input-event, capture, and cleanup
 timings.
 
@@ -56,7 +56,7 @@ Useful environment variables:
 - `RUNWAVE_SESSION_WAIT_MS`: startup wait for the daemon session file.
   Defaults to `60000`.
 
-Each command must include `action_name`. By default, command artifacts are
+Each operation must include `action_name`. By default, operation artifacts are
 written under:
 
 ```text
@@ -107,9 +107,9 @@ Useful `start` options:
 - `stateExpression`: optional JavaScript expression evaluated in the page.
 - `outputRoot`: defaults to `state/output`.
 - `outDir`: defaults to `recordings/runwave-run-<timestamp>`.
-- `sessionWaitMs`: overrides daemon startup wait for this start command.
+- `sessionWaitMs`: overrides daemon startup wait for this start operation.
 
-## Commands
+## Sequences And Actions
 
 Inspect state:
 
@@ -129,15 +129,17 @@ Execute timed keyboard controls:
 runwave '{
   "action": "step",
   "action_name": "turn-002-jump-right",
-  "duration": 1200,
-  "commands": [
-    { "from": 0, "to": 900, "key": "right" },
-    { "from": 150, "to": 230, "key": "jump" }
+  "actions": [
+    { "type": "key", "start": 0, "end": 900, "key": "right" },
+    { "type": "key", "start": 150, "end": 230, "key": "jump" }
   ],
-  "captures": [1200],
+  "captures": [900],
   "autoCaptures": false
 }'
 ```
+
+For `step`, the payload is a sequence. The sequence duration is inferred from
+the latest action `end`, or from `start` for instant actions.
 
 Click:
 
@@ -145,9 +147,36 @@ Click:
 runwave '{
   "action": "step",
   "action_name": "turn-003-click-start",
-  "duration": 500,
-  "clicks": [
-    { "at": 100, "x": 512, "y": 310 }
+  "actions": [
+    { "type": "click", "start": 100, "end": 500, "x": 512, "y": 310 }
+  ]
+}'
+```
+
+Screenshots include an 8x8 red mark grid by default. Pointer actions may use
+up to 4 grid cell IDs instead of exact pixels. Cell IDs run row-major from `0`
+at the top-left to `63` at the bottom-right.
+
+Single grid-cell click:
+
+```sh
+runwave '{
+  "action": "step",
+  "action_name": "turn-003-click-start-cell",
+  "actions": [
+    { "type": "click", "start": 100, "end": 500, "cells": [27] }
+  ]
+}'
+```
+
+Multi-click sends quick clicks at random points inside the selected cells:
+
+```sh
+runwave '{
+  "action": "step",
+  "action_name": "turn-003-multi-click",
+  "actions": [
+    { "type": "multi_click", "start": 100, "cells": [27, 28], "count": 10 }
   ]
 }'
 ```
@@ -158,15 +187,25 @@ Drag:
 runwave '{
   "action": "step",
   "action_name": "turn-004-drag",
-  "duration": 700,
-  "drags": [
-    { "at": 100, "from": { "x": 420, "y": 300 }, "to": { "x": 500, "y": 300 }, "mode": "mouse", "steps": 12 }
+  "actions": [
+    { "type": "drag", "start": 100, "end": 700, "from": { "x": 420, "y": 300 }, "to": { "x": 500, "y": 300 }, "mode": "mouse", "steps": 12 }
   ]
 }'
 ```
 
 Use `mode: "mouse"` for canvas and pointer-based games. Use `mode: "html5"`
 for browser-native draggable/drop elements.
+Drag endpoints can also use grid cells:
+
+```json
+{ "type": "drag", "start": 100, "from_cells": [34], "to_cells": [35], "mode": "mouse" }
+```
+
+Move the cursor without clicking:
+
+```json
+{ "action": "step", "action_name": "turn-005-hover", "actions": [{ "type": "cursor_move", "start": 100, "end": 500, "cells": [27] }] }
+```
 
 Move the mouse without clicking for camera control:
 
@@ -174,16 +213,14 @@ Move the mouse without clicking for camera control:
 runwave '{
   "action": "step",
   "action_name": "turn-005-look-around",
-  "duration": 1200,
-  "view_moves": [
-    { "from": 200, "to": 900, "dx": 260, "dy": -40, "steps": 16 }
+  "actions": [
+    { "type": "view_move", "start": 200, "end": 900, "dx": 260, "dy": -40, "steps": 16 }
   ]
 }'
 ```
 
-`view_moves` use relative CSS-pixel deltas. Positive `dx` moves right,
+`view_move` actions use relative CSS-pixel deltas. Positive `dx` moves right,
 negative `dx` moves left, positive `dy` moves down, and negative `dy` moves up.
-Runwave also accepts `viewMoves`, `mouse_moves`, and `mouseMoves`.
 
 Navigate or reset:
 
@@ -208,7 +245,7 @@ Every response includes generic browser state:
 - Canvas positions and sizes.
 
 For game-specific state, pass a `stateExpression` on `start` or an individual
-command:
+operation:
 
 ```json
 {
@@ -224,8 +261,8 @@ If the expression throws, the response still includes generic state plus
 Each turn writes:
 
 - `response.json`: the main CLI response.
-- `*.png`: screenshots captured during that command.
-- `NNN-<action_name>.json`: detailed step log for `step` actions.
+- `*.png`: screenshots captured during that operation.
+- `NNN-<action_name>.json`: detailed sequence log for `step` operations.
 
 The active session is tracked in `.runwave-session.json` by default and
 is removed by `stop`.

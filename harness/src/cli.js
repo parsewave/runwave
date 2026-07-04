@@ -8,6 +8,7 @@ const { createProfiler } = require('./profiler');
 const { assertActionName, parseCliInput, targetUrl, usage } = require('./protocol');
 
 const DEFAULT_SESSION_WAIT_MS = 60000;
+const DEFAULT_FORCE_STOP_WAIT_MS = 5000;
 
 function cliArgs() {
   const args = process.argv.slice(2);
@@ -52,6 +53,35 @@ function sessionWaitMs(input) {
   return positiveNumber(input.sessionWaitMs ?? process.env.RUNWAVE_SESSION_WAIT_MS, DEFAULT_SESSION_WAIT_MS);
 }
 
+function forceStopWaitMs(input) {
+  return positiveNumber(input.forceStopWaitMs ?? process.env.RUNWAVE_FORCE_STOP_WAIT_MS, DEFAULT_FORCE_STOP_WAIT_MS);
+}
+
+function isPidRunning(pid, kill = process.kill) {
+  const parsed = Number(pid);
+  if (!Number.isInteger(parsed) || parsed <= 0) return false;
+  try {
+    kill(parsed, 0);
+    return true;
+  } catch (error) {
+    if (error && error.code === 'ESRCH') return false;
+    if (error && error.code === 'EPERM') return true;
+    throw error;
+  }
+}
+
+async function waitForPidExit(pid, timeoutMs, sleepFn = sleep, kill = process.kill) {
+  const parsed = Number(pid);
+  if (!Number.isInteger(parsed) || parsed <= 0) return true;
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (!isPidRunning(parsed, kill)) return true;
+    await sleepFn(100);
+  }
+  return !isPidRunning(parsed, kill);
+}
+
 async function waitForSession(pid, timeoutMs = DEFAULT_SESSION_WAIT_MS) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -62,6 +92,81 @@ async function waitForSession(pid, timeoutMs = DEFAULT_SESSION_WAIT_MS) {
     await sleep(100);
   }
   throw new Error('timed out waiting for runwave session');
+}
+
+async function stopExistingSessionForForce(input, profiler, options = {}) {
+  const file = options.sessionFilePath || sessionFile;
+  const exists = options.existsSync || fs.existsSync;
+  const read = options.readJson || readJson;
+  const remove = options.removeFileIfExists || removeFileIfExists;
+  const post = options.postJson || postJson;
+  const sleepFn = options.sleep || sleep;
+  const kill = options.kill || process.kill;
+
+  if (!exists(file)) return { stopped: false, reason: 'no-session' };
+
+  let session;
+  try {
+    session = read(file);
+  } catch (error) {
+    profiler.mark('cli.force_stop.invalid_session_file', { sessionFile: file, error: error.message });
+    remove(file);
+    return { stopped: false, reason: 'invalid-session-file' };
+  }
+
+  const pid = Number(session.pid);
+  const waitMs = forceStopWaitMs(input);
+  const runningBeforeStop = isPidRunning(pid, kill);
+  profiler.mark('cli.force_stop.session_found', {
+    sessionFile: file,
+    pid: session.pid,
+    port: session.port,
+    running: runningBeforeStop,
+    waitMs,
+  });
+
+  let stopResponse = null;
+  let stopError = null;
+  if (session.port) {
+    try {
+      stopResponse = await profiler.time('cli.force_stop.post_stop', { port: session.port }, () =>
+        post(session.port, {
+          action: 'stop',
+          action_name: `${input.action_name}-force-stop`,
+          finalScreenshot: false,
+          __runwaveVerbose: input.__runwaveVerbose,
+        })
+      );
+      if (!stopResponse || stopResponse.ok === false) {
+        throw new Error(`forced stop failed: ${JSON.stringify(stopResponse).slice(0, 500)}`);
+      }
+    } catch (error) {
+      stopError = error;
+      profiler.mark('cli.force_stop.post_stop_error', { port: session.port, error: error.message });
+    }
+  }
+
+  if (Number.isInteger(pid) && pid > 0) {
+    const exited = await profiler.time('cli.force_stop.wait_for_exit', { pid, waitMs }, () =>
+      waitForPidExit(pid, waitMs, sleepFn, kill)
+    );
+    if (!exited) {
+      const message = stopError
+        ? `existing runwave session pid ${pid} is still running after forced stop failed: ${stopError.message}`
+        : `existing runwave session pid ${pid} did not exit within ${waitMs}ms`;
+      throw new Error(message);
+    }
+  } else if (stopError) {
+    remove(file);
+    return { stopped: false, reason: 'stale-unreachable-session', error: stopError.message };
+  }
+
+  remove(file);
+  return {
+    stopped: Boolean(stopResponse && stopResponse.ok !== false),
+    reason: stopResponse ? 'stopped' : 'stale-session',
+    session,
+  };
 }
 
 async function existingSessionStart(input, profiler) {
@@ -92,9 +197,13 @@ async function existingSessionStart(input, profiler) {
 
 async function start(input, profiler) {
   profiler.timeSync('cli.start.target_url', () => targetUrl(input));
+  if (input.force) {
+    await profiler.time('cli.start.force_stop_existing_session', { sessionFile }, () =>
+      stopExistingSessionForForce(input, profiler)
+    );
+  }
   const existing = await profiler.time('cli.start.existing_session', () => existingSessionStart(input, profiler));
   if (existing) return existing;
-  if (input.force) profiler.timeSync('cli.start.remove_session_file', { sessionFile }, () => removeFileIfExists(sessionFile));
 
   const daemon = path.resolve(__dirname, 'daemon.js');
   const child = profiler.timeSync('cli.start.spawn_daemon', { daemon }, () =>
@@ -167,5 +276,9 @@ async function main() {
 module.exports = {
   main,
   sessionWaitMs,
+  forceStopWaitMs,
+  isPidRunning,
+  stopExistingSessionForForce,
+  waitForPidExit,
   cliArgs,
 };

@@ -89,8 +89,7 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
       {
         action: 'step',
         action_name: 'smoke-click',
-        duration: 300,
-        clicks: [{ at: 50, x: 320, y: 210 }],
+        actions: [{ type: 'click', start: 50, end: 300, x: 320, y: 210 }],
         captures: [300],
         autoCaptures: false,
       },
@@ -106,8 +105,7 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
       {
         action: 'step',
         action_name: 'smoke-drag',
-        duration: 300,
-        drags: [{ at: 50, from: { x: 260, y: 210 }, to: { x: 380, y: 210 }, mode: 'mouse', steps: 6 }],
+        actions: [{ type: 'drag', start: 50, end: 300, from: { x: 260, y: 210 }, to: { x: 380, y: 210 }, mode: 'mouse', steps: 6 }],
         captures: [300],
         autoCaptures: false,
       },
@@ -115,7 +113,7 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
     );
     assert.equal(drag.ok, true);
     assert.equal(drag.endState.custom.drags, 1);
-    assert.equal(drag.drags[0].mode, 'mouse');
+    assert.equal(drag.actions.find((action) => action.type === 'drag').mode, 'mouse');
 
     const stop = runCli(
       {

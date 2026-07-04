@@ -48,18 +48,29 @@ async function executeTimeline({ browser, events, duration, outputDir, prefix, s
       await waitUntil(startedAt, event.at, profiler, fields);
 
       if (event.type === 'down') {
-        if (profiler) await profiler.time('timeline.event.key_down', { ...fields, key: event.command.key }, () => browser.keyDown(event.command.key));
-        else await browser.keyDown(event.command.key);
-        pressed.add(event.command.key);
+        if (profiler) await profiler.time('timeline.event.key_down', { ...fields, key: event.action.key }, () => browser.keyDown(event.action.key));
+        else await browser.keyDown(event.action.key);
+        pressed.add(event.action.key);
       } else if (event.type === 'up') {
-        if (profiler) await profiler.time('timeline.event.key_up', { ...fields, key: event.command.key }, () => browser.keyUp(event.command.key));
-        else await browser.keyUp(event.command.key);
-        pressed.delete(event.command.key);
+        if (profiler) await profiler.time('timeline.event.key_up', { ...fields, key: event.action.key }, () => browser.keyUp(event.action.key));
+        else await browser.keyUp(event.action.key);
+        pressed.delete(event.action.key);
       } else if (event.type === 'click') {
         if (profiler) {
           await profiler.time('timeline.event.click', { ...fields, x: event.click.x, y: event.click.y }, () => browser.click(event.click));
         } else {
           await browser.click(event.click);
+        }
+      } else if (event.type === 'cursor_move') {
+        if (profiler) {
+          await profiler.time('timeline.event.cursor_move', {
+            ...fields,
+            x: event.cursorMove.to.x,
+            y: event.cursorMove.to.y,
+            steps: event.cursorMove.steps,
+          }, () => browser.moveCursor(event.cursorMove));
+        } else {
+          await browser.moveCursor(event.cursorMove);
         }
       } else if (event.type === 'drag') {
         if (profiler) {

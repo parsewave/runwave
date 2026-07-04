@@ -95,7 +95,7 @@ class BrowserSession {
       })
     );
     if (this.config.gridScreenshots !== false) {
-      this.timeSync('browser.screenshot.grid_overlay', { file }, () => drawGridOnScreenshot(file));
+      this.timeSync('browser.screenshot.grid_overlay', { file }, () => drawGridOnScreenshot(file, this.config));
     }
     return file;
   }
@@ -121,6 +121,15 @@ class BrowserSession {
       })
     );
     this.mousePosition = { x: click.x, y: click.y };
+  }
+
+  async moveCursor(move) {
+    await this.time('browser.mouse.cursor_move', {
+      x: move.to.x,
+      y: move.to.y,
+      steps: move.steps,
+    }, () => this.page.mouse.move(move.to.x, move.to.y, { steps: move.steps }));
+    this.mousePosition = { x: move.to.x, y: move.to.y };
   }
 
   async drag(drag) {

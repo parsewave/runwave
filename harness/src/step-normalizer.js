@@ -1,3 +1,10 @@
+const {
+  assertAllowedFields,
+  inferDurationFromRawActions,
+  normalizeActions,
+  readNumber,
+} = require('./action-normalizer');
+
 const defaultKeyAliases = {
   left: 'ArrowLeft',
   right: 'ArrowRight',
@@ -9,103 +16,31 @@ const defaultKeyAliases = {
   esc: 'Escape',
 };
 
-function readNumber(value, fallback) {
-  return Number(value ?? fallback);
-}
+const STEP_FIELDS = new Set([
+  'action',
+  'action_name',
+  'name',
+  'actions',
+  'captures',
+  'autoCaptures',
+  'captureIntervalMs',
+  'duration',
+]);
 
 function normalizeDuration(input) {
-  const duration = readNumber(input.duration, input.ms ?? 1000);
+  const hasExplicitDuration = Object.prototype.hasOwnProperty.call(input, 'duration');
+  const explicit = hasExplicitDuration ? readNumber(input.duration) : null;
+  const duration = hasExplicitDuration ? explicit : inferDurationFromRawActions(input.actions);
   if (!Number.isFinite(duration) || duration < 0) {
-    throw new Error('duration must be a non-negative number of milliseconds');
+    throw new Error('sequence duration must be a non-negative number of milliseconds');
   }
   return duration;
 }
 
-function normalizeCommand(command, aliases) {
-  const from = readNumber(command.from, command.start ?? command[0]);
-  const to = readNumber(command.to, command.end ?? command[1]);
-  const keyName = command.key ?? command.button ?? command[2];
-  const key = aliases[keyName] || keyName;
-
-  if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to < from) {
-    throw new Error(`invalid command interval: ${JSON.stringify(command)}`);
-  }
-  if (!key) throw new Error(`command is missing key: ${JSON.stringify(command)}`);
-
-  return { from, to, keyName, key };
-}
-
-function normalizeClick(click, duration) {
-  const at = readNumber(click.at, click.from ?? 0);
-  const x = Number(click.x);
-  const y = Number(click.y);
-
-  if (!Number.isFinite(at) || at < 0 || at > duration) {
-    throw new Error(`invalid click time: ${JSON.stringify(click)}`);
-  }
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    throw new Error(`click requires numeric x and y: ${JSON.stringify(click)}`);
-  }
-
-  return {
-    at,
-    x,
-    y,
-    button: click.button || 'left',
-    clickCount: Number(click.clickCount || 1),
-  };
-}
-
-function normalizePoint(point, label) {
-  const x = Number(point && point.x);
-  const y = Number(point && point.y);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    throw new Error(`${label} requires numeric x and y: ${JSON.stringify(point)}`);
-  }
-  return { x, y };
-}
-
-function normalizeDrag(drag, duration) {
-  const at = readNumber(drag.at, drag.fromAt ?? drag.startAt ?? 0);
-  const from = normalizePoint(drag.from || drag.start || { x: drag.x1, y: drag.y1 }, 'drag.from');
-  const to = normalizePoint(drag.to || drag.end || { x: drag.x2, y: drag.y2 }, 'drag.to');
-  const steps = Math.max(1, Math.min(80, Math.round(readNumber(drag.steps, 12))));
-
-  if (!Number.isFinite(at) || at < 0 || at > duration) {
-    throw new Error(`invalid drag time: ${JSON.stringify(drag)}`);
-  }
-
-  return {
-    at,
-    from,
-    to,
-    button: drag.button || 'left',
-    mode: drag.mode === 'html5' ? 'html5' : 'mouse',
-    steps,
-  };
-}
-
-function normalizeViewMove(viewMove, duration) {
-  const from = readNumber(viewMove.from, viewMove.start ?? viewMove.at ?? 0);
-  const to = readNumber(viewMove.to, viewMove.end ?? from);
-  const dx = Number(viewMove.dx ?? viewMove.deltaX ?? viewMove.delta_x ?? 0);
-  const dy = Number(viewMove.dy ?? viewMove.deltaY ?? viewMove.delta_y ?? 0);
-  const steps = Math.max(1, Math.min(80, Math.round(readNumber(viewMove.steps, 12))));
-
-  if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to < from || to > duration) {
-    throw new Error(`invalid view move interval: ${JSON.stringify(viewMove)}`);
-  }
-  if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) {
-    throw new Error(`view move requires numeric dx or dy: ${JSON.stringify(viewMove)}`);
-  }
-
-  return { from, to, dx, dy, steps };
-}
-
 function addCapture(captures, capture, duration) {
-  const at = Number(capture);
-  if (Number.isFinite(at) && at >= 0 && at <= duration) {
-    captures.add(Math.round(at));
+  const start = Number(capture);
+  if (Number.isFinite(start) && start >= 0 && start <= duration) {
+    captures.add(Math.round(start));
   }
 }
 
@@ -117,8 +52,8 @@ function normalizeCaptures(input, config, duration) {
   const autoCaptures = input.autoCaptures !== false && config.autoCaptures !== false;
   const captureIntervalMs = readNumber(input.captureIntervalMs, config.captureIntervalMs ?? 1000);
   if (autoCaptures && Number.isFinite(captureIntervalMs) && captureIntervalMs > 0) {
-    for (let at = captureIntervalMs; at < duration; at += captureIntervalMs) {
-      addCapture(captures, at, duration);
+    for (let start = captureIntervalMs; start < duration; start += captureIntervalMs) {
+      addCapture(captures, start, duration);
     }
     addCapture(captures, duration, duration);
   }
@@ -127,20 +62,47 @@ function normalizeCaptures(input, config, duration) {
   return Array.from(captures).sort((a, b) => a - b);
 }
 
+function bucketActions(actions) {
+  const result = {
+    keyActions: [],
+    clicks: [],
+    drags: [],
+    cursorMoves: [],
+    viewMoves: [],
+  };
+
+  for (const action of actions) {
+    if (action.type === 'key') result.keyActions.push(action);
+    else if (action.type === 'click') result.clicks.push(action);
+    else if (action.type === 'drag') result.drags.push(action);
+    else if (action.type === 'cursor_move') result.cursorMoves.push(action);
+    else if (action.type === 'view_move') result.viewMoves.push(action);
+  }
+
+  return result;
+}
+
 function normalizeStep(input, config, nextStepIndex) {
+  assertAllowedFields(input, STEP_FIELDS, 'step sequence');
   const aliases = { ...defaultKeyAliases, ...(config.keyAliases || {}) };
   const duration = normalizeDuration(input);
-  const viewMoves = input.viewMoves || input.view_moves || input.mouseMoves || input.mouse_moves || [];
-  const drags = input.drags || input.drag || [];
+  const typed = bucketActions(normalizeActions(input.actions, duration, {
+    strict: true,
+    config,
+    aliases,
+    includeKeyName: true,
+    cursorCellsOnTarget: true,
+  }));
 
   return {
     index: nextStepIndex,
     name: String(input.name || `step-${String(nextStepIndex).padStart(3, '0')}`),
     duration,
-    commands: (input.commands || []).map((command) => normalizeCommand(command, aliases)),
-    clicks: (input.clicks || []).map((click) => normalizeClick(click, duration)),
-    drags: (Array.isArray(drags) ? drags : [drags]).map((drag) => normalizeDrag(drag, duration)),
-    viewMoves: viewMoves.map((viewMove) => normalizeViewMove(viewMove, duration)),
+    keyActions: typed.keyActions,
+    clicks: typed.clicks,
+    drags: typed.drags,
+    cursorMoves: typed.cursorMoves,
+    viewMoves: typed.viewMoves,
     captures: normalizeCaptures(input, config, duration),
   };
 }

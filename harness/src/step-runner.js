@@ -8,8 +8,22 @@ function resultFileName(stepIndex, actionName) {
   return `${String(stepIndex).padStart(3, '0')}-${safeName(actionName)}`;
 }
 
-function summarizeCommands(commands) {
-  return commands.map(({ from, to, keyName, key }) => ({ from, to, key: keyName, resolvedKey: key }));
+function summarizeActions(step) {
+  return [
+    ...step.keyActions.map(({ start, end, keyName, key }) => ({ type: 'key', start, end, key: keyName, resolvedKey: key })),
+    ...step.clicks.map(({ type, start, x, y, button, clickCount, cells }) => ({
+      type,
+      start,
+      x,
+      y,
+      button,
+      clickCount,
+      ...(cells ? { cells } : {}),
+    })),
+    ...step.drags.map(({ type, start, from, to, button, mode, steps }) => ({ type, start, from, to, button, mode, steps })),
+    ...step.cursorMoves.map(({ type, start, to, steps }) => ({ type, start, to, steps })),
+    ...step.viewMoves.map(({ type, start, end, dx, dy, steps }) => ({ type, start, end, dx, dy, steps })),
+  ].sort((left, right) => (left.start ?? 0) - (right.start ?? 0));
 }
 
 async function runStep({ input, config, browser, outputDir, nextStepIndex, actionName, profiler }) {
@@ -26,9 +40,11 @@ async function runStep({ input, config, browser, outputDir, nextStepIndex, actio
       stepIndex: step.index,
       duration: step.duration,
       eventCount: events.length,
-      commandCount: step.commands.length,
+      actionCount: step.keyActions.length + step.clicks.length + step.drags.length + step.cursorMoves.length + step.viewMoves.length,
+      keyActionCount: step.keyActions.length,
       clickCount: step.clicks.length,
       dragCount: step.drags.length,
+      cursorMoveCount: step.cursorMoves.length,
       viewMoveCount: step.viewMoves.length,
       captureCount: events.filter((event) => event.type === 'capture').length,
     });
@@ -56,9 +72,10 @@ async function runStep({ input, config, browser, outputDir, nextStepIndex, actio
     startState,
     endState,
     captures,
-    commands: summarizeCommands(step.commands),
+    actions: summarizeActions(step),
     clicks: step.clicks,
     drags: step.drags,
+    cursorMoves: step.cursorMoves,
     viewMoves: step.viewMoves,
   };
   result.resultPath = path.join(outputDir, `${prefix}.json`);

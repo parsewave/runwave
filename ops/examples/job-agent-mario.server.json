@@ -12,7 +12,7 @@
   "agentMinPlaytestMs": 170000,
   "agentMaxActionMs": 6000,
   "agentTimeoutMs": 120000,
-  "agentMaxTokens": 1400,
+  "agentMaxTokens": 2400,
   "viewport": { "width": 960, "height": 540 },
   "videoSize": { "width": 960, "height": 540 }
 }

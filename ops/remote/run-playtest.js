@@ -6,6 +6,9 @@ const http = require('http');
 const path = require('path');
 const { spawn } = require('child_process');
 
+const DEFAULT_PROCESS_STOP_WAIT_MS = 5000;
+const DEFAULT_PROCESS_KILL_WAIT_MS = 5000;
+
 function parseArgs(argv) {
   const out = {};
   for (let i = 2; i < argv.length; i += 1) {
@@ -91,11 +94,78 @@ function spawnLong(command, args, options = {}) {
     cwd: options.cwd,
     env: options.env || process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: options.detached !== false,
   });
   child.stdout.on('data', (chunk) => process.stdout.write(chunk));
   child.stderr.on('data', (chunk) => process.stderr.write(chunk));
   child.on('close', (code) => log('process.end', { command, code }));
   return child;
+}
+
+function processHasClosed(child) {
+  return Boolean(child && (child.exitCode !== null || child.signalCode !== null));
+}
+
+function signalLongProcess(child, signal, options = {}) {
+  if (!child || !child.pid) return false;
+  const kill = options.kill || process.kill;
+  const platform = options.platform || process.platform;
+  const target = platform === 'win32' ? child.pid : -child.pid;
+  try {
+    kill(target, signal);
+    return true;
+  } catch (error) {
+    if (error && error.code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+function waitForProcessClose(child, timeoutMs) {
+  if (!child || processHasClosed(child)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let timer = null;
+    const done = (closed) => {
+      if (timer) clearTimeout(timer);
+      child.off('close', onClose);
+      resolve(closed);
+    };
+    const onClose = () => done(true);
+    child.once('close', onClose);
+    timer = setTimeout(() => done(processHasClosed(child)), Math.max(0, timeoutMs));
+  });
+}
+
+async function stopLongProcess(child, options = {}) {
+  if (!child) return { stopped: false, reason: 'no-process' };
+  if (processHasClosed(child)) return { stopped: true, reason: 'already-closed', pid: child.pid };
+
+  const label = options.label || 'process';
+  const termWaitMs = Math.max(0, Number(options.termWaitMs ?? DEFAULT_PROCESS_STOP_WAIT_MS));
+  const killWaitMs = Math.max(0, Number(options.killWaitMs ?? DEFAULT_PROCESS_KILL_WAIT_MS));
+  const writeLog = options.log || log;
+  writeLog('process.stop.start', { label, pid: child.pid, termWaitMs, killWaitMs });
+
+  const termSent = signalLongProcess(child, 'SIGTERM', options);
+  if (!termSent) {
+    writeLog('process.stop.not_running', { label, pid: child.pid, signal: 'SIGTERM' });
+    return { stopped: true, reason: 'not-running', pid: child.pid };
+  }
+
+  if (await waitForProcessClose(child, termWaitMs)) {
+    writeLog('process.stop.end', { label, pid: child.pid, signal: 'SIGTERM', escalated: false });
+    return { stopped: true, reason: 'terminated', pid: child.pid, signal: 'SIGTERM', escalated: false };
+  }
+
+  writeLog('process.stop.escalate', { label, pid: child.pid, signal: 'SIGKILL' });
+  const killSent = signalLongProcess(child, 'SIGKILL', options);
+  if (!killSent) {
+    writeLog('process.stop.not_running', { label, pid: child.pid, signal: 'SIGKILL' });
+    return { stopped: true, reason: 'not-running-after-term', pid: child.pid, signal: 'SIGTERM', escalated: true };
+  }
+
+  const stopped = await waitForProcessClose(child, killWaitMs);
+  writeLog('process.stop.end', { label, pid: child.pid, signal: 'SIGKILL', escalated: true, stopped });
+  return { stopped, reason: stopped ? 'killed' : 'kill-timeout', pid: child.pid, signal: 'SIGKILL', escalated: true };
 }
 
 function waitForHttp(url, timeoutMs) {
@@ -530,24 +600,24 @@ function defaultPlan(durationMs = 120000) {
   const segmentMs = 10000;
   const patterns = [
     [
-      { from: 0, to: 6200, key: 'ArrowRight' },
-      { from: 1200, to: 7600, key: 'ArrowUp' },
-      { from: 8200, to: 8450, key: 'Space' },
+      { type: 'key', start: 0, end: 6200, key: 'ArrowRight' },
+      { type: 'key', start: 1200, end: 7600, key: 'ArrowUp' },
+      { type: 'key', start: 8200, end: 8450, key: 'Space' },
     ],
     [
-      { from: 0, to: 5200, key: 'ArrowLeft' },
-      { from: 2500, to: 9200, key: 'ArrowDown' },
-      { from: 5600, to: 5750, key: 'Enter' },
+      { type: 'key', start: 0, end: 5200, key: 'ArrowLeft' },
+      { type: 'key', start: 2500, end: 9200, key: 'ArrowDown' },
+      { type: 'key', start: 5600, end: 5750, key: 'Enter' },
     ],
     [
-      { from: 0, to: 6500, key: 'KeyW' },
-      { from: 1000, to: 8200, key: 'KeyD' },
-      { from: 7800, to: 8050, key: 'Space' },
+      { type: 'key', start: 0, end: 6500, key: 'KeyW' },
+      { type: 'key', start: 1000, end: 8200, key: 'KeyD' },
+      { type: 'key', start: 7800, end: 8050, key: 'Space' },
     ],
     [
-      { from: 0, to: 6000, key: 'KeyA' },
-      { from: 2600, to: 8600, key: 'KeyS' },
-      { from: 7000, to: 7250, key: 'Space' },
+      { type: 'key', start: 0, end: 6000, key: 'KeyA' },
+      { type: 'key', start: 2600, end: 8600, key: 'KeyS' },
+      { type: 'key', start: 7000, end: 7250, key: 'Space' },
     ],
   ];
 
@@ -560,11 +630,10 @@ function defaultPlan(durationMs = 120000) {
     {
       action: 'step',
       action_name: 'step-002-focus-start',
-      duration: 900,
-      clicks: [{ at: 100, x: 640, y: 360 }],
-      commands: [
-        { from: 250, to: 350, key: 'Space' },
-        { from: 500, to: 650, key: 'Enter' },
+      actions: [
+        { type: 'click', start: 100, x: 640, y: 360 },
+        { type: 'key', start: 250, end: 350, key: 'Space' },
+        { type: 'key', start: 500, end: 650, key: 'Enter' },
       ],
       duration: focusDuration,
       captures: [focusDuration],
@@ -577,18 +646,21 @@ function defaultPlan(durationMs = 120000) {
   while (elapsed < remaining) {
     const duration = Math.min(segmentMs, remaining - elapsed);
     const pattern = patterns[segmentIndex % patterns.length]
-      .map((command) => ({
-        ...command,
-        to: Math.min(command.to, Math.max(0, duration - 200)),
+      .map((action) => ({
+        ...action,
+        end: Math.min(action.end, Math.max(0, duration - 200)),
       }))
-      .filter((command) => command.to > command.from);
+      .filter((action) => action.end > action.start);
     actions.push({
       action: 'step',
       action_name: `step-${String(segmentIndex + 3).padStart(3, '0')}-play`,
-      duration,
-      commands: pattern,
-      clicks: segmentIndex % 3 === 2 ? [{ at: Math.min(500, duration), x: 640, y: 360 }] : [],
-      view_moves: segmentIndex % 4 === 1 ? [{ from: 800, to: Math.min(2500, duration), dx: 180, dy: -35, steps: 12 }] : [],
+      actions: [
+        ...pattern,
+        ...(segmentIndex % 3 === 2 ? [{ type: 'click', start: Math.min(500, duration), x: 640, y: 360 }] : []),
+        ...(segmentIndex % 4 === 1
+          ? [{ type: 'view_move', start: 800, end: Math.min(2500, duration), dx: 180, dy: -35, steps: 12 }]
+          : []),
+      ],
       captures: [duration],
       autoCaptures: false,
     });
@@ -797,7 +869,16 @@ async function main() {
   } finally {
     summary.finishedAt = new Date().toISOString();
     fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
-    if (gameProcess && !gameProcess.killed) gameProcess.kill('SIGTERM');
+    if (gameProcess) {
+      summary.gameProcessCleanup = await stopLongProcess(gameProcess, {
+        label: 'game',
+        termWaitMs: Number(job.processStopWaitMs ?? runnerEnv.RUNWAVE_PROCESS_STOP_WAIT_MS ?? DEFAULT_PROCESS_STOP_WAIT_MS),
+        killWaitMs: Number(job.processKillWaitMs ?? runnerEnv.RUNWAVE_PROCESS_KILL_WAIT_MS ?? DEFAULT_PROCESS_KILL_WAIT_MS),
+      }).catch((error) => {
+        log('process.stop.error', { jobId, error: error.message });
+        return { stopped: false, reason: 'error', error: error.message };
+      });
+    }
     if (job.s3Uri) summary.uploadedTo = job.s3Uri.replace(/\/+$/, '');
     fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
     const uploadedTo = await uploadWorkspace(job, dirs, runnerEnv).catch((error) => {
@@ -824,5 +905,8 @@ if (require.main === module) {
 module.exports = {
   chooseViewportFromProbe,
   normalizeVlmViewportChoice,
+  signalLongProcess,
+  stopLongProcess,
   viewportCandidatesFromProbe,
+  waitForProcessClose,
 };

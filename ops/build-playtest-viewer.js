@@ -83,7 +83,7 @@ function collectRuns(artifacts, outFile, options = {}) {
 
 function render(runs, artifacts) {
   const cards = runs.map((run, index) => `
-    <article class="card" data-game="${escapeHtml(run.game)}" data-status="${escapeHtml(run.status)}">
+    <article class="card hidden" data-index="${index}" data-game="${escapeHtml(run.game)}" data-status="${escapeHtml(run.status)}">
       <header>
         <div>
           <h2>${escapeHtml(run.game)}</h2>
@@ -92,7 +92,7 @@ function render(runs, artifacts) {
         <a href="${escapeHtml(run.summary)}">summary</a>
       </header>
       <div class="media">
-        ${run.video ? `<video controls preload="metadata" ${run.poster ? `poster="${escapeHtml(run.poster)}"` : ''} src="${escapeHtml(run.video)}"></video>` : '<div class="missing">No video found</div>'}
+        ${run.video ? `<video controls muted playsinline preload="none" data-src="${escapeHtml(run.video)}" ${run.poster ? `poster="${escapeHtml(run.poster)}"` : ''}></video>` : '<div class="missing">No video found</div>'}
       </div>
       <div class="strip">
         ${run.screenshots.slice(0, 8).map((shot) => `<a href="${escapeHtml(shot)}"><img src="${escapeHtml(shot)}" loading="lazy" alt=""></a>`).join('')}
@@ -117,11 +117,13 @@ function render(runs, artifacts) {
     header.page { position: sticky; top: 0; z-index: 2; display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 14px 18px; background: #181818; border-bottom: 1px solid #333; }
     h1 { margin: 0; font-size: 18px; font-weight: 650; }
     .meta { color: #bbb; font-size: 13px; }
-    .controls { display: flex; gap: 8px; align-items: center; }
+    .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
     input { width: min(360px, 42vw); padding: 8px 10px; border: 1px solid #444; border-radius: 6px; background: #0d0d0d; color: #f4f4f4; }
     button, a { color: #f4f4f4; }
     button { padding: 7px 10px; border: 1px solid #555; border-radius: 6px; background: #242424; cursor: pointer; }
-    main { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 14px; padding: 14px; }
+    button.primary { border-color: #79a7ff; background: #1f4f97; }
+    button:disabled { cursor: not-allowed; opacity: 0.5; }
+    main { display: grid; grid-template-columns: repeat(2, minmax(360px, 1fr)); gap: 14px; max-width: 1480px; margin: 0 auto; padding: 14px; }
     .card { border: 1px solid #333; border-radius: 8px; background: #181818; overflow: hidden; }
     .card header, .card footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; }
     h2 { margin: 0; font-size: 15px; font-weight: 650; }
@@ -149,24 +151,109 @@ function render(runs, artifacts) {
     </div>
     <div class="controls">
       <input id="filter" type="search" placeholder="Filter games">
-      <button id="pauseAll" type="button">Pause All</button>
+      <button id="prevPage" type="button">Previous 4</button>
+      <button id="nextPage" class="primary" type="button">Next 4</button>
+      <button id="pauseAll" type="button">Pause Page</button>
+      <div id="pageStatus" class="meta" role="status" aria-live="polite"></div>
     </div>
   </header>
   <main>${cards}</main>
   <script>
+    const PAGE_SIZE = 4;
     const cards = [...document.querySelectorAll('.card')];
     const videos = [...document.querySelectorAll('video')];
-    document.querySelector('#filter').addEventListener('input', (event) => {
-      const q = event.target.value.toLowerCase();
-      for (const card of cards) card.classList.toggle('hidden', !card.dataset.game.toLowerCase().includes(q));
+    const filter = document.querySelector('#filter');
+    const prevPage = document.querySelector('#prevPage');
+    const nextPage = document.querySelector('#nextPage');
+    const pauseAll = document.querySelector('#pauseAll');
+    const pageStatus = document.querySelector('#pageStatus');
+    let page = 0;
+
+    const matchingCards = () => {
+      const q = filter.value.trim().toLowerCase();
+      return cards.filter((card) => !q || card.dataset.game.toLowerCase().includes(q));
+    };
+
+    const ensureVideoSource = (video) => {
+      if (!video || video.src || !video.dataset.src) return;
+      video.src = video.dataset.src;
+      video.load();
+    };
+
+    const unloadVideo = (video) => {
+      if (!video) return;
+      video.pause();
+      if (video.src) {
+        video.removeAttribute('src');
+        video.load();
+      }
+    };
+
+    const playVideo = async (video) => {
+      if (!video) return false;
+      ensureVideoSource(video);
+      video.muted = true;
+      video.playsInline = true;
+      try {
+        await video.play();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const renderPage = async ({ autoplay = true } = {}) => {
+      const matches = matchingCards();
+      const pageCount = Math.max(1, Math.ceil(matches.length / PAGE_SIZE));
+      page = Math.min(Math.max(page, 0), pageCount - 1);
+      const visible = new Set(matches.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE));
+
+      for (const card of cards) {
+        const show = visible.has(card);
+        card.classList.toggle('hidden', !show);
+        const video = card.querySelector('video');
+        if (!show) unloadVideo(video);
+        else ensureVideoSource(video);
+      }
+
+      prevPage.disabled = matches.length <= PAGE_SIZE;
+      nextPage.disabled = matches.length <= PAGE_SIZE;
+      pageStatus.textContent = matches.length
+        ? \`Page \${page + 1} of \${pageCount} · showing \${visible.size} of \${matches.length}\`
+        : 'No matching games';
+
+      if (autoplay) await Promise.all([...visible].map((card) => playVideo(card.querySelector('video'))));
+    };
+
+    filter.addEventListener('input', () => {
+      page = 0;
+      renderPage();
     });
-    document.querySelector('#pauseAll').addEventListener('click', () => videos.forEach((video) => video.pause()));
+    prevPage.addEventListener('click', () => {
+      const pageCount = Math.max(1, Math.ceil(matchingCards().length / PAGE_SIZE));
+      page = (page - 1 + pageCount) % pageCount;
+      renderPage();
+      prevPage.blur();
+    });
+    nextPage.addEventListener('click', () => {
+      const pageCount = Math.max(1, Math.ceil(matchingCards().length / PAGE_SIZE));
+      page = (page + 1) % pageCount;
+      renderPage();
+      nextPage.blur();
+    });
+    pauseAll.addEventListener('click', () => {
+      for (const card of matchingCards().slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)) {
+        card.querySelector('video')?.pause();
+      }
+      pauseAll.blur();
+    });
     document.addEventListener('click', (event) => {
       const play = event.target.closest('[data-play]');
       const pause = event.target.closest('[data-pause]');
-      if (play) videos[Number(play.dataset.play)]?.play();
+      if (play) playVideo(videos[Number(play.dataset.play)]);
       if (pause) videos[Number(pause.dataset.pause)]?.pause();
     });
+    renderPage();
   </script>
 </body>
 </html>

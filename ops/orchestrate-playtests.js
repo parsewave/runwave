@@ -5,17 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
-
-function defaultSshKey() {
-  if (process.env.RUNWAVE_SSH_KEY) return process.env.RUNWAVE_SSH_KEY;
-  if (process.env.SSH_KEY) return process.env.SSH_KEY;
-  const sshDir = path.join(os.homedir(), '.ssh');
-  for (const name of ['id_ed25519', 'id_rsa']) {
-    const candidate = path.join(sshDir, name);
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return path.join(sshDir, 'id_ed25519');
-}
+const { defaultSshKey } = require('./lib/ssh-key');
 
 function parseArgs(argv) {
   const args = {
