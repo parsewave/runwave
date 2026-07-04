@@ -10,20 +10,6 @@ IMAGE="${IMAGE:-ubuntu-24.04}"
 SSH_KEY_NAME="${RUNWAVE_SSH_KEY_NAME:-${SSH_KEY_NAME:-}}"
 BATCH="${BATCH:-runwave-$(date -u +%Y%m%d-%H%M%S)}"
 
-default_ssh_key() {
-  if [ -n "${RUNWAVE_SSH_KEY:-}" ]; then
-    printf '%s\n' "${RUNWAVE_SSH_KEY}"
-  elif [ -n "${SSH_KEY:-}" ]; then
-    printf '%s\n' "${SSH_KEY}"
-  elif [ -f "${HOME}/.ssh/id_ed25519" ]; then
-    printf '%s\n' "${HOME}/.ssh/id_ed25519"
-  elif [ -f "${HOME}/.ssh/id_rsa" ]; then
-    printf '%s\n' "${HOME}/.ssh/id_rsa"
-  else
-    printf '%s\n' "${HOME}/.ssh/id_ed25519"
-  fi
-}
-
 token_from_yaml() {
   awk -F':[[:space:]]*' '/HETZNER_API_KEY/ {
     gsub(/^[[:space:]"'\''"]+|[[:space:]"'\''"]+$/, "", $2);
@@ -49,7 +35,7 @@ command -v jq >/dev/null 2>&1 || {
 
 ssh_key_name_from_local_key() {
   local key pub fingerprint
-  key="$(default_ssh_key)"
+  key="$(node "${ROOT_DIR}/ops/lib/ssh-key.js")"
   pub="${key}.pub"
   if [ ! -f "${pub}" ]; then
     return 1

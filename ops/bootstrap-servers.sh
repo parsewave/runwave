@@ -7,22 +7,6 @@ SSH_USER="${SSH_USER:-root}"
 GAMES_S3_URI="${GAMES_S3_URI:-s3://pw-cruft/games}"
 GAMES_DIR="${GAMES_DIR:-${ROOT_DIR}/cruft/games}"
 
-default_ssh_key() {
-  if [ -n "${RUNWAVE_SSH_KEY:-}" ]; then
-    printf '%s\n' "${RUNWAVE_SSH_KEY}"
-  elif [ -n "${SSH_KEY:-}" ]; then
-    printf '%s\n' "${SSH_KEY}"
-  elif [ -f "${HOME}/.ssh/id_ed25519" ]; then
-    printf '%s\n' "${HOME}/.ssh/id_ed25519"
-  elif [ -f "${HOME}/.ssh/id_rsa" ]; then
-    printf '%s\n' "${HOME}/.ssh/id_rsa"
-  else
-    printf '%s\n' "${HOME}/.ssh/id_ed25519"
-  fi
-}
-
-SSH_KEY="$(default_ssh_key)"
-
 if [ -z "${INVENTORY}" ] || [ ! -f "${INVENTORY}" ]; then
   echo "Usage: ops/bootstrap-servers.sh ops/inventory/<batch>.json" >&2
   exit 1
@@ -36,6 +20,8 @@ command -v jq >/dev/null 2>&1 || {
   echo "jq is required" >&2
   exit 1
 }
+
+SSH_KEY="$(node "${ROOT_DIR}/ops/lib/ssh-key.js")"
 
 tmp_dir="$(mktemp -d)"
 cleanup() {

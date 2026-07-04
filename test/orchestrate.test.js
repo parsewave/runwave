@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { buildJobs, parseArgs } = require('../ops/orchestrate-playtests');
+const { defaultSshKey } = require('../ops/lib/ssh-key');
 
 test('agent fleet jobs default minimum play time to near full duration', () => {
   const args = parseArgs([
@@ -94,4 +95,37 @@ test('orchestrator can take ssh key from environment', () => {
     if (previousSshKey === undefined) delete process.env.SSH_KEY;
     else process.env.SSH_KEY = previousSshKey;
   }
+});
+
+test('default ssh key helper prefers RUNWAVE_SSH_KEY over SSH_KEY', () => {
+  const key = defaultSshKey({
+    env: {
+      RUNWAVE_SSH_KEY: '/tmp/runwave-key',
+      SSH_KEY: '/tmp/ssh-key',
+    },
+    homeDir: '/home/tester',
+    existsSync: () => false,
+  });
+
+  assert.equal(key, '/tmp/runwave-key');
+});
+
+test('default ssh key helper falls back to local id_ed25519', () => {
+  const key = defaultSshKey({
+    env: {},
+    homeDir: '/home/tester',
+    existsSync: (file) => file === '/home/tester/.ssh/id_ed25519',
+  });
+
+  assert.equal(key, '/home/tester/.ssh/id_ed25519');
+});
+
+test('default ssh key helper falls back to id_ed25519 path when no key exists', () => {
+  const key = defaultSshKey({
+    env: {},
+    homeDir: '/home/tester',
+    existsSync: () => false,
+  });
+
+  assert.equal(key, '/home/tester/.ssh/id_ed25519');
 });

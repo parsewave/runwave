@@ -7,20 +7,6 @@ SSH_USER="${SSH_USER:-root}"
 GAMES_S3_URI="${GAMES_S3_URI:-s3://pw-cruft/games}"
 GAMES_DIR="${GAMES_DIR:-${ROOT_DIR}/cruft/games}"
 
-default_ssh_key() {
-  if [ -n "${RUNWAVE_SSH_KEY:-}" ]; then
-    printf '%s\n' "${RUNWAVE_SSH_KEY}"
-  elif [ -n "${SSH_KEY:-}" ]; then
-    printf '%s\n' "${SSH_KEY}"
-  elif [ -f "${HOME}/.ssh/id_ed25519" ]; then
-    printf '%s\n' "${HOME}/.ssh/id_ed25519"
-  elif [ -f "${HOME}/.ssh/id_rsa" ]; then
-    printf '%s\n' "${HOME}/.ssh/id_rsa"
-  else
-    printf '%s\n' "${HOME}/.ssh/id_ed25519"
-  fi
-}
-
 if [ -z "${INVENTORY}" ] || [ ! -f "${INVENTORY}" ]; then
   echo "Usage: ops/bootstrap-servers-parallel.sh cruft/inventory/<batch>.json" >&2
   exit 1
@@ -35,7 +21,7 @@ command -v jq >/dev/null 2>&1 || {
   exit 1
 }
 
-SSH_KEY="$(default_ssh_key)"
+SSH_KEY="$(node "${ROOT_DIR}/ops/lib/ssh-key.js")"
 batch="$(basename "${INVENTORY}" .json)"
 LOG_DIR="${RUNWAVE_BOOTSTRAP_LOG_DIR:-${ROOT_DIR}/cruft/playtests/_bootstrap-logs/${batch}}"
 mkdir -p "${LOG_DIR}"
