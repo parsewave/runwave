@@ -190,6 +190,8 @@ test('agent playtest loop calls model and executes returned sequence', async () 
   assert.equal(result.steps, 1);
   assert.equal(harnessSteps.length, 1);
   assert.equal(harnessSteps[0].action, 'step');
+  assert.equal(harnessSteps[0].duration, 500);
+  assert.deepEqual(harnessSteps[0].captures, [500]);
   assert.equal(harnessSteps[0].actions.find((action) => action.type === 'key').key, 'Enter');
   assert.equal(harnessSteps[0].actions.find((action) => action.type === 'drag').mode, 'mouse');
   assert.equal(result.history[0].result.ok, true);
