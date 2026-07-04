@@ -9,7 +9,7 @@ const test = require('node:test');
 const { normalizeDecision } = require('../agent/src/action-parser');
 const { fallbackDecisionAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
 const { chatCompletion, parseJsonResponse } = require('../agent/src/model-client');
-const { buildPlaytesterPrompt } = require('../agent/src/prompt');
+const { buildPlaytesterPrompt, compactHistory } = require('../agent/src/prompt');
 
 test('normalizes model actions into harness steps', () => {
   const decision = normalizeDecision(
@@ -21,6 +21,7 @@ test('normalizes model actions into harness steps', () => {
       view_moves: [{ from: 0, to: 500, dx: 50, dy: -10 }],
       should_stop: true,
       summary: 'menu is visible',
+      previous_action_outcome: 'Enter opened the menu.',
     },
     { viewport: { width: 1000, height: 600 } }
   );
@@ -44,15 +45,18 @@ test('normalizes model actions into harness steps', () => {
   });
   assert.equal(decision.viewMoves[0].dx, 50);
   assert.equal(decision.shouldStop, true);
+  assert.equal(decision.previousActionOutcome, 'Enter opened the menu.');
 });
 
 test('agent playtest loop calls model and executes returned action', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-test-'));
   const screenshot = path.join(dir, 'screen.png');
+  const afterScreenshot = path.join(dir, 'after-screen.png');
   fs.writeFileSync(
     screenshot,
     Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64')
   );
+  fs.writeFileSync(afterScreenshot, 'different screenshot bytes');
 
   const actions = [];
   const result = await runAgenticPlaytest({
@@ -80,7 +84,7 @@ test('agent playtest loop calls model and executes returned action', async () =>
     }),
     runAction: async (action) => {
       actions.push(action);
-      return { captures: [{ path: screenshot }], endState: { ok: true } };
+      return { ok: true, captures: [{ path: afterScreenshot }], endState: { ok: true } };
     },
   });
 
@@ -89,6 +93,10 @@ test('agent playtest loop calls model and executes returned action', async () =>
   assert.equal(actions[0].action, 'step');
   assert.equal(actions[0].commands[0].key, 'Enter');
   assert.equal(actions[0].drags[0].mode, 'mouse');
+  assert.equal(result.history[0].result.ok, true);
+  assert.equal(result.history[0].result.screenshot, afterScreenshot);
+  assert.equal(result.history[0].result.screenshotChanged, true);
+  assert.deepEqual(result.history[0].result.state, { ok: true });
   assert.equal(fs.existsSync(path.join(dir, 'agent', 'agent-summary.json')), true);
 });
 
@@ -114,6 +122,7 @@ Here is the next action:
 test('recovers JSON with bare repeated string fragments before the closing brace', () => {
   const parsed = parseJsonResponse(`{
   "summary": "The board changed.",
+  "previous_action_outcome": "The previous ArrowRight move shifted the board.",
   "duration_ms": 1500,
   "commands": [
     {"from": 0, "to": 300, "key": "ArrowRight"},
@@ -130,6 +139,7 @@ right corner."
 }`);
 
   assert.equal(parsed.summary, 'The board changed.');
+  assert.equal(parsed.previous_action_outcome, 'The previous ArrowRight move shifted the board.');
   assert.equal(parsed.commands[0].key, 'ArrowRight');
   assert.equal(parsed.rationale, 'Sliding right and down will merge tiles in the bottom-right corner.');
 });
@@ -236,6 +246,74 @@ test('playtester prompt warns when recent actions repeat', () => {
   assert.match(prompt, /drags/);
   assert.match(prompt, /Single Player/);
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
+});
+
+test('compact history includes post-action result signals', () => {
+  const text = compactHistory([
+    {
+      step: 1,
+      summary: 'ball moved through a corridor',
+      commands: [{ key: 'ArrowRight' }],
+      clicks: [],
+      drags: [],
+      result: { ok: true, screenshotChanged: true, captureCount: 1 },
+      outcomeSummary: 'The ball rolled right and the camera followed into a new corridor.',
+    },
+  ]);
+
+  assert.match(text, /controls=ArrowRight/);
+  assert.match(text, /post_action=ok=true,screenshot_changed=true,captures=1/);
+  assert.match(text, /outcome="The ball rolled right and the camera followed into a new corridor\."/);
+});
+
+test('agent loop attaches previous action outcome to the prior history step', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-outcome-test-'));
+  const screenshot = path.join(dir, 'screen.png');
+  fs.writeFileSync(
+    screenshot,
+    Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64')
+  );
+
+  let calls = 0;
+  const result = await runAgenticPlaytest({
+    job: {
+      playtestDurationMs: 9000,
+      agentMinPlaytestMs: 0,
+      viewport: { width: 640, height: 360 },
+    },
+    initialResponse: {
+      screenshot,
+      state: { url: 'http://example.test' },
+    },
+    outputDir: path.join(dir, 'agent'),
+    modelClient: async () => {
+      calls += 1;
+      return {
+        model: 'fake-model',
+        usage: { total_tokens: 1 },
+        json: calls === 1
+          ? {
+              summary: 'ball is in a corridor',
+              previous_action_outcome: '',
+              duration_ms: 500,
+              commands: [{ from: 0, to: 500, key: 'ArrowRight' }],
+              should_stop: false,
+            }
+          : {
+              summary: 'ball has moved into the next corridor',
+              previous_action_outcome: 'ArrowRight rolled the ball into a new visible corridor.',
+              duration_ms: 500,
+              commands: [{ from: 0, to: 500, key: 'ArrowRight' }],
+              should_stop: true,
+            },
+      };
+    },
+    runAction: async () => ({ ok: true, captures: [{ path: screenshot }], endState: { ok: true } }),
+  });
+
+  assert.equal(result.steps, 2);
+  assert.equal(result.history[0].outcomeSummary, 'ArrowRight rolled the ball into a new visible corridor.');
+  assert.equal(result.history[1].outcomeSummary, undefined);
 });
 
 test('chat completion honors explicit retry attempts for malformed JSON', async () => {

@@ -1,5 +1,20 @@
 'use strict';
 
+function compactPostActionResult(result) {
+  if (!result || typeof result !== 'object') return '';
+  const parts = [];
+  if (typeof result.ok === 'boolean') parts.push(`ok=${result.ok}`);
+  if (typeof result.screenshotChanged === 'boolean') parts.push(`screenshot_changed=${result.screenshotChanged}`);
+  if (typeof result.captureCount === 'number') parts.push(`captures=${result.captureCount}`);
+  if (result.error) parts.push(`error=${String(result.error).slice(0, 120)}`);
+  return parts.length ? `; post_action=${parts.join(',')}` : '';
+}
+
+function compactOutcomeSummary(outcomeSummary) {
+  const text = String(outcomeSummary || '').trim();
+  return text ? `; outcome="${text.slice(0, 220)}"` : '';
+}
+
 function compactHistory(history, limit = 8) {
   return history
     .slice(-limit)
@@ -9,7 +24,7 @@ function compactHistory(history, limit = 8) {
         ...(item.clicks || []).map((click) => `click(${click.x},${click.y})`),
         ...(item.drags || []).map((drag) => `drag(${drag.from.x},${drag.from.y}->${drag.to.x},${drag.to.y},${drag.mode})`),
       ];
-      return `step ${item.step}: ${item.summary || item.rationale || 'no summary'}; controls=${controls.join(',') || 'none'}`;
+      return `step ${item.step}: ${item.summary || item.rationale || 'no summary'}; controls=${controls.join(',') || 'none'}${compactPostActionResult(item.result)}${compactOutcomeSummary(item.outcomeSummary)}`;
     })
     .join('\n');
 }
@@ -82,6 +97,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '- If the state JSON reports a canvas, treat that canvas rectangle as the active game area unless the screenshot clearly shows otherwise.',
     '- If you die, reset, or return to a map/title screen, re-enter gameplay and change strategy instead of repeating the same failed action.',
     '- Avoid idle waiting. Each step should do something visible or useful for the gameplay video.',
+    '- In previous_action_outcome, summarize what visibly happened after the most recent prior step. If a prior control moved the player, camera, board, score, menu, or level state, say that clearly. On the first step, use an empty string.',
     '',
     warning ? `${warning}\n` : '',
     'Recent history:',
@@ -93,6 +109,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     'Return only JSON with this shape:',
     '{',
     '  "summary": "one sentence describing what is visible now and what happened recently",',
+    '  "previous_action_outcome": "one sentence describing the visible outcome of the previous step, or empty on the first step",',
     '  "duration_ms": 3000,',
     '  "commands": [{"from": 0, "to": 3000, "key": "ArrowRight"}],',
     '  "clicks": [{"at": 100, "x": 640, "y": 360}],',
@@ -108,4 +125,5 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
 
 module.exports = {
   buildPlaytesterPrompt,
+  compactHistory,
 };

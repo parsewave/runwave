@@ -136,6 +136,9 @@ function normalizeDecision(raw, options = {}) {
     viewMoves: asArray(data.view_moves || data.viewMoves).map((move) => cleanViewMove(move, durationMs)).filter(Boolean),
     shouldStop: Boolean(data.should_stop ?? data.shouldStop),
     summary: String(data.summary || data.observation_summary || '').trim().slice(0, 500),
+    previousActionOutcome: String(
+      data.previous_action_outcome ?? data.previousActionOutcome ?? data.action_outcome ?? data.outcome_summary ?? ''
+    ).trim().slice(0, 500),
     rationale: String(data.rationale || data.reason || '').trim().slice(0, 1000),
   };
 }

@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const { normalizeDecision } = require('./action-parser');
 const { AgentRecorder } = require('./history');
@@ -27,6 +29,38 @@ function responseState(response) {
 
 function viewportFor(job) {
   return job.viewport || job.videoSize || { width: 1280, height: 720 };
+}
+
+function fileHash(file) {
+  if (!file) return null;
+  try {
+    return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+function screenshotChanged(beforeScreenshot, afterScreenshot) {
+  if (!beforeScreenshot || !afterScreenshot) return null;
+  const beforeHash = fileHash(beforeScreenshot);
+  const afterHash = fileHash(afterScreenshot);
+  if (!beforeHash || !afterHash) return null;
+  return beforeHash !== afterHash;
+}
+
+function postActionResult(response, beforeScreenshot) {
+  const body = responseBody(response);
+  const captures = Array.isArray(body.captures) ? body.captures : [];
+  const afterScreenshot = latestScreenshot(response);
+  const result = {
+    ok: typeof body.ok === 'boolean' ? body.ok : null,
+    screenshot: afterScreenshot,
+    screenshotChanged: screenshotChanged(beforeScreenshot, afterScreenshot),
+    captureCount: captures.length,
+    state: responseState(response),
+  };
+  if (body.error) result.error = String(body.error).slice(0, 500);
+  return result;
 }
 
 async function decideNextAction({ job, screenshot, state, history, elapsedMs, maxMs, modelClient }) {
@@ -143,6 +177,10 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       usage = null;
     }
 
+    if (history.length && decision.previousActionOutcome) {
+      history[history.length - 1].outcomeSummary = decision.previousActionOutcome;
+    }
+
     const duration = Math.max(100, Math.min(decision.durationMs, remainingMs));
     step += 1;
     const action = {
@@ -180,6 +218,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     });
 
     lastResponse = await runAction(action);
+    const result = postActionResult(lastResponse, screenshot);
     history.push({
       step,
       summary: decision.summary,
@@ -187,6 +226,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       commands: decision.commands,
       clicks: decision.clicks,
       drags: decision.drags,
+      result,
     });
 
     if (consecutiveModelErrors >= maxModelFallbacks) break;
@@ -219,6 +259,7 @@ module.exports = {
   decideNextAction,
   fallbackDecisionAfterInvalidJson,
   latestScreenshot,
+  postActionResult,
   responseState,
   runAgenticPlaytest,
 };
