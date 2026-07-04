@@ -499,6 +499,8 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
   assert.match(prompt, /24x24 red mark grid/);
   assert.match(prompt, /0 through 575/);
+  assert.match(prompt, /"cells": \[300\]/);
+  assert.match(prompt, /"from_cells": \[300\], "to_cells": \[301\]/);
   assert.match(prompt, /"type": "multi_click"/);
   assert.match(prompt, /Each action must have a "type"/);
   assert.match(prompt, /"actions":/);
@@ -522,6 +524,8 @@ test('playtester prompt describes custom mark grid dimensions', () => {
 
   assert.match(prompt, /12x10 red mark grid/);
   assert.match(prompt, /0 through 119/);
+  assert.match(prompt, /"cells": \[65\]/);
+  assert.doesNotMatch(prompt, /"cells": \[300\]/);
 });
 
 test('playtester prompt warns when recent sequences repeat a control cycle up to 5 steps', () => {

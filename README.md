@@ -148,14 +148,14 @@ runwave '{
   "action": "step",
   "action_name": "turn-003-click-start",
   "actions": [
-    { "type": "click", "start": 100, "end": 500, "x": 512, "y": 310 }
+    { "type": "click", "start": 100, "end": 150, "x": 512, "y": 310 }
   ]
 }'
 ```
 
-Screenshots include an 8x8 red mark grid by default. Pointer actions may use
+Screenshots include a 24x24 red mark grid by default. Pointer actions may use
 up to 4 grid cell IDs instead of exact pixels. Cell IDs run row-major from `0`
-at the top-left to `63` at the bottom-right.
+at the top-left to `575` at the bottom-right.
 
 Single grid-cell click:
 
@@ -164,7 +164,7 @@ runwave '{
   "action": "step",
   "action_name": "turn-003-click-start-cell",
   "actions": [
-    { "type": "click", "start": 100, "end": 500, "cells": [27] }
+    { "type": "click", "start": 100, "cells": [300] }
   ]
 }'
 ```
@@ -176,7 +176,7 @@ runwave '{
   "action": "step",
   "action_name": "turn-003-multi-click",
   "actions": [
-    { "type": "multi_click", "start": 100, "cells": [27, 28], "count": 10 }
+    { "type": "multi_click", "start": 100, "cells": [300, 301], "count": 10 }
   ]
 }'
 ```
@@ -198,13 +198,13 @@ for browser-native draggable/drop elements.
 Drag endpoints can also use grid cells:
 
 ```json
-{ "type": "drag", "start": 100, "from_cells": [34], "to_cells": [35], "mode": "mouse" }
+{ "type": "drag", "start": 100, "from_cells": [300], "to_cells": [301], "mode": "mouse" }
 ```
 
 Move the cursor without clicking:
 
 ```json
-{ "action": "step", "action_name": "turn-005-hover", "actions": [{ "type": "cursor_move", "start": 100, "end": 500, "cells": [27] }] }
+{ "action": "step", "action_name": "turn-005-hover", "actions": [{ "type": "cursor_move", "start": 100, "end": 150, "cells": [324] }] }
 ```
 
 Move the mouse without clicking for camera control:

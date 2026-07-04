@@ -135,6 +135,15 @@ function repeatedHistoryWarning(history) {
   return '';
 }
 
+function gridExampleCells(grid) {
+  const row = Math.min(grid.rows - 1, Math.max(0, Math.floor(grid.rows / 2)));
+  const col = Math.min(grid.cols - 1, Math.max(0, Math.floor(grid.cols / 2)));
+  const center = row * grid.cols + col;
+  const right = row * grid.cols + Math.min(grid.cols - 1, col + 1);
+  const below = Math.min(grid.rows - 1, row + 1) * grid.cols + col;
+  return { center, right, below };
+}
+
 function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history }) {
   const secondsLeft = Math.max(0, Math.round((maxMs - elapsedMs) / 1000));
   const controls = job.agentControls || [
@@ -153,6 +162,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
   const warning = repeatedHistoryWarning(history);
   const grid = markGridFromConfig(job || {});
   const maxGridCell = grid.rows * grid.cols - 1;
+  const examples = gridExampleCells(grid);
 
   return [
     'You are an agentic browser-game playtester. Your job is to create a useful gameplay video, not to judge the game.',
@@ -200,10 +210,10 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '  "actions": [',
     '    {"type": "key", "start": 0, "end": 300, "key": "ArrowRight"},',
     '    {"type": "key", "start": 200, "end": 700, "key": "ArrowDown"},',
-    '    {"type": "click", "start": 100, "cells": [27]},',
-    '    {"type": "multi_click", "start": 100, "cells": [27, 28], "count": 10},',
-    '    {"type": "drag", "start": 100, "from_cells": [34], "to_cells": [35], "mode": "mouse", "steps": 12},',
-    '    {"type": "cursor_move", "start": 100, "cells": [27], "steps": 8},',
+    `    {"type": "click", "start": 100, "cells": [${examples.center}]},`,
+    `    {"type": "multi_click", "start": 100, "cells": [${examples.center}, ${examples.right}], "count": 10},`,
+    `    {"type": "drag", "start": 100, "from_cells": [${examples.center}], "to_cells": [${examples.right}], "mode": "mouse", "steps": 12},`,
+    `    {"type": "cursor_move", "start": 100, "cells": [${examples.below}], "steps": 8},`,
     '    {"type": "view_move", "start": 0, "end": 800, "dx": 120, "dy": 0, "steps": 8}',
     '  ],',
     '  "should_stop": false,',
