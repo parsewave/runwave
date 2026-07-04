@@ -127,6 +127,42 @@ test('normalizes harness grid-cell steps into concrete pointer events', () => {
   assert.deepEqual(step.cursorMoves[0].to.cells, [7]);
 });
 
+test('infers harness duration from action timing fields only', () => {
+  const step = normalizeStep(
+    {
+      actions: [
+        { type: 'drag', start: 100, from: { x: 854, y: 156 }, to: { x: 1012, y: 158 }, mode: 'mouse' },
+        { type: 'cursor_move', start: 500, to: { x: 347, y: 345 }, steps: 5 },
+        { type: 'drag', start: 1000, from: { x: 609, y: 331 }, to: { x: 605, y: 202 }, mode: 'mouse' },
+      ],
+    },
+    { viewport: { width: 1280, height: 720 } },
+    1
+  );
+
+  assert.equal(step.duration, 1000);
+  assert.deepEqual(step.captures, [1000]);
+  assert.equal(step.drags.length, 2);
+  assert.equal(step.cursorMoves.length, 1);
+});
+
+test('infers harness duration from key ends and multi-click intervals', () => {
+  const keyStep = normalizeStep(
+    { actions: [{ type: 'key', start: 0, end: 700, key: 'Space' }] },
+    {},
+    1
+  );
+  const multiClickStep = normalizeStep(
+    { actions: [{ type: 'multi_click', start: 200, x: 100, y: 100, count: 4, intervalMs: 150 }] },
+    { viewport: { width: 800, height: 800 } },
+    2
+  );
+
+  assert.equal(keyStep.duration, 700);
+  assert.equal(multiClickStep.duration, 650);
+  assert.deepEqual(multiClickStep.clicks.map((click) => click.start), [200, 350, 500, 650]);
+});
+
 test('rejects harness step fields outside the canonical schema', () => {
   const explicit = normalizeStep({ duration: 1000, actions: [], captures: [1000], autoCaptures: false }, {}, 1);
   assert.equal(explicit.duration, 1000);

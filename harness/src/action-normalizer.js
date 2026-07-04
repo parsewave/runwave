@@ -81,19 +81,32 @@ function actionEnd(action) {
   return finiteNumber(action.start, 0);
 }
 
+function actionStartEnd(action) {
+  const start = finiteNumber(action.start, null);
+  const end = finiteNumber(action.end, null);
+  if (end !== null) return end;
+  return start;
+}
+
 function rawActionEnd(action) {
   if (!action || typeof action !== 'object') return null;
-  const value = action.end ?? action.start;
-  const number = Number(value);
-  if (!Number.isFinite(number) || number < 0) return null;
+  const type = actionType(action);
 
-  if (actionType(action) === 'multi_click') {
+  if (type === 'multi_click') {
+    const start = finiteNumber(action.start, null);
+    if (start === null || start < 0) return null;
     const count = Math.max(1, Math.round(finiteNumber(action.count, 10)));
     const intervalMs = finiteNumber(action.intervalMs, 100);
-    if (Number.isFinite(intervalMs) && intervalMs > 0) return number + (count - 1) * intervalMs;
+    if (Number.isFinite(intervalMs) && intervalMs > 0) return start + (count - 1) * intervalMs;
+    return start;
   }
 
-  return number;
+  if (type === 'key' || type === 'view_move' || type === 'click' || type === 'drag' || type === 'cursor_move') {
+    const end = actionStartEnd(action);
+    return Number.isFinite(end) && end >= 0 ? end : null;
+  }
+
+  return null;
 }
 
 function inferDurationFromRawActions(actions) {
