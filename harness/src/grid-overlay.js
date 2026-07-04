@@ -1,6 +1,6 @@
 const fs = require('fs');
 const { PNG } = require('pngjs');
-const { DEFAULT_MARK_GRID } = require('./mark-grid');
+const { markGridFromConfig } = require('./mark-grid');
 
 const FONT = {
   '0': ['111', '101', '101', '101', '111'],
@@ -55,6 +55,20 @@ function drawHorizontalLine(png, y, color) {
   for (let x = 0; x < png.width; x += 1) blendPixel(png, x, py, color);
 }
 
+function drawVerticalSegment(png, x, top, bottom, color) {
+  const px = Math.round(x);
+  const start = Math.max(0, Math.round(top));
+  const end = Math.min(png.height - 1, Math.round(bottom));
+  for (let y = start; y <= end; y += 1) blendPixel(png, px, y, color);
+}
+
+function drawHorizontalSegment(png, y, left, right, color) {
+  const py = Math.round(y);
+  const start = Math.max(0, Math.round(left));
+  const end = Math.min(png.width - 1, Math.round(right));
+  for (let x = start; x <= end; x += 1) blendPixel(png, x, py, color);
+}
+
 function drawRect(png, x, y, width, height, color, lineWidth = 1) {
   for (let offset = 0; offset < lineWidth; offset += 1) {
     for (let px = x + offset; px < x + width - offset; px += 1) {
@@ -98,6 +112,48 @@ function drawLabel(png, text, x, y) {
   drawText(png, text, x + padding, y + padding, [255, 255, 255, 0.9], scale);
 }
 
+function copyImage(source, target, offsetX, offsetY) {
+  for (let y = 0; y < source.height; y += 1) {
+    for (let x = 0; x < source.width; x += 1) {
+      const sourceIndex = (source.width * y + x) << 2;
+      const targetIndex = (target.width * (y + offsetY) + x + offsetX) << 2;
+      target.data[targetIndex] = source.data[sourceIndex];
+      target.data[targetIndex + 1] = source.data[sourceIndex + 1];
+      target.data[targetIndex + 2] = source.data[sourceIndex + 2];
+      target.data[targetIndex + 3] = source.data[sourceIndex + 3];
+    }
+  }
+}
+
+function fillImage(png, color) {
+  for (let y = 0; y < png.height; y += 1) {
+    for (let x = 0; x < png.width; x += 1) {
+      const idx = (png.width * y + x) << 2;
+      png.data[idx] = color[0];
+      png.data[idx + 1] = color[1];
+      png.data[idx + 2] = color[2];
+      png.data[idx + 3] = color[3];
+    }
+  }
+}
+
+function labelMetrics(text, scale, padding) {
+  return {
+    width: textWidth(text, scale) + padding * 2,
+    height: 5 * scale + padding * 2,
+  };
+}
+
+function gridLabelStyle(grid, sourceWidth, sourceHeight) {
+  const maxLabel = String(Math.max(grid.rows - 1, grid.cols - 1));
+  const minCell = Math.min(sourceWidth / grid.cols, sourceHeight / grid.rows);
+  const scale = minCell < textWidth(maxLabel, 2) + 4 ? 1 : 2;
+  const padding = scale === 1 ? 1 : 2;
+  const metrics = labelMetrics(maxLabel, scale, padding);
+  const margin = Math.max(24, metrics.width + 8, metrics.height + 8);
+  return { scale, padding, margin };
+}
+
 function drawCoordinateGridOnScreenshot(file) {
   const png = PNG.sync.read(fs.readFileSync(file));
   const xStep = Math.max(80, Math.floor(png.width / 8));
@@ -117,39 +173,58 @@ function drawCoordinateGridOnScreenshot(file) {
 }
 
 function drawMarkGridOnScreenshot(file, config = {}) {
-  const png = PNG.sync.read(fs.readFileSync(file));
-  const rows = Math.max(1, Math.round(Number(config.markGridRows ?? config.gridRows ?? DEFAULT_MARK_GRID.rows)));
-  const cols = Math.max(1, Math.round(Number(config.markGridCols ?? config.gridCols ?? DEFAULT_MARK_GRID.cols)));
-  const cellWidth = png.width / cols;
-  const cellHeight = png.height / rows;
-  const dense = Math.min(cellWidth, cellHeight) < 36 || rows * cols > 256;
-  const lineColor = dense ? [255, 36, 36, 0.34] : [255, 36, 36, 0.48];
-  const labelBg = dense ? [0, 0, 0, 0.58] : [0, 0, 0, 0.68];
-  const labelText = [255, 255, 255, 0.94];
+  const source = PNG.sync.read(fs.readFileSync(file));
+  const grid = markGridFromConfig(config);
+  const { scale, padding, margin } = gridLabelStyle(grid, source.width, source.height);
+  const png = new PNG({ width: source.width + margin * 2, height: source.height + margin * 2 });
+  fillImage(png, [18, 18, 18, 255]);
+  copyImage(source, png, margin, margin);
+
+  const rows = grid.rows;
+  const cols = grid.cols;
+  const cellWidth = source.width / cols;
+  const cellHeight = source.height / rows;
+  const gameLeft = margin;
+  const gameTop = margin;
+  const gameRight = margin + source.width;
+  const gameBottom = margin + source.height;
+  const lineColor = [255, 36, 36, 0.18];
+  const labelBg = [0, 0, 0, 0.3];
+  const labelText = [255, 255, 255, 0.86];
+  const borderColor = [255, 255, 255, 0.38];
 
   for (let col = 0; col <= cols; col += 1) {
-    drawVerticalLine(png, col * cellWidth, lineColor);
+    drawVerticalSegment(png, gameLeft + col * cellWidth, gameTop, gameBottom, lineColor);
   }
   for (let row = 0; row <= rows; row += 1) {
-    drawHorizontalLine(png, row * cellHeight, lineColor);
+    drawHorizontalSegment(png, gameTop + row * cellHeight, gameLeft, gameRight, lineColor);
+  }
+
+  for (let col = 0; col < cols; col += 1) {
+    const text = String(col);
+    const metrics = labelMetrics(text, scale, padding);
+    const x = Math.round(gameLeft + col * cellWidth + (cellWidth - metrics.width) / 2);
+    const topY = Math.round((margin - metrics.height) / 2);
+    const bottomY = Math.round(gameBottom + (margin - metrics.height) / 2);
+    fillRect(png, x, topY, metrics.width, metrics.height, labelBg);
+    drawText(png, text, x + padding, topY + padding, labelText, scale);
+    fillRect(png, x, bottomY, metrics.width, metrics.height, labelBg);
+    drawText(png, text, x + padding, bottomY + padding, labelText, scale);
   }
 
   for (let row = 0; row < rows; row += 1) {
-    for (let col = 0; col < cols; col += 1) {
-      const id = row * cols + col;
-      const text = String(id);
-      const scale = dense ? 1 : 2;
-      const padding = dense ? 2 : 4;
-      const labelWidth = textWidth(text, scale) + padding * 2;
-      const labelHeight = 5 * scale + padding * 2;
-      const x = Math.round(col * cellWidth + (cellWidth - labelWidth) / 2);
-      const y = Math.round(row * cellHeight + (cellHeight - labelHeight) / 2);
-      fillRect(png, x, y, labelWidth, labelHeight, labelBg);
-      drawText(png, text, x + padding, y + padding, labelText, scale);
-    }
+    const text = String(row);
+    const metrics = labelMetrics(text, scale, padding);
+    const y = Math.round(gameTop + row * cellHeight + (cellHeight - metrics.height) / 2);
+    const leftX = Math.round((margin - metrics.width) / 2);
+    const rightX = Math.round(gameRight + (margin - metrics.width) / 2);
+    fillRect(png, leftX, y, metrics.width, metrics.height, labelBg);
+    drawText(png, text, leftX + padding, y + padding, labelText, scale);
+    fillRect(png, rightX, y, metrics.width, metrics.height, labelBg);
+    drawText(png, text, rightX + padding, y + padding, labelText, scale);
   }
 
-  drawRect(png, 1, 1, png.width - 2, png.height - 2, [255, 255, 255, 0.75], 2);
+  drawRect(png, gameLeft, gameTop, source.width, source.height, borderColor, 1);
   fs.writeFileSync(file, PNG.sync.write(png));
 }
 

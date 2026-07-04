@@ -89,7 +89,7 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
       {
         action: 'step',
         action_name: 'smoke-click',
-        actions: [{ type: 'click', start: 50, end: 300, x: 320, y: 210 }],
+        actions: [{ type: 'click', start: 50, end: 100, x: 320, y: 210 }],
         captures: [300],
         autoCaptures: false,
       },

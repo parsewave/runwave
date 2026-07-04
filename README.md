@@ -153,9 +153,11 @@ runwave '{
 }'
 ```
 
-Screenshots include a 24x24 red mark grid by default. Pointer actions may use
-up to 4 grid cell IDs instead of exact pixels. Cell IDs run row-major from `0`
-at the top-left to `575` at the bottom-right.
+Screenshots include a 24x24 red mark grid by default. Column labels are shown in
+the top and bottom margins, and row labels are shown in the left and right
+margins. Pointer actions may use row/column cells instead of exact pixels. Raw
+`x`/`y` coordinates are still supported, but they always refer to the inner
+browser viewport, not the extra label margins in marked screenshots.
 
 Single grid-cell click:
 
@@ -164,7 +166,7 @@ runwave '{
   "action": "step",
   "action_name": "turn-003-click-start-cell",
   "actions": [
-    { "type": "click", "start": 100, "cells": [300] }
+    { "type": "click", "start": 100, "cell": { "row": 12, "col": 12 } }
   ]
 }'
 ```
@@ -176,7 +178,7 @@ runwave '{
   "action": "step",
   "action_name": "turn-003-multi-click",
   "actions": [
-    { "type": "multi_click", "start": 100, "cells": [300, 301], "count": 10 }
+    { "type": "multi_click", "start": 100, "cells": [{ "row": 12, "col": 12 }, { "row": 12, "col": 13 }], "count": 10 }
   ]
 }'
 ```
@@ -198,13 +200,13 @@ for browser-native draggable/drop elements.
 Drag endpoints can also use grid cells:
 
 ```json
-{ "type": "drag", "start": 100, "from_cells": [300], "to_cells": [301], "mode": "mouse" }
+{ "type": "drag", "start": 100, "from": { "row": 12, "col": 12 }, "to": { "row": 12, "col": 13 }, "mode": "mouse" }
 ```
 
 Move the cursor without clicking:
 
 ```json
-{ "action": "step", "action_name": "turn-005-hover", "actions": [{ "type": "cursor_move", "start": 100, "end": 150, "cells": [324] }] }
+{ "action": "step", "action_name": "turn-005-hover", "actions": [{ "type": "cursor_move", "start": 100, "end": 150, "cell": { "row": 13, "col": 12 } }] }
 ```
 
 Move the mouse without clicking for camera control:
