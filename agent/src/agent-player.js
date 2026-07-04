@@ -210,6 +210,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     const harnessStep = {
       action: 'step',
       action_name: `agent-step-${String(step).padStart(3, '0')}`,
+      duration,
       actions: sequence.actions,
       captures: [duration],
       autoCaptures: false,

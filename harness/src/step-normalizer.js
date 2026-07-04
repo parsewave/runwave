@@ -25,6 +25,7 @@ const STEP_FIELDS = new Set([
   'autoCaptures',
   'captureIntervalMs',
   'duration',
+  '__runwaveVerbose',
 ]);
 
 function normalizeDuration(input) {
