@@ -8,7 +8,7 @@ const test = require('node:test');
 const { PNG } = require('pngjs');
 
 const { normalizeSequence } = require('../agent/src/action-parser');
-const { fallbackSequenceAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
+const { decideNextSequence, runAgenticPlaytest } = require('../agent/src/agent-player');
 const { chatCompletion, parseJsonResponse } = require('../agent/src/model-client');
 const { buildPlaytesterPrompt, compactHistory } = require('../agent/src/prompt');
 const { drawMarkGridOnScreenshot } = require('../harness/src/grid-overlay');
@@ -457,30 +457,29 @@ test('agent playtest loop calls model and executes returned sequence', async () 
   assert.equal(fs.existsSync(path.join(dir, 'agent', 'agent-summary.json')), true);
 });
 
-test('agent playtest loop falls back when model JSON has invalid sequence fields', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-schema-fallback-test-'));
+test('decideNextSequence retries when parsed model JSON has invalid sequence fields', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-schema-retry-test-'));
   const screenshot = path.join(dir, 'screen.png');
   fs.writeFileSync(
     screenshot,
     Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64')
   );
 
-  const harnessSteps = [];
-  const logs = [];
   let call = 0;
-  const result = await runAgenticPlaytest({
+  const messagesByCall = [];
+  const result = await decideNextSequence({
     job: {
-      playtestDurationMs: 8000,
-      agentMinPlaytestMs: 0,
       viewport: { width: 640, height: 360 },
+      agentSchemaAttempts: 2,
     },
-    initialResponse: {
-      screenshot,
-      state: { url: 'http://example.test' },
-    },
-    outputDir: path.join(dir, 'agent'),
-    modelClient: async () => {
+    screenshot,
+    state: { url: 'http://example.test' },
+    history: [],
+    elapsedMs: 0,
+    maxMs: 120000,
+    modelClient: async ({ messages }) => {
       call += 1;
+      messagesByCall.push(messages);
       if (call === 1) {
         return {
           model: 'fake-model',
@@ -495,12 +494,55 @@ test('agent playtest loop falls back when model JSON has invalid sequence fields
       }
       return {
         model: 'fake-model',
-        text: '{"summary":"done","actions":[],"should_stop":true}',
+        text: '{"summary":"press enter","actions":[{"type":"key","start":0,"end":500,"key":"Enter"}],"should_stop":false}',
         usage: { total_tokens: 1 },
         json: {
-          summary: 'done',
+          summary: 'press enter',
+          actions: [{ type: 'key', start: 0, end: 500, key: 'Enter' }],
+          should_stop: false,
+        },
+      };
+    },
+  });
+
+  assert.equal(call, 2);
+  assert.equal(result.sequence.actions[0].key, 'Enter');
+  assert.match(messagesByCall[1][2].content, /did not match the required sequence schema/);
+  assert.match(messagesByCall[1][2].content, /Top-level keys must be exactly/);
+});
+
+test('agent playtest loop fails invalid model output without fallback actions', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-schema-fail-test-'));
+  const screenshot = path.join(dir, 'screen.png');
+  fs.writeFileSync(
+    screenshot,
+    Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64')
+  );
+
+  const harnessSteps = [];
+  let call = 0;
+  const result = await runAgenticPlaytest({
+    job: {
+      playtestDurationMs: 8000,
+      agentMinPlaytestMs: 0,
+      viewport: { width: 640, height: 360 },
+      agentSchemaAttempts: 2,
+    },
+    initialResponse: {
+      screenshot,
+      state: { url: 'http://example.test' },
+    },
+    outputDir: path.join(dir, 'agent'),
+    modelClient: async () => {
+      call += 1;
+      return {
+        model: 'fake-model',
+        text: '{"summary":"menu is visible","actions":[],"and survive.\\"":true}',
+        usage: { total_tokens: 1 },
+        json: {
+          summary: 'menu is visible',
           actions: [],
-          should_stop: true,
+          'and survive."': true,
         },
       };
     },
@@ -508,15 +550,14 @@ test('agent playtest loop falls back when model JSON has invalid sequence fields
       harnessSteps.push(step);
       return { ok: true, captures: [{ path: screenshot }], endState: { ok: true } };
     },
-    log: (event, fields) => logs.push({ event, fields }),
-  });
+  }).then(
+    () => assert.fail('runAgenticPlaytest should reject invalid model output after schema retries'),
+    (error) => error
+  );
 
-  assert.equal(result.modelErrorCount, 1);
-  assert.equal(result.steps, 2);
-  assert.equal(harnessSteps[0].actions[0].type, 'key');
-  assert.equal(harnessSteps[0].actions[0].key, 'Space');
-  assert.equal(harnessSteps[1].actions.length, 0);
-  assert.equal(logs.some((entry) => entry.event === 'agent.model_sequence_error'), true);
+  assert.equal(call, 2);
+  assert.equal(harnessSteps.length, 0);
+  assert.equal(result.code, 'RUNWAVE_MODEL_SEQUENCE_INVALID');
 });
 
 test('parses fenced nested JSON responses from vision models', () => {
@@ -613,25 +654,6 @@ test('tags malformed model JSON parse errors', () => {
       return true;
     }
   );
-});
-
-test('builds a conservative fallback sequence after invalid model JSON', () => {
-  const sequence = fallbackSequenceAfterInvalidJson({
-    viewport: { width: 640, height: 360 },
-    error: Object.assign(new Error('bad JSON'), { code: 'RUNWAVE_MODEL_JSON_PARSE' }),
-    history: [
-      {
-        step: 1,
-        summary: 'board changed',
-        actions: [{ type: 'key', start: 0, end: 1000, key: 'ArrowLeft' }],
-      },
-    ],
-  });
-
-  assert.equal(sequence.durationMs, 1000);
-  assert.equal(sequence.actions[0].key, 'ArrowLeft');
-  assert.equal(sequence.actions.filter((action) => action.type === 'click').length, 0);
-  assert.equal(sequence.actions.filter((action) => action.type === 'drag').length, 0);
 });
 
 test('playtester prompt warns when recent sequences repeat', () => {

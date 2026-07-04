@@ -5,8 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const { normalizeSequence } = require('./action-parser');
 const { AgentRecorder } = require('./history');
-const { chatCompletion, dataUrl, isModelJsonParseError } = require('./model-client');
-const { buildPlaytesterPrompt } = require('./prompt');
+const { chatCompletion, dataUrl } = require('./model-client');
+const { buildPlaytesterPrompt, sequenceSchemaGuide } = require('./prompt');
 
 const STOP_RESERVE_MS = 5000;
 const MODEL_SEQUENCE_INVALID = 'RUNWAVE_MODEL_SEQUENCE_INVALID';
@@ -64,6 +64,25 @@ function postSequenceResult(response, beforeScreenshot) {
   return result;
 }
 
+function modelOutputSchemaError(error, responseText) {
+  const wrapped = new Error(`model response did not match the sequence schema: ${error.message}`);
+  wrapped.code = MODEL_SEQUENCE_INVALID;
+  wrapped.responseText = responseText;
+  wrapped.cause = error;
+  return wrapped;
+}
+
+function schemaCorrectionMessage(error) {
+  return [
+    'The previous JSON object was parseable, but it did not match the required sequence schema.',
+    `Validation error: ${String(error.message || error).slice(0, 500)}`,
+    '',
+    sequenceSchemaGuide(),
+    '',
+    'Return a corrected JSON object for the same screenshot and same game state. Do not include markdown, prose, comments, trailing text, or extra keys.',
+  ].join('\n');
+}
+
 async function decideNextSequence({ job, screenshot, state, history, elapsedMs, maxMs, modelClient, promptStep = null, onPrompt = null }) {
   if (!screenshot) throw new Error('agent cannot decide without a screenshot');
   const viewport = viewportFor(job);
@@ -78,75 +97,52 @@ async function decideNextSequence({ job, screenshot, state, history, elapsedMs, 
     });
   }
   const modelStartedAt = Date.now();
-  const result = await modelClient({
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: dataUrl(screenshot) } },
-        ],
-      },
+  const firstMessage = {
+    role: 'user',
+    content: [
+      { type: 'text', text: prompt },
+      { type: 'image_url', image_url: { url: dataUrl(screenshot) } },
     ],
-    maxTokens: Number(job.agentMaxTokens || 2400),
-    timeoutMs: Number(job.agentTimeoutMs || 120000),
-    temperature: Number(job.agentTemperature ?? 0.2),
-  });
+  };
+  let messages = [firstMessage];
+  const schemaAttempts = Math.max(1, Math.round(Number(job.agentSchemaAttempts || 2)));
+  let lastSchemaError = null;
 
-  let sequence;
-  try {
-    sequence = normalizeSequence(result.json, {
-      viewport,
-      config: job,
-      maxDurationMs: Number(job.agentMaxActionMs || 8000),
+  for (let attempt = 1; attempt <= schemaAttempts; attempt += 1) {
+    const result = await modelClient({
+      messages,
+      maxTokens: Number(job.agentMaxTokens || 2400),
+      timeoutMs: Number(job.agentTimeoutMs || 120000),
+      temperature: Number(job.agentTemperature ?? 0.2),
     });
-  } catch (error) {
-    const wrapped = new Error(`model response did not match the sequence schema: ${error.message}`);
-    wrapped.code = MODEL_SEQUENCE_INVALID;
-    wrapped.responseText = result.text;
-    wrapped.cause = error;
-    throw wrapped;
+
+    try {
+      const sequence = normalizeSequence(result.json, {
+        viewport,
+        config: job,
+        maxDurationMs: Number(job.agentMaxActionMs || 8000),
+      });
+
+      return {
+        sequence,
+        model: result.model,
+        modelElapsedMs: Date.now() - modelStartedAt,
+        rawText: String(result.text || '').slice(0, 8000),
+        usage: result.usage,
+      };
+    } catch (error) {
+      lastSchemaError = modelOutputSchemaError(error, result.text);
+      if (attempt >= schemaAttempts) throw lastSchemaError;
+
+      messages = [
+        firstMessage,
+        { role: 'assistant', content: String(result.text || '').slice(0, 4000) },
+        { role: 'user', content: schemaCorrectionMessage(error) },
+      ];
+    }
   }
 
-  return {
-    sequence,
-    model: result.model,
-    modelElapsedMs: Date.now() - modelStartedAt,
-    rawText: String(result.text || '').slice(0, 8000),
-    usage: result.usage,
-  };
-}
-
-function isRecoverableModelOutputError(error) {
-  return isModelJsonParseError(error) || Boolean(error && error.code === MODEL_SEQUENCE_INVALID);
-}
-
-function fallbackSequenceAfterInvalidJson({ history, viewport, error }) {
-  const lastWithKeyActions = history
-    .slice()
-    .reverse()
-    .find((item) => Array.isArray(item.actions) && item.actions.some((action) => action.type === 'key'));
-  const actions = lastWithKeyActions
-    ? lastWithKeyActions.actions
-        .filter((action) => action.type === 'key')
-        .slice(0, 2)
-        .map((action) => ({
-          type: 'key',
-          start: 0,
-          end: Math.max(500, Math.min(1500, Number(action.end || 1000) - Number(action.start || 0))),
-          key: action.key,
-        }))
-    : [{ type: 'key', start: 0, end: 600, key: 'Space' }];
-
-  return normalizeSequence(
-    {
-      summary: 'The model returned invalid JSON, so the harness is continuing with a conservative fallback sequence.',
-      actions,
-      should_stop: false,
-      rationale: `Avoid ending the playtest because of a malformed model response: ${String(error.message || error).slice(0, 200)}`,
-    },
-    { viewport }
-  );
+  throw lastSchemaError || new Error('model response did not match the sequence schema');
 }
 
 function actionsByType(actions, type) {
@@ -171,9 +167,6 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
   let lastResponse = initialResponse;
   let step = 0;
   let stoppedByAgent = false;
-  let modelErrorCount = 0;
-  let consecutiveModelErrors = 0;
-  const maxModelFallbacks = Math.max(1, Math.round(Number(job.agentMaxModelFallbacks || 3)));
 
   while (Date.now() - startedAt < maxMs - STOP_RESERVE_MS) {
     const elapsedMs = Date.now() - startedAt;
@@ -189,34 +182,17 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     let modelElapsedMs;
     let rawText;
     let usage;
-    try {
-      ({ sequence, model, modelElapsedMs, rawText, usage } = await decideNextSequence({
-        job,
-        screenshot,
-        state,
-        history,
-        elapsedMs,
-        maxMs,
-        modelClient,
-        promptStep: step + 1,
-        onPrompt: (payload) => recorder.prompt(payload),
-      }));
-      consecutiveModelErrors = 0;
-    } catch (error) {
-      if (!isRecoverableModelOutputError(error)) throw error;
-      modelErrorCount += 1;
-      consecutiveModelErrors += 1;
-      log(isModelJsonParseError(error) ? 'agent.model_json_error' : 'agent.model_sequence_error', {
-        step: step + 1,
-        consecutiveModelErrors,
-        error: String(error.message || error).slice(0, 500),
-      });
-      sequence = fallbackSequenceAfterInvalidJson({ history, viewport: viewportFor(job), error });
-      model = isModelJsonParseError(error) ? 'fallback-after-invalid-json' : 'fallback-after-invalid-sequence';
-      modelElapsedMs = 0;
-      rawText = String(error.responseText || error.message || '').slice(0, 8000);
-      usage = null;
-    }
+    ({ sequence, model, modelElapsedMs, rawText, usage } = await decideNextSequence({
+      job,
+      screenshot,
+      state,
+      history,
+      elapsedMs,
+      maxMs,
+      modelClient,
+      promptStep: step + 1,
+      onPrompt: (payload) => recorder.prompt(payload),
+    }));
 
     if (history.length && sequence.previousSequenceOutcome) {
       history[history.length - 1].outcomeSummary = sequence.previousSequenceOutcome;
@@ -272,8 +248,6 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       result,
     });
 
-    if (consecutiveModelErrors >= maxModelFallbacks) break;
-
     if (sequence.shouldStop && Date.now() - startedAt >= minMs) {
       stoppedByAgent = true;
       break;
@@ -287,7 +261,6 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     stoppedByAgent,
     maxMs,
     minMs,
-    modelErrorCount,
     history,
   };
   recorder.summary(summary);
@@ -300,10 +273,10 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
 
 module.exports = {
   decideNextSequence,
-  fallbackSequenceAfterInvalidJson,
-  isRecoverableModelOutputError,
   latestScreenshot,
+  modelOutputSchemaError,
   postSequenceResult,
   responseState,
   runAgenticPlaytest,
+  schemaCorrectionMessage,
 };

@@ -2,6 +2,20 @@
 
 const { markGridFromConfig } = require('../../harness/src/mark-grid');
 
+const SEQUENCE_SCHEMA_GUIDE = [
+  'Output schema, follow exactly:',
+  '- Return exactly one JSON object, with no markdown or prose outside it.',
+  '- Top-level keys must be exactly: "summary", "previous_sequence_outcome", "actions", "should_stop", "rationale". Do not add extra top-level keys.',
+  '- "actions" must be an array. Each action must have one of these shapes:',
+  '  - {"type": "key", "start": ms, "end": ms, "key": "ArrowRight"}',
+  '  - {"type": "click", "start": ms, "cell": {"row": r, "col": c}}',
+  '  - {"type": "multi_click", "start": ms, "cells": [{"row": r, "col": c}], "count": n}',
+  '  - {"type": "drag", "start": ms, "from": {"row": r, "col": c}, "to": {"row": r, "col": c}, "mode": "mouse"}',
+  '  - {"type": "cursor_move", "start": ms, "cell": {"row": r, "col": c}}',
+  '  - {"type": "view_move", "start": ms, "end": ms, "dx": n, "dy": n}',
+  '- Do not invent other action types, fields, comments, captions, or explanatory keys.',
+].join('\n');
+
 function compactPostSequenceResult(result) {
   if (!result || typeof result !== 'object') return '';
   const parts = [];
@@ -177,6 +191,8 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '- Try to chain multiple sensible actions in one sequence rather than a single action each time.',
     '- Do not stop early unless the recording already shows enough real gameplay.',
     '',
+    SEQUENCE_SCHEMA_GUIDE,
+    '',
     `Time remaining: ${secondsLeft}s.`,
     `Viewport: ${viewport.width}x${viewport.height}. The screenshot has a light ${grid.rows}x${grid.cols} red mark grid over the inner game area. Column labels are in the top/bottom margins and row labels are in the left/right margins.`,
     `Available common controls: ${controls.join(', ')}. You may use literal Playwright keys.`,
@@ -231,4 +247,5 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
 module.exports = {
   buildPlaytesterPrompt,
   compactHistory,
+  sequenceSchemaGuide: () => SEQUENCE_SCHEMA_GUIDE,
 };
