@@ -125,6 +125,17 @@ test('drops model actions with invalid short-action timing', () => {
   assert.equal(sequence.durationMs, 5000);
 });
 
+test('normalizes plain clicks to a single physical click', () => {
+  const sequence = normalizeSequence(
+    { actions: [{ type: 'click', start: 100, x: 10, y: 10, clickCount: 3 }] },
+    { viewport: { width: 800, height: 800 } }
+  );
+
+  assert.equal(sequence.actions.length, 1);
+  assert.equal(sequence.actions[0].clickCount, 1);
+  assert.equal(sequence.actions[0].end, 150);
+});
+
 test('normalizes harness grid-cell steps into concrete pointer events', () => {
   const step = normalizeStep(
     {

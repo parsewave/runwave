@@ -246,7 +246,7 @@ function normalizeClickAction(click, duration, options, forceMulti = false) {
     x: point.x,
     y: point.y,
     button: click.button || 'left',
-    clickCount: forceMulti ? 1 : Math.max(1, Math.round(finiteNumber(click.clickCount, 1))),
+    clickCount: 1,
   };
   if (point.cells) {
     base.cells = point.cells;
