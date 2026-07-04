@@ -48,7 +48,7 @@ function screenshotChanged(beforeScreenshot, afterScreenshot) {
   return beforeHash !== afterHash;
 }
 
-function postActionResult(response, beforeScreenshot) {
+function postSequenceResult(response, beforeScreenshot) {
   const body = responseBody(response);
   const captures = Array.isArray(body.captures) ? body.captures : [];
   const afterScreenshot = latestScreenshot(response);
@@ -241,7 +241,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     });
 
     lastResponse = await runAction(harnessStep);
-    const result = postActionResult(lastResponse, screenshot);
+    const result = postSequenceResult(lastResponse, screenshot);
     history.push({
       step,
       summary: sequence.summary,
@@ -282,11 +282,9 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
 
 module.exports = {
   decideNextSequence,
-  decideNextAction: decideNextSequence,
   fallbackSequenceAfterInvalidJson,
-  fallbackDecisionAfterInvalidJson: fallbackSequenceAfterInvalidJson,
   latestScreenshot,
-  postActionResult,
+  postSequenceResult,
   responseState,
   runAgenticPlaytest,
 };

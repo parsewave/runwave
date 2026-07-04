@@ -123,7 +123,7 @@ class Profiler {
       }
       fs.appendFileSync(this.state.logPath, `${JSON.stringify(payload)}\n`);
     } catch {
-      // Profiling should never change command behavior.
+      // Profiling should never change operation behavior.
     }
   }
 
@@ -134,7 +134,7 @@ class Profiler {
       fs.appendFileSync(this.state.logPath, this.state.buffer.map((item) => JSON.stringify(item)).join('\n') + '\n');
       this.state.buffer.length = 0;
     } catch {
-      // Profiling should never change command behavior.
+      // Profiling should never change operation behavior.
     }
   }
 }

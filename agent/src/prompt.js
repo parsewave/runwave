@@ -1,13 +1,13 @@
 'use strict';
 
-function compactPostActionResult(result) {
+function compactPostSequenceResult(result) {
   if (!result || typeof result !== 'object') return '';
   const parts = [];
   if (typeof result.ok === 'boolean') parts.push(`ok=${result.ok}`);
   if (typeof result.screenshotChanged === 'boolean') parts.push(`screenshot_changed=${result.screenshotChanged}`);
   if (typeof result.captureCount === 'number') parts.push(`captures=${result.captureCount}`);
   if (result.error) parts.push(`error=${String(result.error).slice(0, 120)}`);
-  return parts.length ? `; post_action=${parts.join(',')}` : '';
+  return parts.length ? `; post_sequence=${parts.join(',')}` : '';
 }
 
 function compactOutcomeSummary(outcomeSummary) {
@@ -22,7 +22,7 @@ function compactHistory(history, limit = 8) {
       const controls = [
         ...sequenceActions(item).map(actionLabelPart),
       ];
-      return `step ${item.step}: ${item.summary || item.rationale || 'no summary'}; controls=${controls.join(',') || 'none'}${compactPostActionResult(item.result)}${compactOutcomeSummary(item.outcomeSummary)}`;
+      return `step ${item.step}: ${item.summary || item.rationale || 'no summary'}; controls=${controls.join(',') || 'none'}${compactPostSequenceResult(item.result)}${compactOutcomeSummary(item.outcomeSummary)}`;
     })
     .join('\n');
 }
@@ -32,14 +32,7 @@ function roundedPoint(value, quantum = 20) {
 }
 
 function sequenceActions(item) {
-  if (Array.isArray(item.actions)) return item.actions;
-  return [
-    ...(item.commands || []).map((command) => ({ type: 'key', ...command })),
-    ...(item.clicks || []).map((click) => ({ type: 'click', ...click })),
-    ...(item.drags || []).map((drag) => ({ type: 'drag', ...drag })),
-    ...(item.cursorMoves || []).map((move) => ({ type: 'cursor_move', ...move })),
-    ...(item.viewMoves || []).map((move) => ({ type: 'view_move', ...move })),
-  ];
+  return Array.isArray(item.actions) ? item.actions : [];
 }
 
 function actionLabelPart(action) {
@@ -135,7 +128,7 @@ function repeatedHistoryWarning(history) {
     return 'Warning: the game still appears paused. Try a different visible resume/control input instead of repeating the same click.';
   }
   if (summaries.every((summary) => summary.includes('menu') || summary.includes('title') || summary.includes('start'))) {
-    return 'Warning: the recent actions did not clearly leave the menu/title flow. Use the visible start instruction or a different common confirm key.';
+    return 'Warning: the recent sequences did not clearly leave the menu/title flow. Use the visible start instruction or a different common confirm key.';
   }
   return '';
 }

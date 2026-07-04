@@ -10,6 +10,27 @@ const {
 const DEFAULT_DURATION_MS = 500;
 const MIN_DURATION_MS = 500;
 const MAX_DURATION_MS = 8000;
+const removedSequenceFields = [
+  'commands',
+  'duration_ms',
+  'durationMs',
+  'duration',
+  'clicks',
+  'multi_clicks',
+  'multiClicks',
+  'drags',
+  'drag',
+  'cursor_moves',
+  'cursorMoves',
+  'cursor_move',
+  'cursorMove',
+  'view_moves',
+  'viewMoves',
+  'previous_action_outcome',
+  'previousActionOutcome',
+  'action_outcome',
+  'outcome_summary',
+];
 
 function finiteNumber(value, fallback = null) {
   const number = Number(value);
@@ -32,17 +53,26 @@ function splitKeyChord(key) {
     .filter(Boolean);
 }
 
+function rejectRemovedFields(object, fields, label) {
+  for (const field of fields) {
+    if (object && Object.prototype.hasOwnProperty.call(object, field)) {
+      throw new Error(`${label} uses removed field "${field}"`);
+    }
+  }
+}
+
 function timingStart(action, fallback = 0) {
-  return finiteNumber(action.start ?? action.at ?? action.from, fallback);
+  return finiteNumber(action.start, fallback);
 }
 
 function timingEnd(action, fallback = null) {
-  return finiteNumber(action.end ?? action.to, fallback);
+  return finiteNumber(action.end, fallback);
 }
 
 function cleanKeyAction(action, maxDurationMs) {
   if (!action || typeof action !== 'object') return [];
-  const key = cleanKey(action.key ?? action.button ?? action.press);
+  rejectRemovedFields(action, ['from', 'to', 'at', 'button', 'press'], 'key action');
+  const key = cleanKey(action.key);
   if (!key) return [];
 
   const start = clamp(timingStart(action, 0), 0, maxDurationMs);
@@ -88,6 +118,7 @@ function cleanPointOrGrid(point, viewport) {
 
 function cleanClick(click, maxDurationMs, viewport) {
   if (!click || typeof click !== 'object') return null;
+  rejectRemovedFields(click, ['at', 'from', 'to', 'click_mode', 'clickMode'], 'click action');
   const point = cleanPointOrGrid(click, viewport);
   if (!point) return null;
 
@@ -99,18 +130,18 @@ function cleanClick(click, maxDurationMs, viewport) {
     y: point.y,
     button: click.button || 'left',
     clickCount: Math.max(1, Math.round(finiteNumber(click.clickCount, 1))),
-    ...(point.cells ? { cells: point.cells, clickMode: click.click_mode || click.clickMode || 'single' } : {}),
+    ...(point.cells ? { cells: point.cells, clickMode: 'single' } : {}),
   };
 }
 
 function cleanClickIntent(click, maxDurationMs, viewport, forceMulti = false) {
   const base = cleanClick(click, maxDurationMs, viewport);
   if (!base) return [];
-  const mode = forceMulti || click.click_mode === 'multi' || click.clickMode === 'multi' || click.mode === 'multi' ? 'multi' : 'single';
+  const mode = forceMulti || click.mode === 'multi' ? 'multi' : 'single';
   if (mode !== 'multi') return [{ ...base, clickCount: 1, clickMode: base.cells ? 'single' : base.clickMode }];
 
-  const count = clamp(Math.round(finiteNumber(click.count ?? click.clicks, 10)), 1, 20);
-  const times = clickBurstTimes(base.start, maxDurationMs, count, click.interval_ms ?? click.intervalMs ?? 100);
+  const count = clamp(Math.round(finiteNumber(click.count, 10)), 1, 20);
+  const times = clickBurstTimes(base.start, maxDurationMs, count, click.intervalMs ?? 100);
   return times.map((start) => {
     const point = cleanPointOrGrid(click, viewport) || base;
     return {
@@ -127,14 +158,13 @@ function cleanClickIntent(click, maxDurationMs, viewport, forceMulti = false) {
 
 function cleanDrag(drag, maxDurationMs, viewport) {
   if (!drag || typeof drag !== 'object') return null;
-  const legacyStartPoint = drag.start && typeof drag.start === 'object' ? drag.start : null;
-  const legacyEndPoint = drag.end && typeof drag.end === 'object' ? drag.end : null;
+  rejectRemovedFields(drag, ['at', 'fromCells', 'toCells', 'x1', 'y1', 'x2', 'y2'], 'drag action');
   const from = cleanPointOrGrid(
-    drag.from || legacyStartPoint || { x: drag.x1, y: drag.y1, cells: drag.from_cells ?? drag.fromCells },
+    drag.from || { cells: drag.from_cells },
     viewport
   );
   const to = cleanPointOrGrid(
-    drag.to || legacyEndPoint || { x: drag.x2, y: drag.y2, cells: drag.to_cells ?? drag.toCells },
+    drag.to || { cells: drag.to_cells },
     viewport
   );
   if (!from || !to) return null;
@@ -153,7 +183,8 @@ function cleanDrag(drag, maxDurationMs, viewport) {
 
 function cleanCursorMove(move, maxDurationMs, viewport) {
   if (!move || typeof move !== 'object') return null;
-  const point = cleanPointOrGrid(move.to || move.target || move, viewport);
+  rejectRemovedFields(move, ['at', 'from', 'target'], 'cursor_move action');
+  const point = cleanPointOrGrid(move.to || move, viewport);
   if (!point) return null;
 
   const start = clamp(timingStart(move, 0), 0, maxDurationMs);
@@ -168,8 +199,9 @@ function cleanCursorMove(move, maxDurationMs, viewport) {
 
 function cleanViewMove(move, maxDurationMs) {
   if (!move || typeof move !== 'object') return null;
-  const dx = finiteNumber(move.dx ?? move.deltaX ?? move.delta_x, 0);
-  const dy = finiteNumber(move.dy ?? move.deltaY ?? move.delta_y, 0);
+  rejectRemovedFields(move, ['from', 'to', 'deltaX', 'delta_x', 'deltaY', 'delta_y'], 'view_move action');
+  const dx = finiteNumber(move.dx, 0);
+  const dy = finiteNumber(move.dy, 0);
   if (!dx && !dy) return null;
 
   const start = clamp(timingStart(move, 0), 0, maxDurationMs);
@@ -186,24 +218,15 @@ function cleanViewMove(move, maxDurationMs) {
   };
 }
 
-function unwrapSequence(raw) {
-  if (!raw || typeof raw !== 'object') return {};
-  if (raw.sequence && typeof raw.sequence === 'object') return { ...raw.sequence, ...raw };
-  if (raw.action && typeof raw.action === 'object') return { ...raw.action, ...raw };
-  if (raw.next_sequence && typeof raw.next_sequence === 'object') return { ...raw.next_sequence, ...raw };
-  if (raw.next_action && typeof raw.next_action === 'object') return { ...raw.next_action, ...raw };
-  return raw;
-}
-
 function asArray(value) {
   if (!value) return [];
   return Array.isArray(value) ? value : [value];
 }
 
 function typedActionType(action) {
-  const type = String(action.type || action.kind || action.action || '').trim().toLowerCase();
-  if (type) return type.replace(/-/g, '_');
-  return cleanKey(action.key ?? action.button ?? action.press) ? 'key' : '';
+  const type = String(action.type || '').trim().toLowerCase();
+  if (type) return type;
+  return '';
 }
 
 function normalizeTypedActions(items, maxDurationMs, viewport) {
@@ -212,21 +235,23 @@ function normalizeTypedActions(items, maxDurationMs, viewport) {
   for (const item of asArray(items)) {
     if (!item || typeof item !== 'object') continue;
     const type = typedActionType(item);
-    if (type === 'key' || type === 'keyboard' || type === 'press') {
+    if (type === 'key') {
       actions.push(...cleanKeyAction(item, maxDurationMs));
-    } else if (type === 'click' || type === 'single_click' || type === 'tap') {
+    } else if (type === 'click') {
       actions.push(...cleanClickIntent(item, maxDurationMs, viewport));
-    } else if (type === 'multi_click' || type === 'multiclick' || type === 'multi_tap' || type === 'tap_burst') {
+    } else if (type === 'multi_click') {
       actions.push(...cleanClickIntent(item, maxDurationMs, viewport, true));
-    } else if (type === 'drag' || type === 'swipe') {
+    } else if (type === 'drag') {
       const drag = cleanDrag(item, maxDurationMs, viewport);
       if (drag) actions.push(drag);
-    } else if (type === 'cursor_move' || type === 'cursor' || type === 'move_cursor') {
+    } else if (type === 'cursor_move') {
       const move = cleanCursorMove(item, maxDurationMs, viewport);
       if (move) actions.push(move);
-    } else if (type === 'view_move' || type === 'view' || type === 'mouse_move' || type === 'look') {
+    } else if (type === 'view_move') {
       const move = cleanViewMove(item, maxDurationMs);
       if (move) actions.push(move);
+    } else {
+      throw new Error(`unknown sequence action type: ${type || '(missing)'}`);
     }
   }
 
@@ -245,39 +270,20 @@ function inferDurationMs(actions, fallback = DEFAULT_DURATION_MS) {
 function normalizeSequence(raw, options = {}) {
   const viewport = options.viewport || null;
   const maxDurationMs = Number(options.maxDurationMs || MAX_DURATION_MS);
-  const data = unwrapSequence(raw);
-  const typedActions = normalizeTypedActions(data.actions || data.commands, maxDurationMs, viewport);
-  const legacyActions = [
-    ...(data.clicks || []).flatMap((click) => cleanClickIntent(click, maxDurationMs, viewport)),
-    ...asArray(data.multi_clicks || data.multiClicks).flatMap((click) => cleanClickIntent(click, maxDurationMs, viewport, true)),
-    ...asArray(data.drags || data.drag).map((drag) => cleanDrag(drag, maxDurationMs, viewport)).filter(Boolean),
-    ...asArray(data.cursor_moves || data.cursorMoves || data.cursor_move || data.cursorMove)
-      .map((move) => cleanCursorMove(move, maxDurationMs, viewport))
-      .filter(Boolean),
-    ...asArray(data.view_moves || data.viewMoves).map((move) => cleanViewMove(move, maxDurationMs)).filter(Boolean),
-  ];
-  const actions = [...typedActions, ...legacyActions];
+  const data = raw && typeof raw === 'object' ? raw : {};
+  rejectRemovedFields(data, removedSequenceFields, 'sequence');
+  const actions = normalizeTypedActions(data.actions, maxDurationMs, viewport);
 
   return {
-    durationMs: inferDurationMs(actions, finiteNumber(data.duration_ms ?? data.durationMs ?? data.duration, DEFAULT_DURATION_MS)),
+    durationMs: inferDurationMs(actions, DEFAULT_DURATION_MS),
     actions,
-    shouldStop: Boolean(data.should_stop ?? data.shouldStop),
-    summary: String(data.summary || data.observation_summary || '').trim().slice(0, 500),
-    previousSequenceOutcome: String(
-      data.previous_sequence_outcome ??
-        data.previousSequenceOutcome ??
-        data.sequence_outcome ??
-        data.previous_action_outcome ??
-        data.previousActionOutcome ??
-        data.action_outcome ??
-        data.outcome_summary ??
-        ''
-    ).trim().slice(0, 500),
-    rationale: String(data.rationale || data.reason || '').trim().slice(0, 1000),
+    shouldStop: Boolean(data.should_stop),
+    summary: String(data.summary || '').trim().slice(0, 500),
+    previousSequenceOutcome: String(data.previous_sequence_outcome ?? '').trim().slice(0, 500),
+    rationale: String(data.rationale || '').trim().slice(0, 1000),
   };
 }
 
 module.exports = {
   normalizeSequence,
-  normalizeDecision: normalizeSequence,
 };

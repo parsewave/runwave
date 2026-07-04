@@ -17,33 +17,57 @@ const {
   viewportFromConfig,
 } = require('./mark-grid');
 
+const removedStepFields = [
+  'commands',
+  'duration',
+  'duration_ms',
+  'durationMs',
+  'ms',
+  'clicks',
+  'multi_clicks',
+  'multiClicks',
+  'drags',
+  'drag',
+  'cursor_moves',
+  'cursorMoves',
+  'cursor_move',
+  'cursorMove',
+  'view_moves',
+  'viewMoves',
+  'mouse_moves',
+  'mouseMoves',
+];
+
 function readNumber(value, fallback) {
   return Number(value ?? fallback);
 }
 
+function rejectRemovedFields(object, fields, label) {
+  for (const field of fields) {
+    if (object && Object.prototype.hasOwnProperty.call(object, field)) {
+      throw new Error(`${label} uses removed field "${field}"`);
+    }
+  }
+}
+
 function actionStart(action, fallback = 0) {
-  return readNumber(action.start, action.at ?? action.from ?? action[0] ?? fallback);
+  return readNumber(action.start, fallback);
 }
 
 function actionEnd(action, fallback) {
-  return readNumber(action.end, action.to ?? action[1] ?? fallback);
-}
-
-function asArray(value) {
-  if (!value) return [];
-  return Array.isArray(value) ? value : [value];
+  return readNumber(action.end, fallback);
 }
 
 function rawActionEnd(action) {
   if (!action || typeof action !== 'object') return null;
-  const value = action.end ?? action.to ?? action[1] ?? action.start ?? action.at ?? action.from ?? action[0];
+  const value = action.end ?? action.start;
   const number = Number(value);
   if (!Number.isFinite(number) || number < 0) return null;
 
-  const type = String(action.type || action.kind || action.action || '').trim().toLowerCase().replace(/-/g, '_');
-  if (type === 'multi_click' || type === 'multiclick' || type === 'multi_tap' || type === 'tap_burst') {
-    const count = Math.max(1, Math.round(readNumber(action.count, action.clicks ?? 10)));
-    const intervalMs = readNumber(action.intervalMs, action.interval_ms ?? 100);
+  const type = String(action.type || '').trim().toLowerCase();
+  if (type === 'multi_click') {
+    const count = Math.max(1, Math.round(readNumber(action.count, 10)));
+    const intervalMs = readNumber(action.intervalMs, 100);
     if (Number.isFinite(intervalMs) && intervalMs > 0) return number + (count - 1) * intervalMs;
   }
 
@@ -51,36 +75,9 @@ function rawActionEnd(action) {
 }
 
 function inferDuration(input) {
-  const explicit = readNumber(input.duration, input.duration_ms ?? input.durationMs ?? input.ms);
-  if (Number.isFinite(explicit)) return explicit;
-
   const times = [];
   for (const action of input.actions || []) {
     const end = rawActionEnd(action);
-    if (end !== null) times.push(end);
-  }
-  for (const command of input.commands || []) {
-    const end = rawActionEnd(command);
-    if (end !== null) times.push(end);
-  }
-  for (const click of input.clicks || []) {
-    const end = rawActionEnd(click);
-    if (end !== null) times.push(end);
-  }
-  for (const click of asArray(input.multi_clicks || input.multiClicks)) {
-    const end = rawActionEnd(click);
-    if (end !== null) times.push(end);
-  }
-  for (const drag of asArray(input.drags || input.drag)) {
-    const end = rawActionEnd(drag);
-    if (end !== null) times.push(end);
-  }
-  for (const move of asArray(input.cursor_moves || input.cursorMoves || input.cursor_move || input.cursorMove)) {
-    const end = rawActionEnd(move);
-    if (end !== null) times.push(end);
-  }
-  for (const move of input.view_moves || input.viewMoves || input.mouse_moves || input.mouseMoves || []) {
-    const end = rawActionEnd(move);
     if (end !== null) times.push(end);
   }
 
@@ -96,9 +93,10 @@ function normalizeDuration(input) {
 }
 
 function normalizeKeyAction(action, aliases) {
+  rejectRemovedFields(action, ['from', 'to', 'at', 'button', 'press'], 'key action');
   const start = actionStart(action);
   const end = actionEnd(action, start);
-  const keyName = action.key ?? action.button ?? action.press ?? action[2];
+  const keyName = action.key;
   const key = aliases[keyName] || keyName;
 
   if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) {
@@ -127,6 +125,7 @@ function normalizePointOrCells(point, label, config) {
 }
 
 function normalizeClick(click, duration, config, forceMulti = false) {
+  rejectRemovedFields(click, ['at', 'from', 'to', 'click_mode', 'clickMode'], 'click action');
   const start = actionStart(click);
   const gridPoint = normalizeGridPoint(click, config, 'click');
   const x = gridPoint ? gridPoint.x : Number(click.x);
@@ -149,9 +148,9 @@ function normalizeClick(click, duration, config, forceMulti = false) {
   };
   if (!gridPoint && !forceMulti && click.click_mode !== 'multi' && click.clickMode !== 'multi') return [base];
 
-  const mode = forceMulti || click.click_mode === 'multi' || click.clickMode === 'multi' ? 'multi' : 'single';
-  const count = mode === 'multi' ? readNumber(click.count, click.clicks ?? 10) : 1;
-  return clickBurstTimes(start, duration, count, click.intervalMs ?? click.interval_ms ?? 100).map((clickStart) => {
+  const mode = forceMulti ? 'multi' : 'single';
+  const count = mode === 'multi' ? readNumber(click.count, 10) : 1;
+  return clickBurstTimes(start, duration, count, click.intervalMs ?? 100).map((clickStart) => {
     const point = gridPoint ? normalizeGridPoint(click, config, 'click') : { x, y };
     return {
       ...base,
@@ -174,16 +173,15 @@ function normalizePoint(point, label) {
 }
 
 function normalizeDrag(drag, duration, config) {
+  rejectRemovedFields(drag, ['at', 'fromCells', 'toCells', 'x1', 'y1', 'x2', 'y2'], 'drag action');
   const start = actionStart(drag);
-  const legacyStartPoint = drag.start && typeof drag.start === 'object' ? drag.start : null;
-  const legacyEndPoint = drag.end && typeof drag.end === 'object' ? drag.end : null;
   const from = normalizePointOrCells(
-    drag.from || legacyStartPoint || { x: drag.x1, y: drag.y1, cells: drag.from_cells ?? drag.fromCells },
+    drag.from || { cells: drag.from_cells },
     'drag.from',
     config
   );
   const to = normalizePointOrCells(
-    drag.to || legacyEndPoint || { x: drag.x2, y: drag.y2, cells: drag.to_cells ?? drag.toCells },
+    drag.to || { cells: drag.to_cells },
     'drag.to',
     config
   );
@@ -205,8 +203,9 @@ function normalizeDrag(drag, duration, config) {
 }
 
 function normalizeCursorMove(cursorMove, duration, config) {
+  rejectRemovedFields(cursorMove, ['at', 'from', 'target'], 'cursor_move action');
   const start = actionStart(cursorMove);
-  const to = normalizePointOrCells(cursorMove.to || cursorMove.target || cursorMove, 'cursor_move.to', config);
+  const to = normalizePointOrCells(cursorMove.to || cursorMove, 'cursor_move.to', config);
   const steps = Math.max(1, Math.min(80, Math.round(readNumber(cursorMove.steps, 8))));
 
   if (!Number.isFinite(start) || start < 0 || start > duration) {
@@ -217,10 +216,11 @@ function normalizeCursorMove(cursorMove, duration, config) {
 }
 
 function normalizeViewMove(viewMove, duration) {
+  rejectRemovedFields(viewMove, ['from', 'to', 'deltaX', 'delta_x', 'deltaY', 'delta_y'], 'view_move action');
   const start = actionStart(viewMove);
   const end = actionEnd(viewMove, start);
-  const dx = Number(viewMove.dx ?? viewMove.deltaX ?? viewMove.delta_x ?? 0);
-  const dy = Number(viewMove.dy ?? viewMove.deltaY ?? viewMove.delta_y ?? 0);
+  const dx = Number(viewMove.dx ?? 0);
+  const dy = Number(viewMove.dy ?? 0);
   const steps = Math.max(1, Math.min(80, Math.round(readNumber(viewMove.steps, 12))));
 
   if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start || end > duration) {
@@ -234,9 +234,9 @@ function normalizeViewMove(viewMove, duration) {
 }
 
 function typedActionType(action) {
-  const type = String(action.type || action.kind || action.action || '').trim().toLowerCase();
-  if (type) return type.replace(/-/g, '_');
-  return action.key || action.button || action.press ? 'key' : '';
+  const type = String(action.type || '').trim().toLowerCase();
+  if (type) return type;
+  return '';
 }
 
 function normalizeTypedActions(actions, duration, config, aliases) {
@@ -251,18 +251,20 @@ function normalizeTypedActions(actions, duration, config, aliases) {
   for (const action of actions || []) {
     if (!action || typeof action !== 'object') continue;
     const type = typedActionType(action);
-    if (type === 'key' || type === 'keyboard' || type === 'press') {
+    if (type === 'key') {
       result.keyActions.push(normalizeKeyAction(action, aliases));
-    } else if (type === 'click' || type === 'single_click' || type === 'tap') {
+    } else if (type === 'click') {
       result.clicks.push(...normalizeClick(action, duration, config));
-    } else if (type === 'multi_click' || type === 'multiclick' || type === 'multi_tap' || type === 'tap_burst') {
+    } else if (type === 'multi_click') {
       result.clicks.push(...normalizeClick(action, duration, config, true));
-    } else if (type === 'drag' || type === 'swipe') {
+    } else if (type === 'drag') {
       result.drags.push(normalizeDrag(action, duration, config));
-    } else if (type === 'cursor_move' || type === 'cursor' || type === 'move_cursor') {
+    } else if (type === 'cursor_move') {
       result.cursorMoves.push(normalizeCursorMove(action, duration, config));
-    } else if (type === 'view_move' || type === 'view' || type === 'mouse_move' || type === 'look') {
+    } else if (type === 'view_move') {
       result.viewMoves.push(normalizeViewMove(action, duration));
+    } else {
+      throw new Error(`unknown sequence action type: ${type || '(missing)'}`);
     }
   }
 
@@ -295,39 +297,20 @@ function normalizeCaptures(input, config, duration) {
 }
 
 function normalizeStep(input, config, nextStepIndex) {
+  rejectRemovedFields(input, removedStepFields, 'step sequence');
   const aliases = { ...defaultKeyAliases, ...(config.keyAliases || {}) };
   const duration = normalizeDuration(input);
-  const viewMoves = input.viewMoves || input.view_moves || input.mouseMoves || input.mouse_moves || [];
-  const drags = input.drags || input.drag || [];
-  const cursorMoves = input.cursorMoves || input.cursor_moves || input.cursorMove || input.cursor_move || [];
-  const multiClicks = input.multiClicks || input.multi_clicks || [];
   const typed = normalizeTypedActions(input.actions || [], duration, config, aliases);
 
   return {
     index: nextStepIndex,
     name: String(input.name || `step-${String(nextStepIndex).padStart(3, '0')}`),
     duration,
-    keyActions: [
-      ...typed.keyActions,
-      ...(input.commands || []).map((command) => normalizeKeyAction(command, aliases)),
-    ],
-    clicks: [
-      ...typed.clicks,
-      ...(input.clicks || []).flatMap((click) => normalizeClick(click, duration, config)),
-      ...(Array.isArray(multiClicks) ? multiClicks : [multiClicks]).flatMap((click) => normalizeClick(click, duration, config, true)),
-    ],
-    drags: [
-      ...typed.drags,
-      ...(Array.isArray(drags) ? drags : [drags]).map((drag) => normalizeDrag(drag, duration, config)),
-    ],
-    cursorMoves: [
-      ...typed.cursorMoves,
-      ...(Array.isArray(cursorMoves) ? cursorMoves : [cursorMoves]).map((move) => normalizeCursorMove(move, duration, config)),
-    ],
-    viewMoves: [
-      ...typed.viewMoves,
-      ...viewMoves.map((viewMove) => normalizeViewMove(viewMove, duration)),
-    ],
+    keyActions: typed.keyActions,
+    clicks: typed.clicks,
+    drags: typed.drags,
+    cursorMoves: typed.cursorMoves,
+    viewMoves: typed.viewMoves,
     captures: normalizeCaptures(input, config, duration),
   };
 }
