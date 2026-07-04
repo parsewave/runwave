@@ -97,7 +97,7 @@ function drawLabel(png, text, x, y) {
   drawText(png, text, x + padding, y + padding, [255, 255, 255, 0.9], scale);
 }
 
-function drawGridOnScreenshot(file) {
+function drawCoordinateGridOnScreenshot(file) {
   const png = PNG.sync.read(fs.readFileSync(file));
   const xStep = Math.max(80, Math.floor(png.width / 8));
   const yStep = Math.max(60, Math.floor(png.height / 8));
@@ -115,6 +115,52 @@ function drawGridOnScreenshot(file) {
   fs.writeFileSync(file, PNG.sync.write(png));
 }
 
+function drawMarkGridOnScreenshot(file, config = {}) {
+  const png = PNG.sync.read(fs.readFileSync(file));
+  const rows = Math.max(1, Math.round(Number(config.markGridRows ?? config.gridRows ?? 8)));
+  const cols = Math.max(1, Math.round(Number(config.markGridCols ?? config.gridCols ?? 8)));
+  const cellWidth = png.width / cols;
+  const cellHeight = png.height / rows;
+  const lineColor = [255, 36, 36, 0.48];
+  const labelBg = [0, 0, 0, 0.68];
+  const labelText = [255, 255, 255, 0.94];
+
+  for (let col = 0; col <= cols; col += 1) {
+    drawVerticalLine(png, col * cellWidth, lineColor);
+  }
+  for (let row = 0; row <= rows; row += 1) {
+    drawHorizontalLine(png, row * cellHeight, lineColor);
+  }
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      const id = row * cols + col;
+      const text = String(id);
+      const scale = 2;
+      const padding = 4;
+      const labelWidth = textWidth(text, scale) + padding * 2;
+      const labelHeight = 5 * scale + padding * 2;
+      const x = Math.round(col * cellWidth + (cellWidth - labelWidth) / 2);
+      const y = Math.round(row * cellHeight + (cellHeight - labelHeight) / 2);
+      fillRect(png, x, y, labelWidth, labelHeight, labelBg);
+      drawText(png, text, x + padding, y + padding, labelText, scale);
+    }
+  }
+
+  drawRect(png, 1, 1, png.width - 2, png.height - 2, [255, 255, 255, 0.75], 2);
+  fs.writeFileSync(file, PNG.sync.write(png));
+}
+
+function drawGridOnScreenshot(file, config = {}) {
+  if (config.gridOverlay === 'coordinate') {
+    drawCoordinateGridOnScreenshot(file);
+    return;
+  }
+  drawMarkGridOnScreenshot(file, config);
+}
+
 module.exports = {
   drawGridOnScreenshot,
+  drawMarkGridOnScreenshot,
+  drawCoordinateGridOnScreenshot,
 };

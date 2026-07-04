@@ -29,6 +29,7 @@ async function runStep({ input, config, browser, outputDir, nextStepIndex, actio
       commandCount: step.commands.length,
       clickCount: step.clicks.length,
       dragCount: step.drags.length,
+      cursorMoveCount: step.cursorMoves.length,
       viewMoveCount: step.viewMoves.length,
       captureCount: events.filter((event) => event.type === 'capture').length,
     });
@@ -59,6 +60,7 @@ async function runStep({ input, config, browser, outputDir, nextStepIndex, actio
     commands: summarizeCommands(step.commands),
     clicks: step.clicks,
     drags: step.drags,
+    cursorMoves: step.cursorMoves,
     viewMoves: step.viewMoves,
   };
   result.resultPath = path.join(outputDir, `${prefix}.json`);

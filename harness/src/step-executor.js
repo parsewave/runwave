@@ -61,6 +61,17 @@ async function executeTimeline({ browser, events, duration, outputDir, prefix, s
         } else {
           await browser.click(event.click);
         }
+      } else if (event.type === 'cursor_move') {
+        if (profiler) {
+          await profiler.time('timeline.event.cursor_move', {
+            ...fields,
+            x: event.cursorMove.to.x,
+            y: event.cursorMove.to.y,
+            steps: event.cursorMove.steps,
+          }, () => browser.moveCursor(event.cursorMove));
+        } else {
+          await browser.moveCursor(event.cursorMove);
+        }
       } else if (event.type === 'drag') {
         if (profiler) {
           await profiler.time('timeline.event.drag', {

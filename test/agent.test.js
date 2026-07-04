@@ -10,6 +10,7 @@ const { normalizeDecision } = require('../agent/src/action-parser');
 const { fallbackDecisionAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
 const { chatCompletion, parseJsonResponse } = require('../agent/src/model-client');
 const { buildPlaytesterPrompt, compactHistory } = require('../agent/src/prompt');
+const { normalizeStep } = require('../harness/src/step-normalizer');
 
 test('normalizes model actions into harness steps', () => {
   const decision = normalizeDecision(
@@ -46,6 +47,62 @@ test('normalizes model actions into harness steps', () => {
   assert.equal(decision.viewMoves[0].dx, 50);
   assert.equal(decision.shouldStop, true);
   assert.equal(decision.previousActionOutcome, 'Enter opened the menu.');
+});
+
+test('normalizes grid-cell model actions into concrete pointer events', () => {
+  const decision = normalizeDecision(
+    {
+      duration_ms: 1500,
+      clicks: [{ at: 100, cells: [9] }],
+      multi_clicks: [{ at: 200, cells: [18, 19], count: 10 }],
+      drags: [{ at: 300, from_cells: [34], to_cells: [35], mode: 'mouse' }],
+      cursor_moves: [{ at: 400, cells: [27] }],
+    },
+    { viewport: { width: 800, height: 800 } }
+  );
+
+  assert.equal(decision.clicks.length, 11);
+  assert.equal(decision.clicks[0].clickMode, 'single');
+  assert.equal(decision.clicks[0].cells[0], 9);
+  assert.ok(decision.clicks[0].x >= 100 && decision.clicks[0].x <= 199);
+  assert.ok(decision.clicks[0].y >= 100 && decision.clicks[0].y <= 199);
+  assert.deepEqual(decision.clicks.slice(1).map((click) => click.at), [200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100]);
+  assert.ok(decision.clicks.slice(1).every((click) => click.clickMode === 'multi'));
+  assert.ok(decision.clicks.slice(1).every((click) => click.x >= 200 && click.x <= 399));
+  assert.ok(decision.clicks.slice(1).every((click) => click.y >= 200 && click.y <= 299));
+  assert.ok(decision.drags[0].from.x >= 200 && decision.drags[0].from.x <= 299);
+  assert.ok(decision.drags[0].from.y >= 400 && decision.drags[0].from.y <= 499);
+  assert.ok(decision.drags[0].to.x >= 300 && decision.drags[0].to.x <= 399);
+  assert.ok(decision.drags[0].to.y >= 400 && decision.drags[0].to.y <= 499);
+  assert.ok(decision.cursorMoves[0].to.x >= 300 && decision.cursorMoves[0].to.x <= 399);
+  assert.ok(decision.cursorMoves[0].to.y >= 300 && decision.cursorMoves[0].to.y <= 399);
+});
+
+test('normalizes harness grid-cell steps into concrete pointer events', () => {
+  const step = normalizeStep(
+    {
+      duration: 1200,
+      clicks: [{ at: 100, cells: [0] }],
+      multi_clicks: [{ at: 200, cells: [63], count: 3 }],
+      drags: [{ at: 300, from_cells: [8], to_cells: [15] }],
+      cursor_moves: [{ at: 400, cells: [7] }],
+    },
+    { viewport: { width: 800, height: 800 } },
+    1
+  );
+
+  assert.equal(step.clicks.length, 4);
+  assert.deepEqual(step.clicks.slice(1).map((click) => click.at), [200, 300, 400]);
+  assert.ok(step.clicks[0].x >= 0 && step.clicks[0].x <= 99);
+  assert.ok(step.clicks[0].y >= 0 && step.clicks[0].y <= 99);
+  assert.ok(step.clicks.slice(1).every((click) => click.x >= 700 && click.x <= 799));
+  assert.ok(step.clicks.slice(1).every((click) => click.y >= 700 && click.y <= 799));
+  assert.ok(step.drags[0].from.x >= 0 && step.drags[0].from.x <= 99);
+  assert.ok(step.drags[0].from.y >= 100 && step.drags[0].from.y <= 199);
+  assert.ok(step.drags[0].to.x >= 700 && step.drags[0].to.x <= 799);
+  assert.ok(step.drags[0].to.y >= 100 && step.drags[0].to.y <= 199);
+  assert.ok(step.cursorMoves[0].to.x >= 700 && step.cursorMoves[0].to.x <= 799);
+  assert.ok(step.cursorMoves[0].to.y >= 0 && step.cursorMoves[0].to.y <= 99);
 });
 
 test('agent playtest loop calls model and executes returned action', async () => {
@@ -246,6 +303,8 @@ test('playtester prompt warns when recent actions repeat', () => {
   assert.match(prompt, /drags/);
   assert.match(prompt, /Single Player/);
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
+  assert.match(prompt, /8x8 red mark grid/);
+  assert.match(prompt, /multi_clicks/);
 });
 
 test('compact history includes post-action result signals', () => {

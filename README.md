@@ -152,6 +152,36 @@ runwave '{
 }'
 ```
 
+Screenshots include an 8x8 red mark grid by default. Pointer actions may use
+up to 4 grid cell IDs instead of exact pixels. Cell IDs run row-major from `0`
+at the top-left to `63` at the bottom-right.
+
+Single grid-cell click:
+
+```sh
+runwave '{
+  "action": "step",
+  "action_name": "turn-003-click-start-cell",
+  "duration": 500,
+  "clicks": [
+    { "at": 100, "cells": [27] }
+  ]
+}'
+```
+
+Multi-click sends quick clicks at random points inside the selected cells:
+
+```sh
+runwave '{
+  "action": "step",
+  "action_name": "turn-003-multi-click",
+  "duration": 1500,
+  "multi_clicks": [
+    { "at": 100, "cells": [27, 28], "count": 10 }
+  ]
+}'
+```
+
 Drag:
 
 ```sh
@@ -167,6 +197,17 @@ runwave '{
 
 Use `mode: "mouse"` for canvas and pointer-based games. Use `mode: "html5"`
 for browser-native draggable/drop elements.
+Drag endpoints can also use grid cells:
+
+```json
+{ "at": 100, "from_cells": [34], "to_cells": [35], "mode": "mouse" }
+```
+
+Move the cursor without clicking:
+
+```json
+{ "action": "step", "action_name": "turn-005-hover", "duration": 500, "cursor_moves": [{ "at": 100, "cells": [27] }] }
+```
 
 Move the mouse without clicking for camera control:
 

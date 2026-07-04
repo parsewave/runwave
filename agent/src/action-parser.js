@@ -1,5 +1,12 @@
 'use strict';
 
+const {
+  cellsFromObject,
+  clickBurstTimes,
+  markGridFromConfig,
+  randomPointInCells,
+} = require('../../harness/src/mark-grid');
+
 const DEFAULT_DURATION_MS = 2500;
 const MIN_DURATION_MS = 500;
 const MAX_DURATION_MS = 8000;
@@ -38,7 +45,7 @@ function cleanCommand(command, durationMs) {
 
 function cleanClick(click, durationMs, viewport) {
   if (!click || typeof click !== 'object') return null;
-  const point = cleanPoint(click, viewport);
+  const point = cleanPointOrGrid(click, viewport);
   if (!point) return null;
 
   const at = clamp(finiteNumber(click.at ?? click.from, 0), 0, durationMs);
@@ -48,7 +55,29 @@ function cleanClick(click, durationMs, viewport) {
     y: point.y,
     button: click.button || 'left',
     clickCount: Math.max(1, Math.round(finiteNumber(click.clickCount, 1))),
+    ...(point.cells ? { cells: point.cells, clickMode: click.click_mode || click.clickMode || 'single' } : {}),
   };
+}
+
+function cleanClickIntent(click, durationMs, viewport, forceMulti = false) {
+  const base = cleanClick(click, durationMs, viewport);
+  if (!base) return [];
+  const mode = forceMulti || click.click_mode === 'multi' || click.clickMode === 'multi' || click.mode === 'multi' ? 'multi' : 'single';
+  if (mode !== 'multi') return [{ ...base, clickCount: 1, clickMode: base.cells ? 'single' : base.clickMode }];
+
+  const count = clamp(Math.round(finiteNumber(click.count ?? click.clicks, 10)), 1, 20);
+  const times = clickBurstTimes(base.at, durationMs, count, click.interval_ms ?? click.intervalMs ?? 100);
+  return times.map((at) => {
+    const point = cleanPointOrGrid(click, viewport) || base;
+    return {
+      at,
+      x: point.x,
+      y: point.y,
+      button: base.button,
+      clickCount: 1,
+      ...(point.cells ? { cells: point.cells, clickMode: 'multi' } : {}),
+    };
+  });
 }
 
 function cleanPoint(point, viewport) {
@@ -70,10 +99,26 @@ function cleanPoint(point, viewport) {
   return { x: Math.round(x), y: Math.round(y) };
 }
 
+function cleanGridPoint(point, viewport) {
+  if (!point || typeof point !== 'object' || !viewport) return null;
+  const grid = markGridFromConfig({});
+  const cells = cellsFromObject(point, grid, 4);
+  if (!cells.length) return null;
+  try {
+    return randomPointInCells(cells, viewport, grid);
+  } catch {
+    return null;
+  }
+}
+
+function cleanPointOrGrid(point, viewport) {
+  return cleanGridPoint(point, viewport) || cleanPoint(point, viewport);
+}
+
 function cleanDrag(drag, durationMs, viewport) {
   if (!drag || typeof drag !== 'object') return null;
-  const from = cleanPoint(drag.from || drag.start || { x: drag.x1, y: drag.y1 }, viewport);
-  const to = cleanPoint(drag.to || drag.end || { x: drag.x2, y: drag.y2 }, viewport);
+  const from = cleanPointOrGrid(drag.from || drag.start || { x: drag.x1, y: drag.y1, cells: drag.from_cells ?? drag.fromCells }, viewport);
+  const to = cleanPointOrGrid(drag.to || drag.end || { x: drag.x2, y: drag.y2, cells: drag.to_cells ?? drag.toCells }, viewport);
   if (!from || !to) return null;
 
   const at = clamp(finiteNumber(drag.at ?? drag.fromAt ?? drag.startAt, 0), 0, durationMs);
@@ -84,6 +129,20 @@ function cleanDrag(drag, durationMs, viewport) {
     button: drag.button || 'left',
     mode: drag.mode === 'html5' ? 'html5' : 'mouse',
     steps: clamp(Math.round(finiteNumber(drag.steps, 12)), 1, 80),
+  };
+}
+
+function cleanCursorMove(move, durationMs, viewport) {
+  if (!move || typeof move !== 'object') return null;
+  const point = cleanPointOrGrid(move.to || move.target || move, viewport);
+  if (!point) return null;
+
+  const at = clamp(finiteNumber(move.at ?? move.from ?? move.start, 0), 0, durationMs);
+  return {
+    at: Math.round(at),
+    to: { x: point.x, y: point.y },
+    steps: clamp(Math.round(finiteNumber(move.steps, 8)), 1, 80),
+    ...(point.cells ? { cells: point.cells } : {}),
   };
 }
 
@@ -131,8 +190,14 @@ function normalizeDecision(raw, options = {}) {
   return {
     durationMs,
     commands: (data.commands || []).flatMap((command) => cleanCommand(command, durationMs) || []),
-    clicks: (data.clicks || []).map((click) => cleanClick(click, durationMs, viewport)).filter(Boolean),
+    clicks: [
+      ...(data.clicks || []).flatMap((click) => cleanClickIntent(click, durationMs, viewport)),
+      ...asArray(data.multi_clicks || data.multiClicks).flatMap((click) => cleanClickIntent(click, durationMs, viewport, true)),
+    ],
     drags: asArray(data.drags || data.drag).map((drag) => cleanDrag(drag, durationMs, viewport)).filter(Boolean),
+    cursorMoves: asArray(data.cursor_moves || data.cursorMoves || data.cursor_move || data.cursorMove)
+      .map((move) => cleanCursorMove(move, durationMs, viewport))
+      .filter(Boolean),
     viewMoves: asArray(data.view_moves || data.viewMoves).map((move) => cleanViewMove(move, durationMs)).filter(Boolean),
     shouldStop: Boolean(data.should_stop ?? data.shouldStop),
     summary: String(data.summary || data.observation_summary || '').trim().slice(0, 500),

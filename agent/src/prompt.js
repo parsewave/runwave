@@ -23,6 +23,7 @@ function compactHistory(history, limit = 8) {
         ...(item.commands || []).map((command) => command.key),
         ...(item.clicks || []).map((click) => `click(${click.x},${click.y})`),
         ...(item.drags || []).map((drag) => `drag(${drag.from.x},${drag.from.y}->${drag.to.x},${drag.to.y},${drag.mode})`),
+        ...(item.cursorMoves || []).map((move) => `cursor(${move.to.x},${move.to.y})`),
       ];
       return `step ${item.step}: ${item.summary || item.rationale || 'no summary'}; controls=${controls.join(',') || 'none'}${compactPostActionResult(item.result)}${compactOutcomeSummary(item.outcomeSummary)}`;
     })
@@ -82,12 +83,14 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '- Do not stop early unless the recording already shows enough real gameplay.',
     '',
     `Time remaining: ${secondsLeft}s.`,
-    `Viewport: ${viewport.width}x${viewport.height}. Click coordinates use this pixel space with origin at top-left.`,
+    `Viewport: ${viewport.width}x${viewport.height}. The screenshot has an 8x8 red mark grid labeled 0 through 63, row-major from top-left to bottom-right.`,
     `Available common controls: ${controls.join(', ')}. You may use literal Playwright keys.`,
     '',
     'Action guidance:',
-    '- You may use normalized click coordinates from 0 to 1. For example, x=0.5 and y=0.5 means the center of the current viewport.',
-    '- For drag/swipe games, use drags. Use mode "mouse" for canvas or pointer games; use mode "html5" for browser-native drag/drop elements such as match-3 candy boards.',
+    '- Prefer grid-cell targeting over raw x/y coordinates. For pointer actions, choose up to 4 relevant grid cell IDs using "cells": [id].',
+    '- Use "clicks" for a single click in the selected cell area. Use "multi_clicks" when a target is imprecise or repeated clicking/tapping is useful; it sends 10 quick clicks at random points inside the selected cells.',
+    '- For drag/swipe games, use drags with from_cells and to_cells. Use mode "mouse" for canvas or pointer games; use mode "html5" for browser-native drag/drop elements such as match-3 candy boards.',
+    '- For cursor movement without clicking, use cursor_moves with cells. Use view_moves only for relative camera/mouse-look movement where dx/dy matters.',
     '- If a click did not change the screen, do not repeat the exact same click more than twice. Pick a meaningfully different visible target or try a keyboard control shown by the game.',
     '- If the game says paused, resume, continue, start, or shows tutorial controls, follow that visible instruction before doing anything else.',
     '- On menus, prefer options that clearly enter gameplay: Play, Start, New Game, Single Player, Campaign, Level 1, Continue, Resume, or a default character/level choice.',
@@ -112,14 +115,16 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '  "previous_action_outcome": "one sentence describing the visible outcome of the previous step, or empty on the first step",',
     '  "duration_ms": 3000,',
     '  "commands": [{"from": 0, "to": 3000, "key": "ArrowRight"}],',
-    '  "clicks": [{"at": 100, "x": 640, "y": 360}],',
-    '  "drags": [{"at": 100, "from": {"x": 400, "y": 300}, "to": {"x": 480, "y": 300}, "mode": "mouse", "steps": 12}],',
+    '  "clicks": [{"at": 100, "cells": [27]}],',
+    '  "multi_clicks": [{"at": 100, "cells": [27, 28], "count": 10}],',
+    '  "drags": [{"at": 100, "from_cells": [34], "to_cells": [35], "mode": "mouse", "steps": 12}],',
+    '  "cursor_moves": [{"at": 100, "cells": [27], "steps": 8}],',
     '  "view_moves": [{"from": 0, "to": 800, "dx": 120, "dy": 0, "steps": 8}],',
     '  "should_stop": false,',
     '  "rationale": "why this is the next useful playtest action."',
     '}',
     '',
-    'Use duration_ms between 500 and 8000. Use empty arrays when no clicks, drags, or view movement are needed.',
+    'Use duration_ms between 500 and 8000. Use empty arrays when no clicks, multi_clicks, drags, cursor_moves, or view movement are needed.',
   ].join('\n');
 }
 
