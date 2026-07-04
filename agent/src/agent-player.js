@@ -9,6 +9,7 @@ const { chatCompletion, dataUrl, isModelJsonParseError } = require('./model-clie
 const { buildPlaytesterPrompt } = require('./prompt');
 
 const STOP_RESERVE_MS = 5000;
+const MODEL_SEQUENCE_INVALID = 'RUNWAVE_MODEL_SEQUENCE_INVALID';
 
 function responseBody(response) {
   if (!response || typeof response !== 'object') return {};
@@ -92,17 +93,32 @@ async function decideNextSequence({ job, screenshot, state, history, elapsedMs, 
     temperature: Number(job.agentTemperature ?? 0.2),
   });
 
-  return {
-    sequence: normalizeSequence(result.json, {
+  let sequence;
+  try {
+    sequence = normalizeSequence(result.json, {
       viewport,
       config: job,
       maxDurationMs: Number(job.agentMaxActionMs || 8000),
-    }),
+    });
+  } catch (error) {
+    const wrapped = new Error(`model response did not match the sequence schema: ${error.message}`);
+    wrapped.code = MODEL_SEQUENCE_INVALID;
+    wrapped.responseText = result.text;
+    wrapped.cause = error;
+    throw wrapped;
+  }
+
+  return {
+    sequence,
     model: result.model,
     modelElapsedMs: Date.now() - modelStartedAt,
     rawText: String(result.text || '').slice(0, 8000),
     usage: result.usage,
   };
+}
+
+function isRecoverableModelOutputError(error) {
+  return isModelJsonParseError(error) || Boolean(error && error.code === MODEL_SEQUENCE_INVALID);
 }
 
 function fallbackSequenceAfterInvalidJson({ history, viewport, error }) {
@@ -187,16 +203,16 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       }));
       consecutiveModelErrors = 0;
     } catch (error) {
-      if (!isModelJsonParseError(error)) throw error;
+      if (!isRecoverableModelOutputError(error)) throw error;
       modelErrorCount += 1;
       consecutiveModelErrors += 1;
-      log('agent.model_json_error', {
+      log(isModelJsonParseError(error) ? 'agent.model_json_error' : 'agent.model_sequence_error', {
         step: step + 1,
         consecutiveModelErrors,
         error: String(error.message || error).slice(0, 500),
       });
       sequence = fallbackSequenceAfterInvalidJson({ history, viewport: viewportFor(job), error });
-      model = 'fallback-after-invalid-json';
+      model = isModelJsonParseError(error) ? 'fallback-after-invalid-json' : 'fallback-after-invalid-sequence';
       modelElapsedMs = 0;
       rawText = String(error.responseText || error.message || '').slice(0, 8000);
       usage = null;
@@ -285,6 +301,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
 module.exports = {
   decideNextSequence,
   fallbackSequenceAfterInvalidJson,
+  isRecoverableModelOutputError,
   latestScreenshot,
   postSequenceResult,
   responseState,

@@ -457,6 +457,68 @@ test('agent playtest loop calls model and executes returned sequence', async () 
   assert.equal(fs.existsSync(path.join(dir, 'agent', 'agent-summary.json')), true);
 });
 
+test('agent playtest loop falls back when model JSON has invalid sequence fields', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-schema-fallback-test-'));
+  const screenshot = path.join(dir, 'screen.png');
+  fs.writeFileSync(
+    screenshot,
+    Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64')
+  );
+
+  const harnessSteps = [];
+  const logs = [];
+  let call = 0;
+  const result = await runAgenticPlaytest({
+    job: {
+      playtestDurationMs: 8000,
+      agentMinPlaytestMs: 0,
+      viewport: { width: 640, height: 360 },
+    },
+    initialResponse: {
+      screenshot,
+      state: { url: 'http://example.test' },
+    },
+    outputDir: path.join(dir, 'agent'),
+    modelClient: async () => {
+      call += 1;
+      if (call === 1) {
+        return {
+          model: 'fake-model',
+          text: '{"summary":"menu is visible","actions":[],"and survive.\\"":true}',
+          usage: { total_tokens: 1 },
+          json: {
+            summary: 'menu is visible',
+            actions: [],
+            'and survive."': true,
+          },
+        };
+      }
+      return {
+        model: 'fake-model',
+        text: '{"summary":"done","actions":[],"should_stop":true}',
+        usage: { total_tokens: 1 },
+        json: {
+          summary: 'done',
+          actions: [],
+          should_stop: true,
+        },
+      };
+    },
+    runAction: async (step) => {
+      harnessSteps.push(step);
+      return { ok: true, captures: [{ path: screenshot }], endState: { ok: true } };
+    },
+    log: (event, fields) => logs.push({ event, fields }),
+  });
+
+  assert.equal(result.modelErrorCount, 1);
+  assert.equal(result.steps, 2);
+  assert.equal(harnessSteps[0].actions[0].type, 'key');
+  assert.equal(harnessSteps[0].actions[0].key, 'Space');
+  assert.equal(harnessSteps[1].actions.length, 0);
+  assert.equal(logs.some((entry) => entry.event === 'agent.model_sequence_error'), true);
+});
+
 test('parses fenced nested JSON responses from vision models', () => {
   const parsed = parseJsonResponse(`
 Here is the next sequence:
