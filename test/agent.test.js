@@ -676,6 +676,8 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.match(prompt, /\{"type":"drag","start":100/);
   assert.match(prompt, /Single Player/);
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
+  assert.match(prompt, /If several recent actions produced no visible change/);
+  assert.match(prompt, /the move itself may be invalid/);
   assert.match(prompt, /24x24 red mark grid/);
   assert.match(prompt, /Column labels are in the top\/bottom margins/);
   assert.match(prompt, /"cell":\{"row":12,"col":12\}/);
