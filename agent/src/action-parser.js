@@ -23,13 +23,23 @@ function inferDurationMs(actions, fallback = DEFAULT_DURATION_MS) {
   return Math.max(MIN_DURATION_MS, latest || fallback);
 }
 
+function sanitizeAgentActions(actions) {
+  if (!Array.isArray(actions)) return actions;
+  return actions.map((action) => {
+    if (!action || typeof action !== 'object' || Array.isArray(action)) return action;
+    if (String(action.type || '').trim().toLowerCase() !== 'click') return action;
+    const { clickCount, ...singleClick } = action;
+    return singleClick;
+  });
+}
+
 function normalizeSequence(raw, options = {}) {
   const viewport = options.viewport || null;
   const maxDurationMs = Number(options.maxDurationMs || MAX_DURATION_MS);
   const data = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   assertAllowedFields(data, AGENT_SEQUENCE_FIELDS, 'sequence');
 
-  const actions = normalizeActions(data.actions, maxDurationMs, {
+  const actions = normalizeActions(sanitizeAgentActions(data.actions), maxDurationMs, {
     strict: false,
     viewport,
     config: options.config || {},

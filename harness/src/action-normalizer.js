@@ -13,7 +13,7 @@ const POINT_FIELDS = new Set(['x', 'y', ...CELL_FIELDS]);
 
 const ACTION_FIELDS = {
   key: new Set(['type', 'start', 'end', 'key']),
-  click: new Set(['type', 'start', 'end', 'x', 'y', ...CELL_FIELDS, 'button', 'clickCount']),
+  click: new Set(['type', 'start', 'end', 'x', 'y', ...CELL_FIELDS, 'button']),
   multi_click: new Set(['type', 'start', 'end', 'x', 'y', ...CELL_FIELDS, 'button', 'count', 'intervalMs']),
   drag: new Set(['type', 'start', 'end', 'from', 'to', 'from_cells', 'to_cells', 'button', 'mode', 'steps']),
   cursor_move: new Set(['type', 'start', 'end', 'to', 'x', 'y', ...CELL_FIELDS, 'steps']),
@@ -246,7 +246,6 @@ function normalizeClickAction(click, duration, options, forceMulti = false) {
     x: point.x,
     y: point.y,
     button: click.button || 'left',
-    clickCount: 1,
   };
   if (point.cells) {
     base.cells = point.cells;
@@ -267,7 +266,6 @@ function normalizeClickAction(click, duration, options, forceMulti = false) {
       x: nextPoint.x,
       y: nextPoint.y,
       button: base.button,
-      clickCount: 1,
     };
     if (nextPoint.cells) {
       action.cells = nextPoint.cells;
