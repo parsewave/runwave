@@ -7,6 +7,7 @@ const { normalizeSequence } = require('./action-parser');
 const { AgentRecorder } = require('./history');
 const { chatCompletion, dataUrl } = require('./model-client');
 const { buildPlaytesterPrompt, sequenceSchemaGuide } = require('./prompt');
+const { markGridFromConfig } = require('../../harness/src/mark-grid');
 
 const STOP_RESERVE_MS = 5000;
 const MODEL_SEQUENCE_INVALID = 'RUNWAVE_MODEL_SEQUENCE_INVALID';
@@ -72,12 +73,12 @@ function modelOutputSchemaError(error, responseText) {
   return wrapped;
 }
 
-function schemaCorrectionMessage(error) {
+function schemaCorrectionMessage(error, job = {}) {
   return [
     'The previous JSON object was parseable, but it did not match the required sequence schema.',
     `Validation error: ${String(error.message || error).slice(0, 500)}`,
     '',
-    sequenceSchemaGuide(),
+    sequenceSchemaGuide(markGridFromConfig(job || {})),
     '',
     'Return a corrected JSON object for the same screenshot and same game state. Do not include markdown, prose, comments, trailing text, or extra keys.',
   ].join('\n');
@@ -137,7 +138,7 @@ async function decideNextSequence({ job, screenshot, state, history, elapsedMs, 
       messages = [
         firstMessage,
         { role: 'assistant', content: String(result.text || '').slice(0, 4000) },
-        { role: 'user', content: schemaCorrectionMessage(error) },
+        { role: 'user', content: schemaCorrectionMessage(error, job) },
       ];
     }
   }

@@ -509,6 +509,7 @@ test('decideNextSequence retries when parsed model JSON has invalid sequence fie
   assert.equal(result.sequence.actions[0].key, 'Enter');
   assert.match(messagesByCall[1][2].content, /did not match the required sequence schema/);
   assert.match(messagesByCall[1][2].content, /Top-level keys must be exactly/);
+  assert.match(messagesByCall[1][2].content, /\{"type":"drag","start":100/);
 });
 
 test('agent playtest loop fails invalid model output without fallback actions', async () => {
@@ -672,18 +673,19 @@ test('playtester prompt warns when recent sequences repeat', () => {
 
   assert.match(prompt, /Warning:/);
   assert.match(prompt, /Space, Enter, Escape, and P/);
-  assert.match(prompt, /"type": "drag"/);
+  assert.match(prompt, /\{"type":"drag","start":100/);
   assert.match(prompt, /Single Player/);
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
   assert.match(prompt, /24x24 red mark grid/);
   assert.match(prompt, /Column labels are in the top\/bottom margins/);
-  assert.match(prompt, /"cell": \{"row": 12, "col": 12\}/);
-  assert.match(prompt, /"from": \{"row": 12, "col": 12\}, "to": \{"row": 12, "col": 13\}/);
-  assert.match(prompt, /"type": "multi_click"/);
-  assert.match(prompt, /Each action must have a "type"/);
-  assert.match(prompt, /"actions":/);
-  assert.match(prompt, /"start": 0/);
-  assert.match(prompt, /"end": 300/);
+  assert.match(prompt, /"cell":\{"row":12,"col":12\}/);
+  assert.match(prompt, /"from":\{"row":12,"col":12\},"to":\{"row":12,"col":13\}/);
+  assert.match(prompt, /"type":"multi_click"/);
+  assert.match(prompt, /Top-level keys must be exactly/);
+  assert.match(prompt, /Timing rules:/);
+  assert.match(prompt, /"actions"/);
+  assert.match(prompt, /"start":0/);
+  assert.match(prompt, /"end":500/);
   assert.doesNotMatch(prompt, /"commands":/);
   assert.doesNotMatch(prompt, /duration_ms/);
   assert.doesNotMatch(prompt, /"clicks":/);
@@ -701,8 +703,8 @@ test('playtester prompt describes custom mark grid dimensions', () => {
   });
 
   assert.match(prompt, /12x10 red mark grid/);
-  assert.match(prompt, /"cell": \{"row": 6, "col": 5\}/);
-  assert.doesNotMatch(prompt, /"cell": \{"row": 12, "col": 12\}/);
+  assert.match(prompt, /"cell":\{"row":6,"col":5\}/);
+  assert.doesNotMatch(prompt, /"cell":\{"row":12,"col":12\}/);
 });
 
 test('playtester prompt warns when recent sequences repeat a control cycle up to 5 steps', () => {
