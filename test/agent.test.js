@@ -154,6 +154,15 @@ test('agent playtest loop calls model and executes returned action', async () =>
   assert.equal(result.history[0].result.screenshot, afterScreenshot);
   assert.equal(result.history[0].result.screenshotChanged, true);
   assert.deepEqual(result.history[0].result.state, { ok: true });
+  const promptLog = fs
+    .readFileSync(path.join(dir, 'agent', 'agent-prompts.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(promptLog.length, 1);
+  assert.equal(promptLog[0].step, 1);
+  assert.equal(promptLog[0].screenshot, screenshot);
+  assert.match(promptLog[0].prompt, /You are an agentic browser-game playtester/);
   assert.equal(fs.existsSync(path.join(dir, 'agent', 'agent-summary.json')), true);
 });
 
@@ -305,6 +314,28 @@ test('playtester prompt warns when recent actions repeat', () => {
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
   assert.match(prompt, /8x8 red mark grid/);
   assert.match(prompt, /multi_clicks/);
+});
+
+test('playtester prompt warns when recent actions repeat a control cycle up to 5 steps', () => {
+  const cycle = ['ArrowRight', 'ArrowUp', 'ArrowLeft', 'ArrowDown'];
+  const prompt = buildPlaytesterPrompt({
+    job: {},
+    elapsedMs: 10000,
+    maxMs: 120000,
+    viewport: { width: 1280, height: 720 },
+    state: {},
+    history: cycle.concat(cycle).map((key, index) => ({
+      step: index + 1,
+      summary: 'ball is still in the central maze area',
+      commands: [{ key }],
+      clicks: [],
+      drags: [],
+    })),
+  });
+
+  assert.match(prompt, /Warning: the recent actions repeated a 4-step control cycle/);
+  assert.match(prompt, /ArrowRight -> ArrowUp -> ArrowLeft -> ArrowDown/);
+  assert.match(prompt, /Break the loop now/);
 });
 
 test('compact history includes post-action result signals', () => {

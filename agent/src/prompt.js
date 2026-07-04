@@ -24,27 +24,94 @@ function compactHistory(history, limit = 8) {
         ...(item.clicks || []).map((click) => `click(${click.x},${click.y})`),
         ...(item.drags || []).map((drag) => `drag(${drag.from.x},${drag.from.y}->${drag.to.x},${drag.to.y},${drag.mode})`),
         ...(item.cursorMoves || []).map((move) => `cursor(${move.to.x},${move.to.y})`),
+        ...(item.viewMoves || []).map((move) => `view(${move.dx},${move.dy})`),
       ];
       return `step ${item.step}: ${item.summary || item.rationale || 'no summary'}; controls=${controls.join(',') || 'none'}${compactPostActionResult(item.result)}${compactOutcomeSummary(item.outcomeSummary)}`;
     })
     .join('\n');
 }
 
+function roundedPoint(value, quantum = 20) {
+  return Math.round(Number(value || 0) / quantum) * quantum;
+}
+
+function actionControls(item) {
+  return {
+    commands: (item.commands || []).map((command) => command.key).filter(Boolean),
+    clicks: (item.clicks || []).map((click) => `${roundedPoint(click.x)},${roundedPoint(click.y)}`),
+    drags: (item.drags || []).map(
+      (drag) =>
+        `${roundedPoint(drag.from.x)},${roundedPoint(drag.from.y)}->${roundedPoint(drag.to.x)},${roundedPoint(drag.to.y)}`
+    ),
+    cursorMoves: (item.cursorMoves || []).map((move) => `${roundedPoint(move.to.x)},${roundedPoint(move.to.y)}`),
+    viewMoves: (item.viewMoves || []).map((move) => `${roundedPoint(move.dx)},${roundedPoint(move.dy)}`),
+  };
+}
+
+function actionSignature(item) {
+  const controls = actionControls(item);
+  if (!Object.values(controls).some((values) => values.length)) return '';
+  return [
+    controls.commands.join(','),
+    controls.clicks.join(','),
+    controls.drags.join(','),
+    controls.cursorMoves.join(','),
+    controls.viewMoves.join(','),
+  ].join('|');
+}
+
+function actionLabel(item) {
+  const controls = actionControls(item);
+  const labels = [
+    ...controls.commands,
+    ...controls.clicks.map((click) => `click(${click})`),
+    ...controls.drags.map((drag) => `drag(${drag})`),
+    ...controls.cursorMoves.map((move) => `cursor(${move})`),
+    ...controls.viewMoves.map((move) => `view(${move})`),
+  ];
+  return labels.join('+') || 'no controls';
+}
+
+function repeatedControlCycle(history, maxPeriod = 5) {
+  const signatures = history.map(actionSignature);
+  const max = Math.min(maxPeriod, Math.floor(signatures.length / 2));
+  for (let period = 1; period <= max; period += 1) {
+    const repeatCount = period === 1 ? 3 : 2;
+    const required = period * repeatCount;
+    if (signatures.length < required) continue;
+
+    const start = signatures.length - required;
+    const cycle = signatures.slice(signatures.length - period);
+    if (!cycle.some(Boolean)) continue;
+
+    let matched = true;
+    for (let offset = 0; offset < required; offset += 1) {
+      if (signatures[start + offset] !== cycle[offset % period]) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) {
+      return {
+        period,
+        labels: history.slice(history.length - period).map(actionLabel),
+      };
+    }
+  }
+  return null;
+}
+
 function repeatedHistoryWarning(history) {
-  const recent = history.slice(-3);
-  if (recent.length < 3) return '';
-  const signatures = recent.map((item) => {
-    const commands = (item.commands || []).map((command) => command.key).join(',');
-    const clicks = (item.clicks || []).map((click) => `${Math.round(click.x / 20) * 20},${Math.round(click.y / 20) * 20}`).join(',');
-    const drags = (item.drags || [])
-      .map((drag) => `${Math.round(drag.from.x / 20) * 20},${Math.round(drag.from.y / 20) * 20}->${Math.round(drag.to.x / 20) * 20},${Math.round(drag.to.y / 20) * 20}`)
-      .join(',');
-    return `${commands}|${clicks}|${drags}`;
-  });
-  if (signatures[0] && signatures.every((signature) => signature === signatures[0])) {
+  const cycle = repeatedControlCycle(history, 5);
+  if (cycle && cycle.period === 1) {
     return 'Warning: the recent actions repeated the same controls. Switch strategy now instead of trying the same input again.';
   }
+  if (cycle) {
+    return `Warning: the recent actions repeated a ${cycle.period}-step control cycle (${cycle.labels.join(' -> ')}). Break the loop now with a different route, a longer committed move, or a different strategy instead of continuing the cycle.`;
+  }
 
+  const recent = history.slice(-3);
+  if (recent.length < 3) return '';
   const summaries = recent.map((item) => String(item.summary || '').toLowerCase());
   if (summaries.every((summary) => summary.includes('paused'))) {
     return 'Warning: the game still appears paused. Try a different visible resume/control input instead of repeating the same click.';
@@ -77,9 +144,9 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '',
     'High-level goals:',
     '- If the game is on a menu/title/start screen, get into real gameplay.',
-    '- If movement is possible, explore new screens and avoid staying in one place.',
+    '- If movement is possible, always strive to explore as much as possible.',
     '- If there is no movement, perform meaningful game actions repeatedly.',
-    '- Prefer steady, understandable play over random key mashing.',
+    '- Try to chain multiple senseible commands at once rather than a single command each time.',
     '- Do not stop early unless the recording already shows enough real gameplay.',
     '',
     `Time remaining: ${secondsLeft}s.`,
@@ -91,7 +158,6 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '- Use "clicks" for a single click in the selected cell area. Use "multi_clicks" when a target is imprecise or repeated clicking/tapping is useful; it sends 10 quick clicks at random points inside the selected cells.',
     '- For drag/swipe games, use drags with from_cells and to_cells. Use mode "mouse" for canvas or pointer games; use mode "html5" for browser-native drag/drop elements such as match-3 candy boards.',
     '- For cursor movement without clicking, use cursor_moves with cells. Use view_moves only for relative camera/mouse-look movement where dx/dy matters.',
-    '- If a click did not change the screen, do not repeat the exact same click more than twice. Pick a meaningfully different visible target or try a keyboard control shown by the game.',
     '- If the game says paused, resume, continue, start, or shows tutorial controls, follow that visible instruction before doing anything else.',
     '- On menus, prefer options that clearly enter gameplay: Play, Start, New Game, Single Player, Campaign, Level 1, Continue, Resume, or a default character/level choice.',
     '- Avoid Options, Settings, Credits, Help, Leaderboard, and Multiplayer unless they are the only visible path into gameplay.',
@@ -114,7 +180,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '  "summary": "one sentence describing what is visible now and what happened recently",',
     '  "previous_action_outcome": "one sentence describing the visible outcome of the previous step, or empty on the first step",',
     '  "duration_ms": 3000,',
-    '  "commands": [{"from": 0, "to": 3000, "key": "ArrowRight"}],',
+    '  "commands": [{"from": 0, "to": 300, "key": "ArrowRight"}, {"from": 200, "to": 700, "key": "ArrowDown"}, {"from": 400, "to": 700, "key": "ArrowLeft"}],',
     '  "clicks": [{"at": 100, "cells": [27]}],',
     '  "multi_clicks": [{"at": 100, "cells": [27, 28], "count": 10}],',
     '  "drags": [{"at": 100, "from_cells": [34], "to_cells": [35], "mode": "mouse", "steps": 12}],',

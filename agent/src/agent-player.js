@@ -63,10 +63,19 @@ function postActionResult(response, beforeScreenshot) {
   return result;
 }
 
-async function decideNextAction({ job, screenshot, state, history, elapsedMs, maxMs, modelClient }) {
+async function decideNextAction({ job, screenshot, state, history, elapsedMs, maxMs, modelClient, promptStep = null, onPrompt = null }) {
   if (!screenshot) throw new Error('agent cannot decide without a screenshot');
   const viewport = viewportFor(job);
   const prompt = buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history });
+  if (typeof onPrompt === 'function') {
+    onPrompt({
+      step: promptStep,
+      elapsedMs,
+      screenshot,
+      viewport,
+      prompt,
+    });
+  }
   const modelStartedAt = Date.now();
   const result = await modelClient({
     messages: [
@@ -160,6 +169,8 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
         elapsedMs,
         maxMs,
         modelClient,
+        promptStep: step + 1,
+        onPrompt: (payload) => recorder.prompt(payload),
       }));
       consecutiveModelErrors = 0;
     } catch (error) {
@@ -230,6 +241,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       clicks: decision.clicks,
       drags: decision.drags,
       cursorMoves: decision.cursorMoves,
+      viewMoves: decision.viewMoves,
       result,
     });
 
