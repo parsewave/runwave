@@ -16,10 +16,13 @@ test('normalizes model actions into harness steps', () => {
   const decision = normalizeDecision(
     {
       duration_ms: 9000,
-      commands: [{ from: 0, to: 5000, key: 'ArrowRight' }, { from: 100, to: 900, key: 'Shift+ArrowRight+Space' }],
-      clicks: [{ at: 50, x: 0.5, y: 0.25 }],
-      drags: [{ at: 100, from: { x: 0.2, y: 0.25 }, to: { x: 0.4, y: 0.25 }, mode: 'html5' }],
-      view_moves: [{ from: 0, to: 500, dx: 50, dy: -10 }],
+      commands: [
+        { type: 'key', from: 0, to: 5000, key: 'ArrowRight' },
+        { type: 'key', from: 100, to: 900, key: 'Shift+ArrowRight+Space' },
+        { type: 'click', at: 50, x: 0.5, y: 0.25 },
+        { type: 'drag', at: 100, from: { x: 0.2, y: 0.25 }, to: { x: 0.4, y: 0.25 }, mode: 'html5' },
+        { type: 'view_move', from: 0, to: 500, dx: 50, dy: -10 },
+      ],
       should_stop: true,
       summary: 'menu is visible',
       previous_action_outcome: 'Enter opened the menu.',
@@ -53,10 +56,12 @@ test('normalizes grid-cell model actions into concrete pointer events', () => {
   const decision = normalizeDecision(
     {
       duration_ms: 1500,
-      clicks: [{ at: 100, cells: [9] }],
-      multi_clicks: [{ at: 200, cells: [18, 19], count: 10 }],
-      drags: [{ at: 300, from_cells: [34], to_cells: [35], mode: 'mouse' }],
-      cursor_moves: [{ at: 400, cells: [27] }],
+      commands: [
+        { type: 'click', at: 100, cells: [9] },
+        { type: 'multi_click', at: 200, cells: [18, 19], count: 10 },
+        { type: 'drag', at: 300, from_cells: [34], to_cells: [35], mode: 'mouse' },
+        { type: 'cursor_move', at: 400, cells: [27] },
+      ],
     },
     { viewport: { width: 800, height: 800 } }
   );
@@ -76,6 +81,25 @@ test('normalizes grid-cell model actions into concrete pointer events', () => {
   assert.ok(decision.drags[0].to.y >= 400 && decision.drags[0].to.y <= 499);
   assert.ok(decision.cursorMoves[0].to.x >= 300 && decision.cursorMoves[0].to.x <= 399);
   assert.ok(decision.cursorMoves[0].to.y >= 300 && decision.cursorMoves[0].to.y <= 399);
+});
+
+test('normalizes legacy top-level pointer actions for compatibility', () => {
+  const decision = normalizeDecision(
+    {
+      duration_ms: 1500,
+      clicks: [{ at: 100, cells: [9] }],
+      multi_clicks: [{ at: 200, cells: [18], count: 2 }],
+      drags: [{ at: 300, from_cells: [34], to_cells: [35], mode: 'mouse' }],
+      cursor_moves: [{ at: 400, cells: [27] }],
+      view_moves: [{ from: 500, to: 800, dx: 10, dy: -5 }],
+    },
+    { viewport: { width: 800, height: 800 } }
+  );
+
+  assert.equal(decision.clicks.length, 3);
+  assert.equal(decision.drags.length, 1);
+  assert.equal(decision.cursorMoves.length, 1);
+  assert.deepEqual(decision.viewMoves[0], { from: 500, to: 800, dx: 10, dy: -5, steps: 12 });
 });
 
 test('normalizes harness grid-cell steps into concrete pointer events', () => {
@@ -309,11 +333,14 @@ test('playtester prompt warns when recent actions repeat', () => {
 
   assert.match(prompt, /Warning:/);
   assert.match(prompt, /Space, Enter, Escape, and P/);
-  assert.match(prompt, /drags/);
+  assert.match(prompt, /"type": "drag"/);
   assert.match(prompt, /Single Player/);
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
   assert.match(prompt, /8x8 red mark grid/);
-  assert.match(prompt, /multi_clicks/);
+  assert.match(prompt, /"type": "multi_click"/);
+  assert.match(prompt, /Each command must have a "type"/);
+  assert.doesNotMatch(prompt, /"clicks":/);
+  assert.doesNotMatch(prompt, /"multi_clicks":/);
 });
 
 test('playtester prompt warns when recent actions repeat a control cycle up to 5 steps', () => {

@@ -177,6 +177,45 @@ function asArray(value) {
   return Array.isArray(value) ? value : [value];
 }
 
+function typedCommandType(command) {
+  const type = String(command.type || command.kind || command.action || '').trim().toLowerCase();
+  if (type) return type.replace(/-/g, '_');
+  return cleanKey(command.key ?? command.button ?? command.press) ? 'key' : '';
+}
+
+function normalizeTypedCommands(items, durationMs, viewport) {
+  const result = {
+    commands: [],
+    clicks: [],
+    drags: [],
+    cursorMoves: [],
+    viewMoves: [],
+  };
+
+  for (const item of asArray(items)) {
+    if (!item || typeof item !== 'object') continue;
+    const type = typedCommandType(item);
+    if (type === 'key' || type === 'keyboard' || type === 'press') {
+      result.commands.push(...(cleanCommand(item, durationMs) || []));
+    } else if (type === 'click' || type === 'single_click' || type === 'tap') {
+      result.clicks.push(...cleanClickIntent(item, durationMs, viewport));
+    } else if (type === 'multi_click' || type === 'multiclick' || type === 'multi_tap' || type === 'tap_burst') {
+      result.clicks.push(...cleanClickIntent(item, durationMs, viewport, true));
+    } else if (type === 'drag' || type === 'swipe') {
+      const drag = cleanDrag(item, durationMs, viewport);
+      if (drag) result.drags.push(drag);
+    } else if (type === 'cursor_move' || type === 'cursor' || type === 'move_cursor') {
+      const move = cleanCursorMove(item, durationMs, viewport);
+      if (move) result.cursorMoves.push(move);
+    } else if (type === 'view_move' || type === 'view' || type === 'mouse_move' || type === 'look') {
+      const move = cleanViewMove(item, durationMs);
+      if (move) result.viewMoves.push(move);
+    }
+  }
+
+  return result;
+}
+
 function normalizeDecision(raw, options = {}) {
   const viewport = options.viewport || null;
   const maxDurationMs = Number(options.maxDurationMs || MAX_DURATION_MS);
@@ -186,19 +225,30 @@ function normalizeDecision(raw, options = {}) {
     MIN_DURATION_MS,
     maxDurationMs
   );
+  const typed = normalizeTypedCommands(data.commands, durationMs, viewport);
 
   return {
     durationMs,
-    commands: (data.commands || []).flatMap((command) => cleanCommand(command, durationMs) || []),
+    commands: typed.commands,
     clicks: [
+      ...typed.clicks,
       ...(data.clicks || []).flatMap((click) => cleanClickIntent(click, durationMs, viewport)),
       ...asArray(data.multi_clicks || data.multiClicks).flatMap((click) => cleanClickIntent(click, durationMs, viewport, true)),
     ],
-    drags: asArray(data.drags || data.drag).map((drag) => cleanDrag(drag, durationMs, viewport)).filter(Boolean),
-    cursorMoves: asArray(data.cursor_moves || data.cursorMoves || data.cursor_move || data.cursorMove)
-      .map((move) => cleanCursorMove(move, durationMs, viewport))
-      .filter(Boolean),
-    viewMoves: asArray(data.view_moves || data.viewMoves).map((move) => cleanViewMove(move, durationMs)).filter(Boolean),
+    drags: [
+      ...typed.drags,
+      ...asArray(data.drags || data.drag).map((drag) => cleanDrag(drag, durationMs, viewport)).filter(Boolean),
+    ],
+    cursorMoves: [
+      ...typed.cursorMoves,
+      ...asArray(data.cursor_moves || data.cursorMoves || data.cursor_move || data.cursorMove)
+        .map((move) => cleanCursorMove(move, durationMs, viewport))
+        .filter(Boolean),
+    ],
+    viewMoves: [
+      ...typed.viewMoves,
+      ...asArray(data.view_moves || data.viewMoves).map((move) => cleanViewMove(move, durationMs)).filter(Boolean),
+    ],
     shouldStop: Boolean(data.should_stop ?? data.shouldStop),
     summary: String(data.summary || data.observation_summary || '').trim().slice(0, 500),
     previousActionOutcome: String(
