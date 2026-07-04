@@ -204,6 +204,39 @@ test('rejects harness short actions with impossible end timings', () => {
   );
 });
 
+test('browser clicks hold the mouse down for the normalized click interval', async (t) => {
+  let BrowserSession;
+  try {
+    ({ BrowserSession } = require('../harness/src/browser-session'));
+  } catch (error) {
+    if (error.code === 'MODULE_NOT_FOUND' && String(error.message).includes('playwright')) {
+      t.skip('playwright is not installed');
+      return;
+    }
+    throw error;
+  }
+
+  const session = new BrowserSession({}, { runDir: os.tmpdir() });
+  const calls = [];
+  session.page = {
+    mouse: {
+      move: async (x, y) => calls.push({ type: 'move', x, y }),
+      down: async (options) => calls.push({ type: 'down', options, at: Date.now() }),
+      up: async (options) => calls.push({ type: 'up', options, at: Date.now() }),
+    },
+  };
+
+  const startedAt = Date.now();
+  await session.click({ type: 'click', start: 100, end: 150, x: 321, y: 222, button: 'left', clickCount: 1 });
+
+  assert.deepEqual(calls.map((call) => call.type), ['move', 'down', 'up']);
+  assert.deepEqual(calls[0], { type: 'move', x: 321, y: 222 });
+  assert.deepEqual(calls[1].options, { button: 'left', clickCount: 1 });
+  assert.deepEqual(calls[2].options, { button: 'left', clickCount: 1 });
+  assert.ok(Date.now() - startedAt >= 45);
+  assert.deepEqual(session.mousePosition, { x: 321, y: 222 });
+});
+
 test('rejects harness step fields outside the canonical schema', () => {
   const explicit = normalizeStep({ duration: 1000, actions: [], captures: [1000], autoCaptures: false }, {}, 1);
   const verbose = normalizeStep({ duration: 1000, actions: [], captures: [1000], __runwaveVerbose: true }, {}, 2);
