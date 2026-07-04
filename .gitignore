@@ -6,4 +6,5 @@ recordings/
 state/
 *.log
 cruft
+ops/inventory/
 logbook.md

@@ -99,7 +99,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '  "drags": [{"at": 100, "from": {"x": 400, "y": 300}, "to": {"x": 480, "y": 300}, "mode": "mouse", "steps": 12}],',
     '  "view_moves": [{"from": 0, "to": 800, "dx": 120, "dy": 0, "steps": 8}],',
     '  "should_stop": false,',
-    '  "rationale": "why this is the next useful playtest action"',
+    '  "rationale": "why this is the next useful playtest action."',
     '}',
     '',
     'Use duration_ms between 500 and 8000. Use empty arrays when no clicks, drags, or view movement are needed.',

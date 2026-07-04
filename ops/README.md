@@ -41,23 +41,25 @@ Defaults:
 - `RUNWAVE_SSH_KEY_NAME` / `SSH_KEY_NAME`, or inferred from
   `RUNWAVE_SSH_KEY.pub` / `SSH_KEY.pub`
 
-The script writes an inventory file under `ops/inventory/`.
+The script writes an inventory file under `cruft/inventory/`. This is local
+generated state and should not be committed.
 
 ## Bootstrap
 
 Install dependencies and sync all browser games from S3 to each server:
 
 ```sh
-ops/bootstrap-servers.sh ops/inventory/<batch>.json
+ops/bootstrap-servers-parallel.sh cruft/inventory/<batch>.json
 ```
 
 This reads credentials from `~/.c.yaml` and writes them to
-`/etc/runwave-runner.env` on each server with mode `0600`.
+`/etc/runwave-runner.env` on each server with mode `0600`. Per-worker logs are
+written under `cruft/playtests/_bootstrap-logs/<batch>/`.
 
 The default game source is `s3://pw-cruft/games`. Override it with:
 
 ```sh
-GAMES_S3_URI=s3://OTHER_BUCKET/other-prefix ops/bootstrap-servers.sh ops/inventory/<batch>.json
+GAMES_S3_URI=s3://OTHER_BUCKET/other-prefix ops/bootstrap-servers-parallel.sh cruft/inventory/<batch>.json
 ```
 
 ## Run
@@ -66,7 +68,7 @@ Run one attempt per detected browser game:
 
 ```sh
 node ops/orchestrate-playtests.js \
-  --inventory ops/inventory/<batch>.json \
+  --inventory cruft/inventory/<batch>.json \
   --s3-uri s3://pw-cruft/playtests \
   --games-s3-uri s3://pw-cruft/games \
   --runwave-ref runwave-agentic-player \
@@ -82,7 +84,7 @@ Run one agentic attempt for every discovered browser game:
 ```sh
 export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
 node ops/orchestrate-playtests.js \
-  --inventory ops/inventory/<batch>.json \
+  --inventory cruft/inventory/<batch>.json \
   --s3-uri s3://pw-cruft/playtests \
   --games-s3-uri s3://pw-cruft/games \
   --runwave-ref runwave-agentic-player \

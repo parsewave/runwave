@@ -63,6 +63,7 @@ node --check ops/remote/run-playtest.js
 node --check ops/build-playtest-viewer.js
 bash -n ops/provision-hetzner.sh
 bash -n ops/bootstrap-servers.sh
+bash -n ops/bootstrap-servers-parallel.sh
 bash -n ops/remote/bootstrap-runner.sh
 ```
 
@@ -90,18 +91,23 @@ export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
 SERVER_TYPE=ccx43 SERVER_COUNT=8 LOCATION=hel1 ops/provision-hetzner.sh
 ```
 
-2. Bootstrap servers. This syncs `s3://pw-cruft/games` to `/opt/runwave/games` on every worker and installs runner dependencies:
+2. Bootstrap servers in parallel. This syncs `s3://pw-cruft/games` to
+   `/opt/runwave/games` on every worker and installs runner dependencies.
 
 ```sh
-ops/bootstrap-servers.sh ops/inventory/<batch>.json
+ops/bootstrap-servers-parallel.sh cruft/inventory/<batch>.json
 ```
+
+If any worker fails, inspect `cruft/playtests/_bootstrap-logs/<batch>/<worker>.log`.
+The bootstrap is idempotent enough to rerun for failed workers after apt/dpkg has
+settled.
 
 3. Launch one playtest per discovered browser game:
 
 ```sh
 export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
 node ops/orchestrate-playtests.js \
-  --inventory ops/inventory/<batch>.json \
+  --inventory cruft/inventory/<batch>.json \
   --s3-uri s3://pw-cruft/playtests \
   --games-s3-uri s3://pw-cruft/games \
   --runwave-ref runwave-agentic-player \
@@ -188,6 +194,19 @@ aws s3 sync \
   --delete --only-show-errors
 ```
 
+S3 downloads can hit transient network, proxy, or incomplete-read failures. If
+sync reports errors such as `Failed to connect to proxy URL` or
+`IncompleteRead`, rerun the sync once with proxy variables unset, then rebuild
+the viewer:
+
+```sh
+env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u ALL_PROXY -u all_proxy \
+  aws s3 sync \
+    s3://pw-cruft/playtests/<run-id>/ \
+    cruft/playtests/<run-id>/s3-artifacts/ \
+    --delete --only-show-errors
+```
+
 Build the viewer:
 
 ```sh
@@ -196,7 +215,11 @@ node ops/build-playtest-viewer.js \
   --out cruft/playtests/<run-id>/viewer/index.html
 ```
 
-The viewer is static HTML with filterable cards, embedded WebM videos, screenshot strips, and links to each `summary.json`.
+The viewer is static HTML with filterable cards, embedded WebM videos,
+screenshot strips, and links to each `summary.json`. It must page the run list
+in groups of four games, autoplay only the currently visible four videos muted,
+pause/unload videos outside the current page, and provide Previous/Next controls
+to move through the rest of the run without decoding all 20+ videos at once.
 
 ## Verification
 
@@ -219,7 +242,7 @@ const path = require('path');
 const runId = process.argv[2];
 const viewer = path.resolve('cruft/playtests', runId, 'viewer/index.html');
 const html = fs.readFileSync(viewer, 'utf8');
-const refs = [...html.matchAll(/(?:src|poster|href)="([^"]+)"/g)]
+const refs = [...html.matchAll(/(?:data-src|src|poster|href)="([^"]+)"/g)]
   .map((match) => match[1])
   .filter((value) => value && !value.startsWith('#'));
 const missing = refs.filter((ref) => !fs.existsSync(path.resolve(path.dirname(viewer), ref)));
@@ -236,3 +259,6 @@ Report the run id, S3 result prefix, local artifact folder, viewer path, job cou
 - If existing Hetzner servers have blocked public IPs or SSH timeouts, use local fallback and report that remote workers are unreachable.
 - If a job fails, leave its local workspace and log intact, download whatever uploaded, and include the failed job ids in the result.
 - If S3 has more than 20 runnable browser games, prefer running all of them unless the user explicitly requests exactly 20.
+- If artifact download fails with transient proxy/network errors, do not treat
+  the playtest run as failed immediately. Retry `aws s3 sync` with proxy
+  variables unset and verify viewer links after the retry.

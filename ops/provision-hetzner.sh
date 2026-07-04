@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-INVENTORY_DIR="${ROOT_DIR}/ops/inventory"
+INVENTORY_DIR="${INVENTORY_DIR:-${ROOT_DIR}/cruft/inventory}"
 SERVER_TYPE="${SERVER_TYPE:-ccx43}"
 SERVER_COUNT="${SERVER_COUNT:-8}"
 LOCATION="${LOCATION:-hel1}"
