@@ -165,8 +165,11 @@ test('infers harness duration from key ends and multi-click intervals', () => {
 
 test('rejects harness step fields outside the canonical schema', () => {
   const explicit = normalizeStep({ duration: 1000, actions: [], captures: [1000], autoCaptures: false }, {}, 1);
+  const verbose = normalizeStep({ duration: 1000, actions: [], captures: [1000], __runwaveVerbose: true }, {}, 2);
   assert.equal(explicit.duration, 1000);
   assert.deepEqual(explicit.captures, [1000]);
+  assert.equal(verbose.duration, 1000);
+  assert.deepEqual(verbose.captures, [1000]);
 
   assert.throws(
     () => normalizeStep({ actions: [], surprise: true }, {}, 1),
