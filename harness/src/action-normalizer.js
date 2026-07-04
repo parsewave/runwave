@@ -255,13 +255,15 @@ function normalizeClickAction(click, duration, options, forceMulti = false) {
   if (!forceMulti) return [base];
 
   const times = clickBurstTimes(timing.start, timing.end, finiteNumber(click.count, 10), finiteNumber(click.intervalMs, DEFAULT_MULTI_CLICK_INTERVAL_MS));
-  return times.map((clickStart) => {
+  return times.flatMap((clickStart) => {
     const nextPoint = normalizePointerActionPoint(click, 'click', options) || point;
     const clickEnd = Math.min(timing.end, clickStart + DEFAULT_IMPLICIT_END_MS);
+    const end = options.roundTimes ? Math.round(clickEnd) : clickEnd;
+    if (end <= clickStart) return [];
     const action = {
       type: 'click',
       start: clickStart,
-      end: options.roundTimes ? Math.round(clickEnd) : clickEnd,
+      end,
       x: nextPoint.x,
       y: nextPoint.y,
       button: base.button,

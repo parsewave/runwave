@@ -189,6 +189,18 @@ test('infers harness duration from key ends and multi-click intervals', () => {
   assert.deepEqual(multiClickStep.clicks.map((click) => click.end), [250, 400, 550, 700]);
 });
 
+test('drops compressed multi-clicks that would have zero duration', () => {
+  const sequence = normalizeSequence(
+    { actions: [{ type: 'multi_click', start: 7900, cells: [575], count: 10 }] },
+    { viewport: { width: 240, height: 240 }, maxDurationMs: 8000 }
+  );
+  const clicks = sequence.actions.filter((action) => action.type === 'click');
+
+  assert.ok(clicks.length > 0);
+  assert.ok(clicks.every((click) => click.end > click.start));
+  assert.ok(clicks.every((click) => click.end <= 8000));
+});
+
 test('default mark grid is dense enough for fine pointer targets', () => {
   const sequence = normalizeSequence(
     { actions: [{ type: 'click', start: 0, cells: [575] }] },
