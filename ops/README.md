@@ -12,8 +12,9 @@ running many browser-game playtests across Hetzner servers.
   `/opt/runwave/games`.
 - Runner: installed at `/opt/runwave/bin/run-playtest.js`.
 - Per playtest: clone the requested runwave repo/ref, install dependencies, run
-  a browser playtest in an isolated workspace for 2 minutes by default, then
-  upload the full workspace to S3.
+  a browser playtest in an isolated workspace for 2 minutes by default, capture
+  video plus browser audio on Linux workers, then upload the full workspace to
+  S3.
 - SSH: set `RUNWAVE_SSH_KEY` to the local private key used for workers. During
   provisioning, set `RUNWAVE_SSH_KEY_NAME` if the Hetzner key name cannot be
   inferred from the matching local public key.
@@ -55,6 +56,12 @@ ops/bootstrap-servers-parallel.sh cruft/inventory/<batch>.json
 This reads credentials from `~/.c.yaml` and writes them to
 `/etc/runwave-runner.env` on each server with mode `0600`. Per-worker logs are
 written under `cruft/playtests/_bootstrap-logs/<batch>/`.
+
+Bootstrap installs `ffmpeg` and PulseAudio. The remote runner creates a
+PulseAudio null sink named `runwave_sink`, launches Chromium with that sink as
+the default output, records `runwave_sink.monitor`, and muxes that audio into
+`video/000-runwave-with-audio.webm`. Set `recordAudio: false` in a job JSON to
+fall back to Playwright's video-only recording.
 
 The default game source is `s3://pw-cruft/games`. Override it with:
 

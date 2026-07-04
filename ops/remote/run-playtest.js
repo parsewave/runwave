@@ -88,6 +88,36 @@ function run(command, args, options = {}) {
   });
 }
 
+async function prepareAudioCaptureEnv(env, job) {
+  const recordAudio = job.recordAudio !== false && process.platform === 'linux';
+  if (!recordAudio) return { env, recordAudio: false };
+
+  const sink = job.audioSink || env.RUNWAVE_AUDIO_SINK || 'runwave_sink';
+  const audioEnv = {
+    ...env,
+    PULSE_SINK: sink,
+  };
+
+  await run('pulseaudio', ['--start', '--exit-idle-time=-1'], { env: audioEnv });
+  const modules = await run('pactl', ['list', 'short', 'modules'], { env: audioEnv });
+  if (!modules.stdout.includes(`sink_name=${sink}`)) {
+    await run('pactl', [
+      'load-module',
+      'module-null-sink',
+      `sink_name=${sink}`,
+      `sink_properties=device.description=${sink}`,
+    ], { env: audioEnv });
+  }
+  await run('pactl', ['set-default-sink', sink], { env: audioEnv });
+
+  return {
+    env: audioEnv,
+    recordAudio: true,
+    audioInputFormat: job.audioInputFormat || 'pulse',
+    audioSource: job.audioSource || `${sink}.monitor`,
+  };
+}
+
 function spawnLong(command, args, options = {}) {
   log('process.start', { command, args, cwd: options.cwd });
   const child = spawn(command, args, {
@@ -721,17 +751,22 @@ async function runAgentPlan(job, dirs, initialResponse, runAction) {
 
 async function runRunwave(job, dirs, url, runnerEnv = process.env) {
   const runwaveBin = path.join(dirs.runwave, 'bin', 'runwave.js');
-  const env = {
+  let env = {
     ...runnerEnv,
     RUNWAVE_WORKSPACE: dirs.workspace,
     RUNWAVE_SESSION_FILE: path.join(dirs.workspace, '.runwave-session.json'),
   };
+  const audioCapture = await prepareAudioCaptureEnv(env, job);
+  env = audioCapture.env;
   const base = ['node', runwaveBin];
   const start = {
     action: 'start',
     action_name: 'start',
     url,
     record: true,
+    recordAudio: audioCapture.recordAudio,
+    audioInputFormat: audioCapture.audioInputFormat,
+    audioSource: audioCapture.audioSource,
     headless: true,
     channel: job.channel,
     executablePath: job.executablePath,

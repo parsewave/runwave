@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
+const { AudioRecorder } = require('./audio-recorder');
 const { ensureDir, safeName, sleep, timestamp } = require('./file-utils');
 const { drawGridOnScreenshot } = require('./grid-overlay');
 const { targetUrl } = require('./protocol');
@@ -17,6 +18,8 @@ class BrowserSession {
     this.launchUrl = targetUrl(config);
     this.stateExpression = config.stateExpression || null;
     this.videoDir = null;
+    this.audioDir = null;
+    this.audioRecorder = null;
     this.mousePosition = { x: 0, y: 0 };
   }
 
@@ -34,13 +37,18 @@ class BrowserSession {
 
   async start() {
     this.timeSync('browser.start.ensure_run_dir', { dir: this.paths.runDir }, () => ensureDir(this.paths.runDir));
-    if (this.config.record) {
+    const recordVideo = Boolean(this.config.record || this.config.recordAudio);
+    if (recordVideo) {
       this.videoDir = this.timeSync('browser.start.ensure_video_dir', () => ensureDir(path.join(this.paths.runDir, 'video')));
+    }
+    if (this.config.recordAudio) {
+      this.audioRecorder = new AudioRecorder(this.config, this.paths.runDir, this.profiler ? this.profiler.child('audio-recorder') : null);
+      this.audioDir = this.audioRecorder.audioDir;
     }
 
     const launchOptions = {
       headless: this.config.headless !== false,
-      args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
+      args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'],
     };
     if (this.config.channel) launchOptions.channel = String(this.config.channel);
     if (this.config.executablePath) launchOptions.executablePath = String(this.config.executablePath);
@@ -52,12 +60,12 @@ class BrowserSession {
     }, () => chromium.launch(launchOptions));
     this.context = await this.time('browser.start.new_context', {
       viewport: this.config.viewport || { width: 1024, height: 620 },
-      record: Boolean(this.config.record),
+      record: recordVideo,
     }, () =>
       this.browser.newContext({
         viewport: this.config.viewport || { width: 1024, height: 620 },
         deviceScaleFactor: Number(this.config.deviceScaleFactor ?? 1),
-        ...(this.config.record
+        ...(recordVideo
           ? {
               recordVideo: {
                 dir: this.videoDir,
@@ -68,6 +76,9 @@ class BrowserSession {
       })
     );
     this.page = await this.time('browser.start.new_page', () => this.context.newPage());
+    if (this.audioRecorder) {
+      await this.time('browser.start.audio_recorder_start', () => this.audioRecorder.start());
+    }
     this.timeSync('browser.start.attach_console_logger', () => this.page.on('console', (msg) => {
       fs.appendFileSync(path.join(this.paths.runDir, 'browser-console.log'), `${msg.type()} ${msg.text()}\n`);
     }));
@@ -247,8 +258,21 @@ class BrowserSession {
     const video = this.timeSync('browser.close.get_video_handle', () => (this.page ? this.page.video() : null));
     if (this.context) await this.time('browser.close.context_close', () => this.context.close());
     const videoPath = video ? await this.time('browser.close.video_path', () => video.path()) : null;
+    let audioPath = null;
+    let audioVideoPath = null;
+    if (this.audioRecorder) {
+      audioPath = await this.time('browser.close.audio_stop', () => this.audioRecorder.stop());
+    }
     if (this.browser) await this.time('browser.close.browser_close', () => this.browser.close());
-    return videoPath;
+    if (this.audioRecorder) {
+      audioVideoPath = await this.time('browser.close.audio_mux', () => this.audioRecorder.mux(videoPath, audioPath));
+    }
+    return {
+      video: audioVideoPath || videoPath,
+      rawVideo: audioVideoPath ? videoPath : undefined,
+      audio: audioPath,
+      audioVideo: audioVideoPath || undefined,
+    };
   }
 }
 

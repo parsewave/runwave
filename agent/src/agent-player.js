@@ -104,32 +104,18 @@ async function decideNextSequence({ job, screenshot, state, history, elapsedMs, 
   };
 }
 
-function fallbackSequenceAfterInvalidJson({ history, viewport, error }) {
-  const lastWithKeyActions = history
-    .slice()
-    .reverse()
-    .find((item) => Array.isArray(item.actions) && item.actions.some((action) => action.type === 'key'));
-  const actions = lastWithKeyActions
-    ? lastWithKeyActions.actions
-        .filter((action) => action.type === 'key')
-        .slice(0, 2)
-        .map((action) => ({
-          type: 'key',
-          start: 0,
-          end: Math.max(500, Math.min(1500, Number(action.end || 1000) - Number(action.start || 0))),
-          key: action.key,
-        }))
-    : [{ type: 'key', start: 0, end: 600, key: 'Space' }];
-
-  return normalizeSequence(
-    {
-      summary: 'The model returned invalid JSON, so the harness is continuing with a conservative fallback sequence.',
-      actions,
-      should_stop: false,
-      rationale: `Avoid ending the playtest because of a malformed model response: ${String(error.message || error).slice(0, 200)}`,
-    },
-    { viewport }
-  );
+function failedActionAfterInvalidJson({ error }) {
+  const message = String(error && (error.message || error) || 'model returned invalid JSON').slice(0, 500);
+  return {
+    durationMs: 0,
+    actions: [],
+    shouldStop: false,
+    summary: 'Failed action: the model returned invalid JSON, so no gameplay input was sent.',
+    previousSequenceOutcome: '',
+    rationale: `Record the parsing failure, take a fresh screenshot of the current screen, and ask for a new valid JSON action sequence. Error: ${message}`,
+    failedAction: true,
+    error: message,
+  };
 }
 
 function actionsByType(actions, type) {
@@ -194,8 +180,8 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
         consecutiveModelErrors,
         error: String(error.message || error).slice(0, 500),
       });
-      sequence = fallbackSequenceAfterInvalidJson({ history, viewport: viewportFor(job), error });
-      model = 'fallback-after-invalid-json';
+      sequence = failedActionAfterInvalidJson({ error });
+      model = 'failed-action-after-invalid-json';
       modelElapsedMs = 0;
       rawText = String(error.responseText || error.message || '').slice(0, 8000);
       usage = null;
@@ -207,9 +193,56 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
 
     const duration = Math.max(100, Math.min(sequence.durationMs, remainingMs));
     step += 1;
+    if (sequence.failedAction) {
+      const actionName = `agent-step-${String(step).padStart(3, '0')}-failed-action`;
+      const harnessStep = {
+        action: 'screenshot',
+        action_name: actionName,
+        name: 'failed-action',
+      };
+      recorder.sequence({
+        step,
+        elapsedMs,
+        screenshot,
+        sequence,
+        harnessStep,
+        model,
+        modelElapsedMs,
+        rawText,
+        usage,
+      });
+      log('agent.failed_action', {
+        step,
+        model,
+        modelElapsedMs,
+        error: sequence.error,
+      });
+
+      lastResponse = await runAction(harnessStep);
+      const failedResult = postSequenceResult(lastResponse, screenshot);
+      failedResult.ok = false;
+      failedResult.error = sequence.error;
+      history.push({
+        step,
+        summary: sequence.summary,
+        rationale: sequence.rationale,
+        actions: [{ type: 'failed_action', error: sequence.error }],
+        clicks: [],
+        drags: [],
+        cursorMoves: [],
+        viewMoves: [],
+        failedAction: true,
+        result: failedResult,
+      });
+
+      if (consecutiveModelErrors >= maxModelFallbacks) break;
+      continue;
+    }
+
     const harnessStep = {
       action: 'step',
       action_name: `agent-step-${String(step).padStart(3, '0')}`,
+      duration,
       actions: sequence.actions,
       captures: [duration],
       autoCaptures: false,
@@ -282,7 +315,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
 
 module.exports = {
   decideNextSequence,
-  fallbackSequenceAfterInvalidJson,
+  failedActionAfterInvalidJson,
   latestScreenshot,
   postSequenceResult,
   responseState,

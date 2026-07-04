@@ -7,7 +7,7 @@ const path = require('path');
 const test = require('node:test');
 
 const { normalizeSequence } = require('../agent/src/action-parser');
-const { fallbackSequenceAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
+const { failedActionAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
 const { chatCompletion, parseJsonResponse } = require('../agent/src/model-client');
 const { buildPlaytesterPrompt, compactHistory } = require('../agent/src/prompt');
 const { normalizeStep } = require('../harness/src/step-normalizer');
@@ -190,6 +190,7 @@ test('agent playtest loop calls model and executes returned sequence', async () 
   assert.equal(result.steps, 1);
   assert.equal(harnessSteps.length, 1);
   assert.equal(harnessSteps[0].action, 'step');
+  assert.equal(harnessSteps[0].duration, 500);
   assert.equal(harnessSteps[0].actions.find((action) => action.type === 'key').key, 'Enter');
   assert.equal(harnessSteps[0].actions.find((action) => action.type === 'drag').mode, 'mouse');
   assert.equal(result.history[0].result.ok, true);
@@ -206,6 +207,73 @@ test('agent playtest loop calls model and executes returned sequence', async () 
   assert.equal(promptLog[0].screenshot, screenshot);
   assert.match(promptLog[0].prompt, /You are an agentic browser-game playtester/);
   assert.equal(fs.existsSync(path.join(dir, 'agent', 'agent-summary.json')), true);
+});
+
+test('agent loop records invalid JSON as a failed action and continues from a fresh screenshot', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-json-failed-action-test-'));
+  const screenshot = path.join(dir, 'screen.png');
+  const freshScreenshot = path.join(dir, 'fresh-screen.png');
+  const afterScreenshot = path.join(dir, 'after-screen.png');
+  fs.writeFileSync(screenshot, 'initial screenshot bytes');
+  fs.writeFileSync(freshScreenshot, 'fresh screenshot bytes');
+  fs.writeFileSync(afterScreenshot, 'after screenshot bytes');
+
+  const modelScreenshots = [];
+  let calls = 0;
+  const harnessActions = [];
+  const result = await runAgenticPlaytest({
+    job: {
+      playtestDurationMs: 9000,
+      agentMinPlaytestMs: 0,
+      viewport: { width: 640, height: 360 },
+      agentMaxModelFallbacks: 2,
+    },
+    initialResponse: {
+      screenshot,
+      state: { url: 'http://example.test', screen: 'initial' },
+    },
+    outputDir: path.join(dir, 'agent'),
+    modelClient: async ({ messages }) => {
+      calls += 1;
+      const image = messages[0].content.find((item) => item.type === 'image_url');
+      modelScreenshots.push(image.image_url.url);
+      if (calls === 1) {
+        const error = new Error('model response contained malformed JSON');
+        error.code = 'RUNWAVE_MODEL_JSON_PARSE';
+        error.responseText = '{"summary": "bad" trailing';
+        throw error;
+      }
+      return {
+        model: 'fake-model',
+        usage: { total_tokens: 1 },
+        json: {
+          summary: 'fresh screen is visible',
+          actions: [{ type: 'key', start: 0, end: 500, key: 'Enter' }],
+          should_stop: true,
+        },
+      };
+    },
+    runAction: async (action) => {
+      harnessActions.push(action);
+      if (action.action === 'screenshot') {
+        return { ok: true, action: 'screenshot', screenshot: freshScreenshot, state: { screen: 'fresh' } };
+      }
+      return { ok: true, action: 'step', captures: [{ path: afterScreenshot }], endState: { screen: 'after' } };
+    },
+  });
+
+  assert.equal(result.steps, 2);
+  assert.equal(result.modelErrorCount, 1);
+  assert.equal(harnessActions[0].action, 'screenshot');
+  assert.equal(harnessActions[0].action_name, 'agent-step-001-failed-action');
+  assert.equal(harnessActions[1].action, 'step');
+  assert.equal(result.history[0].failedAction, true);
+  assert.equal(result.history[0].actions[0].type, 'failed_action');
+  assert.equal(result.history[0].result.ok, false);
+  assert.match(result.history[0].result.error, /malformed JSON/);
+  assert.equal(result.history[0].result.screenshot, freshScreenshot);
+  assert.equal(result.history[1].actions[0].key, 'Enter');
+  assert.notEqual(modelScreenshots[0], modelScreenshots[1]);
 });
 
 test('parses fenced nested JSON responses from vision models', () => {
@@ -304,23 +372,15 @@ test('tags malformed model JSON parse errors', () => {
   );
 });
 
-test('builds a conservative fallback sequence after invalid model JSON', () => {
-  const sequence = fallbackSequenceAfterInvalidJson({
-    viewport: { width: 640, height: 360 },
+test('builds a failed action after invalid model JSON', () => {
+  const sequence = failedActionAfterInvalidJson({
     error: Object.assign(new Error('bad JSON'), { code: 'RUNWAVE_MODEL_JSON_PARSE' }),
-    history: [
-      {
-        step: 1,
-        summary: 'board changed',
-        actions: [{ type: 'key', start: 0, end: 1000, key: 'ArrowLeft' }],
-      },
-    ],
   });
 
-  assert.equal(sequence.durationMs, 1000);
-  assert.equal(sequence.actions[0].key, 'ArrowLeft');
-  assert.equal(sequence.actions.filter((action) => action.type === 'click').length, 0);
-  assert.equal(sequence.actions.filter((action) => action.type === 'drag').length, 0);
+  assert.equal(sequence.durationMs, 0);
+  assert.deepEqual(sequence.actions, []);
+  assert.equal(sequence.failedAction, true);
+  assert.match(sequence.error, /bad JSON/);
 });
 
 test('playtester prompt warns when recent sequences repeat', () => {
@@ -348,6 +408,8 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.match(prompt, /"actions":/);
   assert.match(prompt, /"start": 0/);
   assert.match(prompt, /"end": 300/);
+  assert.match(prompt, /runner will send that duration explicitly/);
+  assert.match(prompt, /Leave at least 100ms after the final click, drag, multi_click, or cursor_move/);
   assert.doesNotMatch(prompt, /"commands":/);
   assert.doesNotMatch(prompt, /duration_ms/);
   assert.doesNotMatch(prompt, /"clicks":/);

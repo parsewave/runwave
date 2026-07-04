@@ -14,7 +14,7 @@ else
 fi
 
 apt-get update
-apt-get install -y ca-certificates curl gnupg git jq python3 python3-pip rsync unzip
+apt-get install -y ca-certificates curl ffmpeg gnupg git jq pulseaudio pulseaudio-utils python3 python3-pip rsync unzip
 
 if [ "${need_node_install}" -eq 1 ]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -

@@ -119,7 +119,8 @@ async function writeStopResponse(runtime, input) {
       : await runtime.profiler.time('action.stop.screenshot', { action_name: input.action_name }, () =>
           browser.screenshot(outputDir, '999-final')
         );
-  const video = await runtime.profiler.time('action.stop.browser_close', { action_name: input.action_name }, () => browser.close());
+  const recording = await runtime.profiler.time('action.stop.browser_close', { action_name: input.action_name }, () => browser.close());
+  const video = typeof recording === 'string' ? recording : recording.video;
 
   runtime.profiler.timeSync('action.stop.remove_session_file', { sessionFile }, () => removeFileIfExists(sessionFile));
   const payload = withVerboseLog(runtime, {
@@ -130,6 +131,11 @@ async function writeStopResponse(runtime, input) {
     state: finalState,
     video,
   });
+  if (recording && typeof recording === 'object') {
+    if (recording.rawVideo) payload.rawVideo = recording.rawVideo;
+    if (recording.audio) payload.audio = recording.audio;
+    if (recording.audioVideo) payload.audioVideo = recording.audioVideo;
+  }
   if (screenshot) payload.screenshot = screenshot;
   const response = runtime.profiler.timeSync('action.stop.write_response', { action_name: input.action_name }, () =>
     output.response(input.action_name, payload)

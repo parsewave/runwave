@@ -98,6 +98,9 @@ Useful `start` options:
 
 - `url` or `file`: required target.
 - `record`: enable Playwright WebM recording.
+- `recordAudio`: enable ffmpeg audio capture and mux it into the final WebM.
+  This implies video recording. On Linux the default input is PulseAudio
+  `default`; override with `audioInputFormat` and `audioSource`.
 - `headless`: defaults to `true`; set `false` to watch the browser.
 - `channel`: optional Playwright browser channel, such as `chrome` or `msedge`.
 - `executablePath`: optional explicit browser executable path.
@@ -234,6 +237,13 @@ Stop and finalize the recording:
 runwave '{"action":"stop","action_name":"run-stop"}'
 ```
 
+When `recordAudio` is enabled, `stop` returns `video` pointing at the muxed
+audio/video WebM. It also includes `rawVideo` for the original Playwright
+video-only WebM, `audio` for the captured audio file, and `audioVideo` for the
+muxed file. The machine running runwave must have `ffmpeg` and an audio capture
+source. For Linux workers, a PulseAudio monitor source such as
+`runwave_sink.monitor` is the recommended source.
+
 ## State
 
 Every response includes generic browser state:
@@ -263,6 +273,9 @@ Each turn writes:
 - `response.json`: the main CLI response.
 - `*.png`: screenshots captured during that operation.
 - `NNN-<action_name>.json`: detailed sequence log for `step` operations.
+- `video/*.webm`: final recordings. With audio enabled,
+  `video/000-runwave-with-audio.webm` is the combined recording.
+- `audio/*.webm`: raw captured audio when `recordAudio` is enabled.
 
 The active session is tracked in `.runwave-session.json` by default and
 is removed by `stop`.

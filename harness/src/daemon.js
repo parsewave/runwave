@@ -91,6 +91,7 @@ async function main() {
       sessionDir: paths.runDir,
       outputRoot: paths.outputRoot,
       videoDir: browser.videoDir,
+      audioDir: browser.audioDir,
       verboseLog: profiler.enabled ? paths.verboseLogPath : undefined,
       state: await profiler.time('daemon.start_response.state', () => browser.state()),
     };
@@ -109,6 +110,7 @@ async function main() {
       sessionDir: paths.runDir,
       outputRoot: paths.outputRoot,
       videoDir: browser.videoDir,
+      audioDir: browser.audioDir,
       verboseLogPath: paths.verboseLogPath,
       launchUrl: browser.launchUrl,
       initialOutputDir: outputDir,
