@@ -93,41 +93,102 @@ function balancedJsonObject(text) {
   return null;
 }
 
-function parseJsonResponse(text) {
+function stripBareFragmentLines(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  let changed = false;
+  const kept = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      kept.push(line);
+      continue;
+    }
+
+    const startsLikeJson =
+      /^[{[]/.test(trimmed) ||
+      /^[}\]],?$/.test(trimmed) ||
+      /^"[^"]+"\s*:/.test(trimmed) ||
+      /^,\s*$/.test(trimmed);
+
+    if (!startsLikeJson && /"\s*,?$/.test(trimmed)) {
+      changed = true;
+      continue;
+    }
+
+    kept.push(line);
+  }
+
+  return changed ? kept.join('\n') : null;
+}
+
+function parseJsonCandidate(text) {
   let lastParseError = null;
   try {
     const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === 'object') return parsed;
+    if (parsed && typeof parsed === 'object') return { parsed, error: null };
   } catch (error) {
     lastParseError = error;
-    // Try fenced or embedded JSON below.
   }
+
+  const repaired = stripBareFragmentLines(text);
+  if (repaired) {
+    try {
+      const parsed = JSON.parse(repaired);
+      if (parsed && typeof parsed === 'object') return { parsed, error: null };
+    } catch (error) {
+      lastParseError = error;
+    }
+  }
+
+  return { parsed: null, error: lastParseError };
+}
+
+function parseEmbeddedJsonCandidate(text) {
+  const balanced = balancedJsonObject(text);
+  if (balanced) {
+    const parsed = parseJsonCandidate(balanced);
+    if (parsed.parsed) return parsed;
+    return { parsed: null, error: parsed.error, foundObject: true };
+  }
+
+  const repaired = stripBareFragmentLines(text);
+  if (repaired) {
+    const repairedBalanced = balancedJsonObject(repaired);
+    if (repairedBalanced) {
+      const parsed = parseJsonCandidate(repairedBalanced);
+      if (parsed.parsed) return parsed;
+      return { parsed: null, error: parsed.error, foundObject: true };
+    }
+  }
+
+  return { parsed: null, error: null, foundObject: false };
+}
+
+function parseJsonResponse(text) {
+  let lastParseError = null;
+  const direct = parseJsonCandidate(text);
+  if (direct.parsed) return direct.parsed;
+  lastParseError = direct.error;
 
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (fenced) {
     const fencedBody = fenced[1].trim();
-    try {
-      return JSON.parse(fencedBody);
-    } catch (error) {
-      lastParseError = error;
-      const balanced = balancedJsonObject(fencedBody);
-      if (balanced) {
-        try {
-          return JSON.parse(balanced);
-        } catch (balancedError) {
-          throw modelJsonParseError('model response contained malformed JSON', text, balancedError);
-        }
-      }
+    const fencedParsed = parseJsonCandidate(fencedBody);
+    if (fencedParsed.parsed) return fencedParsed.parsed;
+    lastParseError = fencedParsed.error || lastParseError;
+
+    const embeddedFenced = parseEmbeddedJsonCandidate(fencedBody);
+    if (embeddedFenced.parsed) return embeddedFenced.parsed;
+    if (embeddedFenced.foundObject) {
+      throw modelJsonParseError('model response contained malformed JSON', text, embeddedFenced.error);
     }
   }
 
-  const embedded = balancedJsonObject(text);
-  if (embedded) {
-    try {
-      return JSON.parse(embedded);
-    } catch (error) {
-      throw modelJsonParseError('model response contained malformed JSON', text, error);
-    }
+  const embedded = parseEmbeddedJsonCandidate(text);
+  if (embedded.parsed) return embedded.parsed;
+  if (embedded.foundObject) {
+    throw modelJsonParseError('model response contained malformed JSON', text, embedded.error);
   }
   throw modelJsonParseError('model response did not contain a JSON object', text, lastParseError);
 }
@@ -145,7 +206,7 @@ function dataUrl(file) {
   return `data:${mimeType(file)};base64,${encoded}`;
 }
 
-async function chatCompletion({ messages, maxTokens = 1200, temperature = 0.2, timeoutMs = 120000, attempts = null }) {
+async function chatCompletion({ messages, maxTokens = 2400, temperature = 0.2, timeoutMs = 120000, attempts = null }) {
   const apiKey = openRouterApiKey();
   if (!apiKey) {
     throw new Error(`OPENROUTER_API_KEY not found in environment or ${configPath()}`);

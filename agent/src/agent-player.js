@@ -44,7 +44,7 @@ async function decideNextAction({ job, screenshot, state, history, elapsedMs, ma
         ],
       },
     ],
-    maxTokens: Number(job.agentMaxTokens || 1200),
+    maxTokens: Number(job.agentMaxTokens || 2400),
     timeoutMs: Number(job.agentTimeoutMs || 120000),
     temperature: Number(job.agentTemperature ?? 0.2),
   });

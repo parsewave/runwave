@@ -111,6 +111,54 @@ Here is the next action:
   assert.equal(parsed.clicks[0].x, 320);
 });
 
+test('recovers JSON with bare repeated string fragments before the closing brace', () => {
+  const parsed = parseJsonResponse(`{
+  "summary": "The board changed.",
+  "duration_ms": 1500,
+  "commands": [
+    {"from": 0, "to": 300, "key": "ArrowRight"},
+    {"from": 400, "to": 700, "key": "ArrowDown"}
+  ],
+  "clicks": [],
+  "drags": [],
+  "view_moves": [],
+  "should_stop": false,
+  "rationale": "Sliding right and down will merge tiles in the bottom-right corner."
+."
+right corner."
+ corner."
+}`);
+
+  assert.equal(parsed.summary, 'The board changed.');
+  assert.equal(parsed.commands[0].key, 'ArrowRight');
+  assert.equal(parsed.rationale, 'Sliding right and down will merge tiles in the bottom-right corner.');
+});
+
+test('recovers JSON with repeated bare rationale continuation lines', () => {
+  const parsed = parseJsonResponse(`{
+  "summary": "The menu is still visible.",
+  "duration_ms": 1000,
+  "commands": [],
+  "clicks": [
+    {
+      "at": 100,
+      "x": 500,
+      "y": 660
+    }
+  ],
+  "drags": [],
+  "view_moves": [],
+  "should_stop": false,
+  "rationale": "I will try clicking it again."
+clicking it again."
+to see if it registers."
+}`);
+
+  assert.equal(parsed.summary, 'The menu is still visible.');
+  assert.equal(parsed.clicks[0].x, 500);
+  assert.equal(parsed.rationale, 'I will try clicking it again.');
+});
+
 test('tags malformed model JSON parse errors', () => {
   assert.throws(
     () => parseJsonResponse('{"summary": "almost valid", "commands": [] trailing'),
