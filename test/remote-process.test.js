@@ -152,9 +152,27 @@ test('xvfb capture config leaves room for measured browser chrome', () => {
 
   assert.equal(capture.captureX, 0);
   assert.equal(capture.captureY, 0);
-  assert.equal(capture.screenWidth, 656);
+  assert.equal(capture.paddingX, 64);
+  assert.equal(capture.screenWidth, 720);
   assert.equal(capture.screenHeight, 656);
-  assert.equal(capture.screen, '656x656x24');
+  assert.equal(capture.screen, '720x656x24');
+});
+
+test('xvfb capture config pads exact-width viewports for measured X offsets', () => {
+  const capture = xvfbCaptureConfig(
+    {
+      port: 9311,
+      viewport: { width: 660, height: 1000 },
+      videoSize: { width: 660, height: 1000 },
+      xvfbWidth: 660,
+      xvfbHeight: 1000,
+    },
+    {}
+  );
+
+  assert.equal(capture.screenWidth, 724);
+  assert.equal(capture.screenHeight, 1160);
+  assert.equal(capture.screen, '724x1160x24');
 });
 
 test('linux playtest jobs run in a container by default unless disabled or already inside one', () => {

@@ -9,6 +9,7 @@ const { spawn } = require('child_process');
 const DEFAULT_PROCESS_STOP_WAIT_MS = 5000;
 const DEFAULT_PROCESS_KILL_WAIT_MS = 5000;
 const DEFAULT_AUDIO_VIDEO_CAPTURE_Y = 0;
+const DEFAULT_XVFB_CAPTURE_PADDING_X = 64;
 const DEFAULT_XVFB_CAPTURE_PADDING_Y = 160;
 
 function parseArgs(argv) {
@@ -307,13 +308,17 @@ function xvfbCaptureConfig(job = {}, env = process.env) {
     job.audioVideoCaptureY ?? env.RUNWAVE_AUDIO_VIDEO_CAPTURE_Y ?? env.RUNWAVE_VIDEO_Y,
     DEFAULT_AUDIO_VIDEO_CAPTURE_Y
   );
+  const paddingX = nonNegativeInteger(
+    job.xvfbCapturePaddingX ?? env.RUNWAVE_XVFB_CAPTURE_PADDING_X,
+    DEFAULT_XVFB_CAPTURE_PADDING_X
+  );
   const paddingY = nonNegativeInteger(
     job.xvfbCapturePaddingY ?? env.RUNWAVE_XVFB_CAPTURE_PADDING_Y,
     DEFAULT_XVFB_CAPTURE_PADDING_Y
   );
   const configuredWidth = positiveInteger(job.xvfbWidth ?? env.RUNWAVE_XVFB_WIDTH, captureWidth + captureX);
   const configuredHeight = positiveInteger(job.xvfbHeight ?? env.RUNWAVE_XVFB_HEIGHT, captureHeight + captureY + paddingY);
-  const screenWidth = Math.max(configuredWidth, captureWidth + captureX);
+  const screenWidth = Math.max(configuredWidth, captureWidth + captureX + paddingX);
   const screenHeight = Math.max(configuredHeight, captureHeight + captureY + paddingY);
   const screen = job.xvfbScreen || env.RUNWAVE_XVFB_SCREEN || `${screenWidth}x${screenHeight}x24`;
   return {
@@ -322,6 +327,7 @@ function xvfbCaptureConfig(job = {}, env = process.env) {
     captureY,
     captureWidth,
     captureHeight,
+    paddingX,
     screenWidth,
     screenHeight,
     screen,
