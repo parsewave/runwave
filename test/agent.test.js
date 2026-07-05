@@ -165,10 +165,10 @@ test('rejects stale row and column cell objects from agent output', () => {
 test('rejects invalid numbered cells from agent output', () => {
   assert.throws(
     () => normalizeSequence(
-      { actions: [{ type: 'drag', start: 100, from_cells: [143], to_cells: [144] }] },
+      { actions: [{ type: 'drag', start: 100, from_cells: [255], to_cells: [256] }] },
       { viewport: { width: 800, height: 800 } }
     ),
-    /actions\[0\]\.to_cells\[0\] must be between 0 and 143/
+    /actions\[0\]\.to_cells\[0\] must be between 0 and 255/
   );
   assert.throws(
     () => normalizeSequence(
@@ -182,7 +182,7 @@ test('rejects invalid numbered cells from agent output', () => {
       { actions: [{ type: 'click', start: 100, cell: -1 }] },
       { viewport: { width: 800, height: 800 } }
     ),
-    /actions\[0\]\.cell must be between 0 and 143/
+    /actions\[0\]\.cell must be between 0 and 255/
   );
   assert.throws(
     () => normalizeSequence(
@@ -296,16 +296,16 @@ test('drops compressed multi-clicks that would have zero duration', () => {
   assert.ok(clicks.every((click) => click.end <= 8000));
 });
 
-test('default mark grid uses numbered 12x12 targets', () => {
+test('default mark grid uses numbered 16x16 targets', () => {
   const sequence = normalizeSequence(
-    { actions: [{ type: 'click', start: 0, cells: [143] }] },
+    { actions: [{ type: 'click', start: 0, cells: [255] }] },
     { viewport: { width: 240, height: 240 } }
   );
   const click = sequence.actions[0];
 
-  assert.deepEqual(click.cells, [143]);
-  assert.ok(click.x >= 220 && click.x <= 239);
-  assert.ok(click.y >= 220 && click.y <= 239);
+  assert.deepEqual(click.cells, [255]);
+  assert.ok(click.x >= 225 && click.x <= 239);
+  assert.ok(click.y >= 225 && click.y <= 239);
 });
 
 test('mark grid overlay draws numbered labels inside cells', () => {
@@ -722,10 +722,10 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.match(prompt, /\{"type":"drag","start":100/);
   assert.match(prompt, /Single Player/);
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
-  assert.match(prompt, /12x12 red mark grid/);
-  assert.match(prompt, /labeled 0 through 143/);
-  assert.match(prompt, /"cell":78/);
-  assert.match(prompt, /"from_cells":\[78\],"to_cells":\[79\]/);
+  assert.match(prompt, /16x16 red mark grid/);
+  assert.match(prompt, /labeled 0 through 255/);
+  assert.match(prompt, /"cell":136/);
+  assert.match(prompt, /"from_cells":\[136\],"to_cells":\[137\]/);
   assert.match(prompt, /"type":"multi_click"/);
   assert.match(prompt, /Top-level keys must be exactly/);
   assert.match(prompt, /Timing rules:/);

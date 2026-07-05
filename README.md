@@ -153,9 +153,9 @@ runwave '{
 }'
 ```
 
-Screenshots include a 12x12 red mark grid by default. Each cell is labeled with
+Screenshots include a 16x16 red mark grid by default. Each cell is labeled with
 a number in the center, starting at 0 in the top-left and increasing row-major
-to 143 in the bottom-right. Pointer actions may use these numbered cells instead
+to 255 in the bottom-right. Pointer actions may use these numbered cells instead
 of exact pixels. Raw `x`/`y` coordinates are still supported and refer to the
 browser viewport.
 
