@@ -11,17 +11,18 @@ function resultFileName(stepIndex, actionName) {
 function summarizeActions(step) {
   return [
     ...step.keyActions.map(({ start, end, keyName, key }) => ({ type: 'key', start, end, key: keyName, resolvedKey: key })),
-    ...step.clicks.map(({ type, start, x, y, button, clickCount, cells }) => ({
+    ...step.clicks.map(({ type, start, end, x, y, button, clickCount, cells }) => ({
       type,
       start,
+      end,
       x,
       y,
       button,
       clickCount,
       ...(cells ? { cells } : {}),
     })),
-    ...step.drags.map(({ type, start, from, to, button, mode, steps }) => ({ type, start, from, to, button, mode, steps })),
-    ...step.cursorMoves.map(({ type, start, to, steps }) => ({ type, start, to, steps })),
+    ...step.drags.map(({ type, start, end, from, to, button, mode, steps }) => ({ type, start, end, from, to, button, mode, steps })),
+    ...step.cursorMoves.map(({ type, start, end, to, steps }) => ({ type, start, end, to, steps })),
     ...step.viewMoves.map(({ type, start, end, dx, dy, steps }) => ({ type, start, end, dx, dy, steps })),
   ].sort((left, right) => (left.start ?? 0) - (right.start ?? 0));
 }
