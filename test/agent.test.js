@@ -9,7 +9,7 @@ const test = require('node:test');
 const { normalizeSequence } = require('../agent/src/action-parser');
 const { failedActionAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
 const { chatCompletion, parseJsonResponse } = require('../agent/src/model-client');
-const { buildPlaytesterPrompt, compactHistory } = require('../agent/src/prompt');
+const { buildPlaytesterPrompt, compactHistory, sequenceSchemaGuide } = require('../agent/src/prompt');
 const { normalizeStep } = require('../controller/src/step-normalizer');
 
 test('normalizes model sequences into controller steps', () => {
@@ -616,21 +616,30 @@ test('playtester prompt warns when recent sequences repeat', () => {
 
   assert.match(prompt, /Warning:/);
   assert.match(prompt, /Space, Enter, Escape, and P/);
-  assert.match(prompt, /"type": "drag"/);
+  assert.match(prompt, /"type":"drag"/);
   assert.match(prompt, /Single Player/);
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
-  assert.match(prompt, /8x8 red mark grid/);
-  assert.match(prompt, /"type": "multi_click"/);
-  assert.match(prompt, /Each action must have a "type"/);
-  assert.match(prompt, /"actions":/);
-  assert.match(prompt, /"start": 0/);
-  assert.match(prompt, /"end": 300/);
-  assert.match(prompt, /runner will send that duration explicitly/);
-  assert.match(prompt, /Leave at least 100ms after the final click, drag, multi_click, or cursor_move/);
+  assert.match(prompt, /light 8x8 red mark grid/);
+  assert.match(prompt, /"type":"multi_click"/);
+  assert.match(prompt, /JSON output contract/);
+  assert.match(prompt, /Top-level keys must be exactly/);
+  assert.match(prompt, /"actions"/);
+  assert.match(prompt, /"start":0/);
+  assert.match(prompt, /"end":500/);
+  assert.match(prompt, /RunWave adds a short default/);
   assert.doesNotMatch(prompt, /"commands":/);
   assert.doesNotMatch(prompt, /duration_ms/);
   assert.doesNotMatch(prompt, /"clicks":/);
   assert.doesNotMatch(prompt, /"multi_clicks":/);
+});
+
+test('sequence schema guide uses configured numbered grid examples', () => {
+  const guide = sequenceSchemaGuide({ rows: 16, cols: 16 });
+
+  assert.match(guide, /numbered grid cells 0-255/);
+  assert.match(guide, /"cell":136/);
+  assert.match(guide, /"from_cells":\[136\]/);
+  assert.match(guide, /"to_cells":\[137\]/);
 });
 
 test('playtester prompt includes game-specific playtest instructions', () => {
