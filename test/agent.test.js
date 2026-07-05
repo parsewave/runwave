@@ -714,7 +714,7 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.match(prompt, /"type":"drag"/);
   assert.match(prompt, /Single Player/);
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
-  assert.match(prompt, /keep playing but try a different target/);
+  assert.match(prompt, /same action fails about 3-5 times/);
   assert.match(prompt, /light 20x20 red mark grid/);
   assert.match(prompt, /Column labels are in the top\/bottom margins/);
   assert.match(prompt, /"type":"multi_click"/);
