@@ -683,6 +683,71 @@ test('agent loop retries when model actions all normalize away', async () => {
   assert.equal(modelScreenshots[0], modelScreenshots[1]);
 });
 
+test('agent loop retries when clipped timing removes every action', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-empty-clipped-action-test-'));
+  const screenshot = path.join(dir, 'screen.png');
+  const afterScreenshot = path.join(dir, 'after-screen.png');
+  fs.writeFileSync(screenshot, 'initial screenshot bytes');
+  fs.writeFileSync(afterScreenshot, 'after screenshot bytes');
+
+  const modelScreenshots = [];
+  let calls = 0;
+  const controllerActions = [];
+  const result = await runAgenticPlaytest({
+    job: {
+      playtestDurationMs: 6000,
+      agentMinPlaytestMs: 0,
+      viewport: { width: 640, height: 360 },
+      agentMaxModelFallbacks: 2,
+    },
+    initialResponse: {
+      screenshot,
+      state: { screen: 'unchanged' },
+    },
+    outputDir: path.join(dir, 'agent'),
+    modelClient: async ({ messages }) => {
+      calls += 1;
+      const image = messages[0].content.find((item) => item.type === 'image_url');
+      modelScreenshots.push(image.image_url.url);
+      if (calls === 1) {
+        return {
+          model: 'fake-model',
+          text: '{"summary":"starts too late","actions":[{"type":"key","start":2000,"end":2500,"key":"Enter"}]}',
+          usage: { total_tokens: 1 },
+          json: {
+            summary: 'starts too late',
+            actions: [{ type: 'key', start: 2000, end: 2500, key: 'Enter' }],
+          },
+        };
+      }
+      return {
+        model: 'fake-model',
+        text: '{"summary":"valid","actions":[{"type":"key","start":0,"end":100,"key":"Enter"}],"should_stop":true}',
+        usage: { total_tokens: 1 },
+        json: {
+          summary: 'valid',
+          actions: [{ type: 'key', start: 0, end: 100, key: 'Enter' }],
+          should_stop: true,
+        },
+      };
+    },
+    runAction: async (action) => {
+      controllerActions.push(action);
+      return { ok: true, action: 'step', captures: [{ path: afterScreenshot }], endState: { screen: 'after' } };
+    },
+  });
+
+  assert.equal(result.steps, 2);
+  assert.equal(result.modelErrorCount, 1);
+  assert.equal(controllerActions.length, 1);
+  assert.equal(controllerActions[0].actions[0].key, 'Enter');
+  assert.equal(result.history[0].failedAction, true);
+  assert.match(result.history[0].result.error, /outside the remaining sequence duration/);
+  assert.equal(result.history[0].result.screenshotChanged, false);
+  assert.equal(result.history[1].actions[0].key, 'Enter');
+  assert.equal(modelScreenshots[0], modelScreenshots[1]);
+});
+
 test('agent loop records action execution failures and retries with the same screenshot', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-execution-failed-action-test-'));
   const screenshot = path.join(dir, 'screen.png');

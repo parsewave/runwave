@@ -239,6 +239,24 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     }
 
     const duration = Math.max(100, Math.min(sequence.durationMs, remainingMs));
+    let controllerActions = [];
+    if (!sequence.failedAction) {
+      controllerActions = actionsWithinDuration(sequence.actions, duration);
+      if (sequence.actions.length && !controllerActions.length) {
+        const error = new Error('all model actions were outside the remaining sequence duration after clipping');
+        error.code = MODEL_SEQUENCE_ERROR_CODE;
+        modelErrorCount += 1;
+        consecutiveModelErrors += 1;
+        log('agent.model_sequence_error', {
+          step: step + 1,
+          consecutiveModelErrors,
+          type: 'schema',
+          error: error.message,
+        });
+        sequence = failedActionAfterInvalidJson({ error });
+        model = 'failed-action-after-invalid-model-sequence';
+      }
+    }
     step += 1;
     if (sequence.failedAction) {
       const actionName = `agent-step-${String(step).padStart(3, '0')}-failed-action`;
@@ -288,7 +306,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       action: 'step',
       action_name: `agent-step-${String(step).padStart(3, '0')}`,
       duration,
-      actions: actionsWithinDuration(sequence.actions, duration),
+      actions: controllerActions,
       captures: [duration],
       autoCaptures: false,
     };
