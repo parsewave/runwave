@@ -958,6 +958,7 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.match(prompt, /reason about that game structure separately/);
   assert.match(prompt, /failed about 3-5 times/);
   assert.match(prompt, /learn the pattern/);
+  assert.match(prompt, /Every non-stop response must include at least one action/);
   assert.doesNotMatch(prompt, /"commands":/);
   assert.doesNotMatch(prompt, /duration_ms/);
   assert.doesNotMatch(prompt, /"clicks":/);

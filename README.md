@@ -44,7 +44,8 @@ From a private GitHub repo in a task Dockerfile:
 ```dockerfile
 RUN apt-get update && apt-get install -y \
     gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly gstreamer1.0-x pulseaudio xvfb
+    gstreamer1.0-plugins-ugly gstreamer1.0-x gstreamer1.0-pulseaudio \
+    pulseaudio xvfb
 RUN npm install -g https://github.com/parsewave/runwave.git
 RUN npx playwright install --with-deps chromium
 ```

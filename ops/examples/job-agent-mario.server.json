@@ -9,7 +9,5 @@
   "playMode": "agent",
   "verboseRunwave": true,
   "playtestDurationMs": 180000,
-  "agentMinPlaytestMs": 170000,
-  "viewport": { "width": 960, "height": 540 },
-  "videoSize": { "width": 960, "height": 540 }
+  "agentMinPlaytestMs": 170000
 }

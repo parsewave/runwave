@@ -22,8 +22,9 @@ running many browser-game playtests across Hetzner servers.
 
 Real fleet runs should use the agentic OpenRouter planner with `--agent` or
 `--play-mode agent`. The scripted exploration path is kept only for local smoke
-tests and controller debugging. The controller still only controls the browser;
-the agent planner lives separately under `agent/`.
+tests and controller debugging, and should not be used for fleet results. The
+controller still only controls the browser; the agent planner lives separately
+under `agent/`.
 
 ## Provision
 
@@ -123,6 +124,10 @@ runwave drives browser targets.
 For agent jobs, if `--agent-min-playtest-ms` is not provided, the orchestrator
 sets it to `--playtest-duration-ms - 10000`. A 120 second run therefore requires
 about 110 seconds of play before the agent is allowed to stop.
+
+Remote playtest jobs derive `viewport` and `videoSize` from each game's
+`metadata.json`. Job JSON should normally omit those fields unless a lower-level
+debug path explicitly needs to override controller start options.
 
 ## Agent Mode
 

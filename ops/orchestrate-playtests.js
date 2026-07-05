@@ -101,7 +101,7 @@ function usage() {
     '  --agent-min-playtest-ms N',
     '  --mark-grid-rows N',
     '  --mark-grid-cols N',
-    '  --play-mode scripted|agent',
+    '  --play-mode agent|scripted  (scripted is local/debug only)',
     '  --agent',
     '  --hardware-webgl-games game-a,game-b',
     '  --no-default-hardware-webgl-games',

@@ -198,11 +198,12 @@ done < <(find cruft/playtests/_games-cache -mindepth 2 -maxdepth 2 -name package
   "runwaveRef": "main",
   "playMode": "agent",
   "playtestDurationMs": 120000,
-  "s3Uri": "s3://pw-cruft/playtests/<run-id>/<game>/attempt-001",
-  "viewport": { "width": 960, "height": 540 },
-  "videoSize": { "width": 960, "height": 540 }
+  "s3Uri": "s3://pw-cruft/playtests/<run-id>/<game>/attempt-001"
 }
 ```
+
+Remote jobs read `viewport` and `videoSize` from the game's `metadata.json`.
+Do not put those fields in normal fleet job specs.
 
 4. Run jobs with:
 
@@ -254,10 +255,7 @@ node ops/build-playtest-viewer.js \
 ```
 
 The viewer is static HTML with filterable cards, embedded WebM videos,
-screenshot strips, and links to each `summary.json`. It must page the run list
-in groups of four games, autoplay only the currently visible four videos muted,
-pause/unload videos outside the current page, and provide Previous/Next controls
-to move through the rest of the run without decoding all 20+ videos at once.
+fullscreen controls, poster screenshots, and links to each `summary.json`.
 
 ## Verification
 

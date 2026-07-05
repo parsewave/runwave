@@ -244,7 +244,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     'Browser/game state JSON:',
     JSON.stringify(state || {}, null, 2).slice(0, 5000),
     '',
-    'Return the next JSON sequence now. Use an empty actions array only when no input is needed.',
+    'Return the next JSON sequence now. Every non-stop response must include at least one action. Use an empty actions array only when you are done and set "should_stop": true.',
   ].join('\n');
 }
 
