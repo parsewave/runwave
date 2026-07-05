@@ -218,8 +218,9 @@ function run(command, args, options = {}) {
 }
 
 async function prepareAudioCaptureEnv(env, job) {
-  const recordAudio = job.recordAudio !== false && process.platform === 'linux';
-  if (!recordAudio) return { env, recordAudio: false };
+  if (process.platform !== 'linux') {
+    throw new Error('runwave playtest requires linux for gstreamer audio capture');
+  }
 
   const sink = job.audioSink || env.RUNWAVE_AUDIO_SINK || 'runwave_sink';
   const audioEnv = {
@@ -248,7 +249,6 @@ async function prepareAudioCaptureEnv(env, job) {
 
   return {
     env: audioEnv,
-    recordAudio: true,
     audioSource: job.audioSource || `${sink}.monitor`,
   };
 }
@@ -858,213 +858,6 @@ async function checkoutRunwave(job, runwaveDir, env = process.env) {
   await run('npx', ['playwright', 'install', 'chromium'], { cwd: runwaveDir, env });
 }
 
-function defaultPlan(durationMs = 120000) {
-  const totalDuration = Math.max(5000, Number(durationMs) || 120000);
-  const focusDuration = Math.min(2500, Math.max(1000, Math.round(totalDuration * 0.02)));
-  const remaining = Math.max(1000, totalDuration - focusDuration);
-  const segmentMs = 10000;
-  const patterns = [
-    [
-      { type: 'key', start: 0, end: 6200, key: 'ArrowRight' },
-      { type: 'key', start: 1200, end: 7600, key: 'ArrowUp' },
-      { type: 'key', start: 8200, end: 8450, key: 'Space' },
-    ],
-    [
-      { type: 'key', start: 0, end: 5200, key: 'ArrowLeft' },
-      { type: 'key', start: 2500, end: 9200, key: 'ArrowDown' },
-      { type: 'key', start: 5600, end: 5750, key: 'Enter' },
-    ],
-    [
-      { type: 'key', start: 0, end: 6500, key: 'KeyW' },
-      { type: 'key', start: 1000, end: 8200, key: 'KeyD' },
-      { type: 'key', start: 7800, end: 8050, key: 'Space' },
-    ],
-    [
-      { type: 'key', start: 0, end: 6000, key: 'KeyA' },
-      { type: 'key', start: 2600, end: 8600, key: 'KeyS' },
-      { type: 'key', start: 7000, end: 7250, key: 'Space' },
-    ],
-  ];
-
-  const actions = [
-    {
-      action: 'screenshot',
-      action_name: 'screen-001-open',
-      name: 'open',
-    },
-    {
-      action: 'step',
-      action_name: 'step-002-focus-start',
-      actions: [
-        { type: 'click', start: 100, x: 640, y: 360 },
-        { type: 'key', start: 250, end: 350, key: 'Space' },
-        { type: 'key', start: 500, end: 650, key: 'Enter' },
-      ],
-      duration: focusDuration,
-      captures: [focusDuration],
-      autoCaptures: false,
-    },
-  ];
-
-  let elapsed = 0;
-  let segmentIndex = 0;
-  while (elapsed < remaining) {
-    const duration = Math.min(segmentMs, remaining - elapsed);
-    const pattern = patterns[segmentIndex % patterns.length]
-      .map((action) => ({
-        ...action,
-        end: Math.min(action.end, Math.max(0, duration - 200)),
-      }))
-      .filter((action) => action.end > action.start);
-    actions.push({
-      action: 'step',
-      action_name: `step-${String(segmentIndex + 3).padStart(3, '0')}-play`,
-      actions: [
-        ...pattern,
-        ...(segmentIndex % 3 === 2 ? [{ type: 'click', start: Math.min(500, duration), x: 640, y: 360 }] : []),
-        ...(segmentIndex % 4 === 1
-          ? [{ type: 'view_move', start: 800, end: Math.min(2500, duration), dx: 180, dy: -35, steps: 12 }]
-          : []),
-      ],
-      captures: [duration],
-      autoCaptures: false,
-    });
-    elapsed += duration;
-    segmentIndex += 1;
-  }
-
-  actions.push(
-    {
-      action: 'screenshot',
-      action_name: 'screen-final',
-      name: 'final',
-    },
-  );
-  return actions;
-}
-
-function parseActionResponse(result, action) {
-  let response;
-  try {
-    response = JSON.parse(result.stdout);
-  } catch (error) {
-    throw new Error(`runwave returned non-JSON output for ${action.action_name || action.action}: ${result.stdout.slice(-2000)}`);
-  }
-  if (!response || response.ok === false) {
-    throw new Error(`runwave action failed for ${action.action_name || action.action}: ${JSON.stringify(response).slice(0, 2000)}`);
-  }
-  return response;
-}
-
-function runwaveCliArgs(base, action, job) {
-  const args = [base[1]];
-  if (job.verboseRunwave || process.env.RUNWAVE_VERBOSE === '1') args.push('-v');
-  args.push(JSON.stringify(action));
-  return args;
-}
-
-async function runRunwaveAction(base, dirs, env, job, action) {
-  const payload = {
-    ...action,
-    session_id: action.session_id || action.sessionId || job.runwaveSessionId,
-  };
-  const result = await run(base[0], runwaveCliArgs(base, payload, job), { cwd: dirs.workspace, env });
-  return parseActionResponse(result, payload);
-}
-
-function useAgentMode(job) {
-  return job.playMode === 'agent' || job.agent === true;
-}
-
-async function runAgentPlan(job, dirs, initialResponse, runAction) {
-  const agentModule = path.join(dirs.runwave, 'agent', 'src', 'agent-player.js');
-  const { runAgenticPlaytest } = require(agentModule);
-  return runAgenticPlaytest({
-    job,
-    initialResponse,
-    runAction,
-    outputDir: path.join(dirs.workspace, 'artifacts', 'agent'),
-    log,
-  });
-}
-
-async function runRunwave(job, dirs, url, runnerEnv = process.env) {
-  const runwaveBin = path.join(dirs.runwave, 'bin', 'runwave.js');
-  let env = {
-    ...runnerEnv,
-    RUNWAVE_WORKSPACE: dirs.workspace,
-    RUNWAVE_SESSION_DIR: path.join(dirs.workspace, '.runwave-sessions'),
-  };
-  job.runwaveSessionId = job.runwaveSessionId || job.sessionId || job.jobId || `${job.game || 'runwave'}-${Date.now()}`;
-  const audioCapture = await prepareAudioCaptureEnv(env, job);
-  env = audioCapture.env;
-  let xvfb = null;
-  if (audioCapture.recordAudio) {
-    const xvfbSession = await startXvfbForAudio(job, env);
-    env = xvfbSession.env;
-    xvfb = xvfbSession.process;
-    if (xvfbSession.display) log('xvfb.ready', { display: xvfbSession.display });
-  }
-  const base = ['node', runwaveBin];
-  const start = {
-    action: 'start',
-    action_name: 'start',
-    session_id: job.runwaveSessionId,
-    url,
-    record: true,
-    recordAudio: audioCapture.recordAudio,
-    audioSource: audioCapture.audioSource,
-    gstreamerPath: job.gstreamerPath,
-    headless: job.headless ?? (audioCapture.recordAudio ? false : true),
-    channel: job.channel,
-    executablePath: job.executablePath,
-    chromiumArgs: job.chromiumArgs,
-    chromiumArgsMode: job.chromiumArgsMode,
-    viewport: job.viewport || { width: 1280, height: 720 },
-    videoSize: job.videoSize || job.viewport || { width: 1280, height: 720 },
-    outputRoot: 'artifacts/state/output',
-    outDir: 'artifacts/recordings/session',
-    initialScreenshot: true,
-    gridScreenshots: job.gridScreenshots,
-    keyAliases: job.keyAliases,
-    force: true,
-    sessionWaitMs: 120000,
-  };
-
-  const runAction = (action) => runRunwaveAction(base, dirs, env, job, action);
-  let initialResponse = null;
-  let playtestResult = null;
-  try {
-    initialResponse = await runAction(start);
-    job._runwaveInitialWebgl = webglFromResponse(initialResponse);
-    assertHardwareWebgl(job, initialResponse);
-    if (useAgentMode(job)) {
-      playtestResult = await runAgentPlan(job, dirs, initialResponse, runAction);
-    } else {
-      const plan = Array.isArray(job.actionPlan) && job.actionPlan.length ? job.actionPlan : defaultPlan(job.playtestDurationMs);
-      for (const action of plan) {
-        await runAction(action);
-      }
-    }
-  } finally {
-    if (initialResponse) {
-      await runAction({ action: 'stop', action_name: 'stop', session_id: job.runwaveSessionId }).catch((error) => {
-        log('runwave.stop.error', { error: error.message });
-      });
-    }
-    if (xvfb) {
-      await stopLongProcess(xvfb, {
-        label: 'xvfb',
-        termWaitMs: Number(job.processStopWaitMs ?? DEFAULT_PROCESS_STOP_WAIT_MS),
-        killWaitMs: Number(job.processKillWaitMs ?? DEFAULT_PROCESS_KILL_WAIT_MS),
-      }).catch((error) => {
-        log('xvfb.stop.error', { error: error.message });
-      });
-    }
-  }
-  return playtestResult;
-}
-
 async function uploadWorkspace(job, dirs, env) {
   if (!job.s3Uri) return null;
   const s3Uri = job.s3Uri.replace(/\/+$/, '');
@@ -1073,6 +866,30 @@ async function uploadWorkspace(job, dirs, env) {
     env: { ...process.env, ...env },
   });
   return s3Uri;
+}
+
+async function runViewportOnly(job, dirs, runnerEnv, port, gameDir, summary) {
+  const gameProcess = spawnLong('bash', ['start.sh'], {
+    cwd: gameDir,
+    env: { ...runnerEnv, PORT: String(port) },
+  });
+  try {
+    const url = `http://127.0.0.1:${port}/`;
+    await waitForHttp(url, Number(job.httpTimeoutMs || 60000));
+    const probe = await probeViewport(job, dirs, url, runnerEnv);
+    let viewportChoice = probe.choice;
+    if (job.vlmViewportPreflight || runnerEnv.RUNWAVE_VLM_VIEWPORT_PREFLIGHT === '1') {
+      const preflight = await chooseViewportWithVlm(job, dirs, url, runnerEnv, probe);
+      summary.viewportVlmPreflight = preflight;
+      viewportChoice = preflight.choice || viewportChoice;
+    }
+    summary.viewportProbe = probe;
+    summary.viewportChoice = viewportChoice;
+    summary.viewportOnly = true;
+    log('viewport.only.done', { viewport: viewportChoice.viewport });
+  } finally {
+    await stopLongProcess(gameProcess, { label: 'game' }).catch(() => {});
+  }
 }
 
 async function main() {
@@ -1111,84 +928,105 @@ async function main() {
   fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
 
   const gameDir = path.join(runner.gamesRoot, job.game);
+  let xvfb = null;
 
-  let gameProcess = null;
   try {
     if (!fs.existsSync(path.join(gameDir, 'start.sh'))) {
       throw new Error(`game has no start.sh: ${job.game}`);
     }
-    job.playtestInstructions = loadPlaytestInstructions(gameDir, job.game);
-    summary.playtestInstructions = {
-      path: path.join(gameDir, 'playtest.md'),
-      bytes: Buffer.byteLength(job.playtestInstructions, 'utf8'),
-    };
-    fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
-
     log('job.start', { jobId, game: job.game, port });
     await checkoutRunwave(job, dirs.runwave, runnerEnv);
 
-    gameProcess = spawnLong('bash', ['start.sh'], {
-      cwd: gameDir,
-      env: { ...runnerEnv, PORT: String(port) },
-    });
-    const url = `http://127.0.0.1:${port}/`;
-    await waitForHttp(url, Number(job.httpTimeoutMs || 60000));
-
-    if (!job.viewport && job.autoViewport !== false) {
-      const probe = await probeViewport(job, dirs, url, runnerEnv);
-      let viewportChoice = probe.choice;
-      if (job.vlmViewportPreflight || runnerEnv.RUNWAVE_VLM_VIEWPORT_PREFLIGHT === '1') {
-        const preflight = await chooseViewportWithVlm(job, dirs, url, runnerEnv, probe);
-        summary.viewportVlmPreflight = preflight;
-        viewportChoice = preflight.choice || viewportChoice;
-        log('viewport.vlm_preflight', {
-          jobId,
-          choice: viewportChoice,
-          error: preflight.error,
-          elapsedMs: preflight.elapsedMs,
-        });
-      }
-      job.viewport = viewportChoice.viewport;
-      job.videoSize = job.videoSize || viewportChoice.viewport;
-      summary.viewportProbe = probe;
-      summary.viewportChoice = viewportChoice;
-      fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
-      log('viewport.probe', { jobId, choice: probe.choice });
-    }
+    const audioCapture = await prepareAudioCaptureEnv(runnerEnv, job);
+    let playtestEnv = audioCapture.env;
+    const xvfbSession = await startXvfbForAudio(job, playtestEnv);
+    playtestEnv = xvfbSession.env;
+    xvfb = xvfbSession.process;
+    if (xvfbSession.display) log('xvfb.ready', { display: xvfbSession.display });
 
     if (job.viewportOnly || job.viewportPreflightOnly) {
-      summary.viewportOnly = true;
-      log('viewport.only.done', { jobId, viewport: job.viewport });
+      await runViewportOnly(job, dirs, playtestEnv, port, gameDir, summary);
     } else {
-      const playtest = await runRunwave(job, dirs, url, runnerEnv);
-      if (job._runwaveInitialWebgl) summary.webgl = job._runwaveInitialWebgl;
-      if (playtest) {
-        summary.playtest = {
-          mode: playtest.mode,
-          steps: playtest.steps,
-          elapsedMs: playtest.elapsedMs,
-          stoppedByAgent: playtest.stoppedByAgent,
-          outputDir: playtest.outputDir,
-        };
-      }
+      const { runPlaytest } = require(path.join(dirs.runwave, 'playtest', 'playtest.js'));
+
+      const startOverrides = {
+        audioSource: audioCapture.audioSource,
+        gstreamerPath: job.gstreamerPath,
+        channel: job.channel,
+        executablePath: job.executablePath,
+        chromiumArgs: job.chromiumArgs,
+        chromiumArgsMode: job.chromiumArgsMode,
+        keyAliases: job.keyAliases,
+        gridScreenshots: job.gridScreenshots,
+      };
+      if (job.videoSize) startOverrides.videoSize = job.videoSize;
+
+      let viewport = job.viewport;
+      const onGameReady = viewport ? undefined : async ({ url }) => {
+        const probe = await probeViewport(job, dirs, url, playtestEnv);
+        let viewportChoice = probe.choice;
+        if (job.vlmViewportPreflight || runnerEnv.RUNWAVE_VLM_VIEWPORT_PREFLIGHT === '1') {
+          const preflight = await chooseViewportWithVlm(job, dirs, url, playtestEnv, probe);
+          summary.viewportVlmPreflight = preflight;
+          viewportChoice = preflight.choice || viewportChoice;
+          log('viewport.vlm_preflight', {
+            jobId,
+            choice: viewportChoice,
+            error: preflight.error,
+            elapsedMs: preflight.elapsedMs,
+          });
+        }
+        summary.viewportProbe = probe;
+        summary.viewportChoice = viewportChoice;
+        fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
+        log('viewport.probe', { jobId, choice: probe.choice });
+        return { viewport: viewportChoice.viewport };
+      };
+
+      const onInitialResponse = (response) => {
+        const webgl = webglFromResponse(response);
+        if (webgl) summary.webgl = webgl;
+        assertHardwareWebgl(job, response);
+      };
+
+      const playtestResult = await runPlaytest({
+        gameDir,
+        outDir: dirs.workspace,
+        port,
+        openRouterApiKey: runnerEnv.OPENROUTER_API_KEY,
+        playtestDurationMs: job.playtestDurationMs,
+        minPlaytestMs: job.agentMinPlaytestMs,
+        verbose: job.verboseRunwave || runnerEnv.RUNWAVE_VERBOSE === '1',
+        sessionId: job.runwaveSessionId || job.sessionId || job.jobId,
+        viewport,
+        startOverrides,
+        env: playtestEnv,
+        onGameReady,
+        onInitialResponse,
+        onLog: (event, fields) => log(event, fields),
+        processStopWaitMs: Number(job.processStopWaitMs ?? runnerEnv.RUNWAVE_PROCESS_STOP_WAIT_MS ?? DEFAULT_PROCESS_STOP_WAIT_MS),
+        processKillWaitMs: Number(job.processKillWaitMs ?? runnerEnv.RUNWAVE_PROCESS_KILL_WAIT_MS ?? DEFAULT_PROCESS_KILL_WAIT_MS),
+      });
+      if (playtestResult?.playtest) summary.playtest = playtestResult.playtest;
+      if (playtestResult?.viewport) summary.viewport = playtestResult.viewport;
     }
     summary.status = 'passed';
   } catch (error) {
     summary.status = 'failed';
-    if (job._runwaveInitialWebgl) summary.webgl = job._runwaveInitialWebgl;
     summary.error = error.message;
     summary.stack = error.stack;
+    if (error.summary?.webgl) summary.webgl = error.summary.webgl;
     log('job.error', { jobId, error: error.message });
   } finally {
     summary.finishedAt = new Date().toISOString();
     fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
-    if (gameProcess) {
-      summary.gameProcessCleanup = await stopLongProcess(gameProcess, {
-        label: 'game',
+    if (xvfb) {
+      summary.xvfbCleanup = await stopLongProcess(xvfb, {
+        label: 'xvfb',
         termWaitMs: Number(job.processStopWaitMs ?? runnerEnv.RUNWAVE_PROCESS_STOP_WAIT_MS ?? DEFAULT_PROCESS_STOP_WAIT_MS),
         killWaitMs: Number(job.processKillWaitMs ?? runnerEnv.RUNWAVE_PROCESS_KILL_WAIT_MS ?? DEFAULT_PROCESS_KILL_WAIT_MS),
       }).catch((error) => {
-        log('process.stop.error', { jobId, error: error.message });
+        log('xvfb.stop.error', { jobId, error: error.message });
         return { stopped: false, reason: 'error', error: error.message };
       });
     }

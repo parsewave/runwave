@@ -6,7 +6,8 @@
   "type": "commonjs",
   "main": "controller/src/cli.js",
   "bin": {
-    "runwave": "bin/runwave.js"
+    "runwave": "bin/runwave.js",
+    "runwave-playtest": "bin/runwave-playtest.js"
   },
   "scripts": {
     "cli": "node bin/runwave.js",
@@ -17,6 +18,7 @@
     "bin",
     "controller",
     "agent",
+    "playtest",
     "README.md"
   ],
   "engines": {
