@@ -1,5 +1,34 @@
 'use strict';
 
+const { markGridFromConfig } = require('../../harness/src/mark-grid');
+
+function gridExampleCells(grid) {
+  const row = Math.min(grid.rows - 1, Math.max(0, Math.floor(grid.rows / 2)));
+  const col = Math.min(grid.cols - 1, Math.max(0, Math.floor(grid.cols / 2)));
+  const center = row * grid.cols + col;
+  const right = row * grid.cols + Math.min(grid.cols - 1, col + 1);
+  const above = Math.max(0, row - 1) * grid.cols + col;
+  return { center, right, above };
+}
+
+function sequenceSchemaGuide(grid = markGridFromConfig({})) {
+  const examples = gridExampleCells(grid);
+  return [
+    'JSON output contract:',
+    'Return exactly one JSON object. No markdown, no prose outside JSON.',
+    'Top-level keys must be exactly: "summary", "previous_sequence_outcome", "actions", "should_stop", "rationale".',
+    'Actions must match one of these shapes; do not add extra fields:',
+    '{"type":"key","start":0,"end":500,"key":"ArrowRight"}',
+    `{"type":"click","start":100,"cell":${examples.center}}`,
+    `{"type":"multi_click","start":100,"cells":[${examples.center},${examples.right}],"count":8}`,
+    `{"type":"drag","start":100,"from_cells":[${examples.center}],"to_cells":[${examples.right}],"mode":"mouse","steps":12}`,
+    `{"type":"cursor_move","start":100,"cell":${examples.above},"steps":8}`,
+    '{"type":"view_move","start":0,"end":800,"dx":120,"dy":0,"steps":8}',
+    'Timing rules: use milliseconds; click <=100ms if end is provided; drag/cursor_move <=2000ms if end is provided; key/view_move may be longer; whole sequence must stay under 8000ms.',
+    `Click, multi_click, drag, and cursor_move may omit end; RunWave adds a short default. Prefer numbered grid cells 0-${grid.rows * grid.cols - 1} over raw x/y.`,
+  ].join('\n');
+}
+
 function compactPostSequenceResult(result) {
   if (!result || typeof result !== 'object') return '';
   const parts = [];
@@ -162,6 +191,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     'KeyD',
   ];
   const warning = repeatedHistoryWarning(history);
+  const grid = markGridFromConfig(job || {});
 
   return [
     'You are an agentic browser-game playtester. Your job is to create a useful gameplay video, not to judge the game.',
@@ -173,21 +203,17 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '- Try to chain multiple sensible actions in one sequence rather than a single action each time.',
     '- Do not stop early unless the recording already shows enough real gameplay.',
     '',
+    sequenceSchemaGuide(grid),
+    '',
     `Time remaining: ${secondsLeft}s.`,
-    `Viewport: ${viewport.width}x${viewport.height}. The screenshot has an 8x8 red mark grid labeled 0 through 63, row-major from top-left to bottom-right.`,
+    `Viewport: ${viewport.width}x${viewport.height}. The screenshot has a light ${grid.rows}x${grid.cols} red mark grid labeled 0 through ${grid.rows * grid.cols - 1}, row-major from top-left to bottom-right.`,
     `Available common controls: ${controls.join(', ')}. You may use literal Playwright keys.`,
     '',
     ...playtestInstructionsSection(job),
-    'Sequence guidance:',
-    '- Prefer grid-cell targeting over raw x/y coordinates. For pointer actions, choose up to 4 relevant grid cell IDs using "cells": [id].',
-    '- Put every input in the "actions" array. Each action must have a "type": "key", "click", "multi_click", "drag", "cursor_move", or "view_move".',
-    '- Use "start" and "end" times in milliseconds. Instant actions such as click, multi_click, drag, and cursor_move only need "start".',
-    '- The sequence duration is inferred from the latest action "end", or from "start" for instant actions. The runner will send that duration explicitly to the browser harness.',
-    '- For pointer-only sequences, do not put the final pointer action exactly at the end of the sequence. Leave at least 100ms after the final click, drag, multi_click, or cursor_move by scheduling it before the latest action end/start.',
-    '- Never use a pointer action start time beyond the sequence duration. Keep all click, multi_click, drag, and cursor_move start times strictly before the latest end/start in the sequence.',
+    'Gameplay guidance:',
+    '- Prefer numbered grid-cell targeting over raw x/y coordinates. For pointer actions, choose up to 4 relevant grid cell IDs using "cell", "cells", "from_cells", or "to_cells".',
     '- Use type "click" for a single click in the selected cell area. Use type "multi_click" when a target is imprecise or repeated clicking/tapping is useful; it sends quick clicks at random points inside the selected cells.',
-    '- Use type "drag" for drag/swipe games with from_cells and to_cells. Use mode "mouse" for canvas or pointer games; use mode "html5" for browser-native drag/drop elements such as match-3 candy boards.',
-    '- Use type "cursor_move" for cursor movement without clicking. Use type "view_move" only for relative camera/mouse-look movement where dx/dy matters.',
+    '- Use type "drag" for drag/swipe games with "from_cells" and "to_cells". Use mode "mouse" for canvas or pointer games; use mode "html5" for browser-native drag/drop elements such as match-3 candy boards.',
     '- If the game says paused, resume, continue, start, or shows tutorial controls, follow that visible instruction before doing anything else.',
     '- On menus, prefer options that clearly enter gameplay: Play, Start, New Game, Single Player, Campaign, Level 1, Continue, Resume, or a default character/level choice.',
     '- Avoid Options, Settings, Credits, Help, Leaderboard, and Multiplayer unless they are the only visible path into gameplay.',
@@ -205,28 +231,12 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     'Browser/game state JSON:',
     JSON.stringify(state || {}, null, 2).slice(0, 5000),
     '',
-    'Return only JSON for the next sequence with this shape:',
-    '{',
-    '  "summary": "one sentence describing what is visible now and what happened recently",',
-    '  "previous_sequence_outcome": "one sentence describing the visible outcome of the previous sequence, or empty on the first sequence",',
-    '  "actions": [',
-    '    {"type": "key", "start": 0, "end": 300, "key": "ArrowRight"},',
-    '    {"type": "key", "start": 200, "end": 700, "key": "ArrowDown"},',
-    '    {"type": "click", "start": 100, "cells": [27]},',
-    '    {"type": "multi_click", "start": 100, "cells": [27, 28], "count": 10},',
-    '    {"type": "drag", "start": 100, "from_cells": [34], "to_cells": [35], "mode": "mouse", "steps": 12},',
-    '    {"type": "cursor_move", "start": 100, "cells": [27], "steps": 8},',
-    '    {"type": "view_move", "start": 0, "end": 800, "dx": 120, "dy": 0, "steps": 8}',
-    '  ],',
-    '  "should_stop": false,',
-    '  "rationale": "why this is the next useful playtest sequence."',
-    '}',
-    '',
-    'Keep the latest action end/start between 500 and 8000. Use an empty actions array only when no input is needed.',
+    'Return the next JSON sequence now. Use an empty actions array only when no input is needed.',
   ].join('\n');
 }
 
 module.exports = {
   buildPlaytesterPrompt,
   compactHistory,
+  sequenceSchemaGuide,
 };
