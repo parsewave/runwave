@@ -5,11 +5,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const test = require('node:test');
+const { PNG } = require('pngjs');
 
 const { normalizeSequence } = require('../agent/src/action-parser');
 const { failedActionAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
 const { chatCompletion, parseJsonResponse } = require('../agent/src/model-client');
 const { buildPlaytesterPrompt, compactHistory, sequenceSchemaGuide } = require('../agent/src/prompt');
+const { drawMarkGridOnScreenshot } = require('../harness/src/grid-overlay');
 const { normalizeStep } = require('../harness/src/step-normalizer');
 
 test('normalizes model sequences into harness steps', () => {
@@ -77,12 +79,12 @@ test('normalizes grid-cell model actions into concrete pointer events', () => {
   assert.ok(clicks.every((click) => !Object.hasOwn(click, 'clickMode')));
   assert.equal(clicks[0].cells[0], 9);
   assert.equal(clicks[0].end, 150);
-  assert.ok(clicks[0].x >= 450 && clicks[0].x <= 500);
-  assert.ok(clicks[0].y >= 0 && clicks[0].y <= 50);
+  assert.ok(clicks[0].x >= 360 && clicks[0].x <= 400);
+  assert.ok(clicks[0].y >= 0 && clicks[0].y <= 40);
   assert.deepEqual(clicks.slice(1).map((click) => click.start), [200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100]);
   assert.deepEqual(clicks.slice(1).map((click) => click.end), [250, 350, 450, 550, 650, 750, 850, 950, 1050, 1150]);
-  assert.ok(clicks.slice(1).every((click) => click.x >= 100 && click.x <= 200));
-  assert.ok(clicks.slice(1).every((click) => click.y >= 50 && click.y <= 100));
+  assert.ok(clicks.slice(1).every((click) => click.x >= 720 && click.x <= 799));
+  assert.ok(clicks.slice(1).every((click) => click.y >= 0 && click.y <= 40));
   assert.deepEqual(drag.from.cells, [34]);
   assert.deepEqual(drag.to.cells, [35]);
   assert.equal(drag.end, 350);
@@ -91,6 +93,32 @@ test('normalizes grid-cell model actions into concrete pointer events', () => {
 
   const step = normalizeStep({ actions: sequence.actions }, { viewport: { width: 800, height: 800 } }, 1);
   assert.equal(step.clicks.length, 11);
+});
+
+test('normalizes row and column grid targets into concrete pointer events', () => {
+  const sequence = normalizeSequence(
+    {
+      actions: [
+        { type: 'click', start: 100, cell: { row: 1, col: 2 } },
+        { type: 'multi_click', start: 200, cells: [{ row: 2, col: 0 }, { row: 2, col: 1 }], count: 2 },
+        { type: 'drag', start: 300, from: { row: 3, col: 4 }, to: { row: 3, col: 5 }, mode: 'mouse' },
+        { type: 'cursor_move', start: 400, cell: { row: 0, col: 7 } },
+      ],
+    },
+    { viewport: { width: 800, height: 800 }, config: { markGridRows: 8, markGridCols: 8 } }
+  );
+
+  const clicks = sequence.actions.filter((action) => action.type === 'click');
+  const drag = sequence.actions.find((action) => action.type === 'drag');
+  const cursorMove = sequence.actions.find((action) => action.type === 'cursor_move');
+  assert.equal(clicks[0].cells[0], 10);
+  assert.ok(clicks[0].x >= 200 && clicks[0].x <= 299);
+  assert.ok(clicks[0].y >= 100 && clicks[0].y <= 199);
+  assert.equal(clicks.slice(1).length, 2);
+  assert.ok(clicks.slice(1).every((click) => [16, 17].includes(click.cells[0])));
+  assert.deepEqual(drag.from.cells, [28]);
+  assert.deepEqual(drag.to.cells, [29]);
+  assert.deepEqual(cursorMove.cells, [7]);
 });
 
 test('rejects model sequence fields outside the canonical schema', () => {
@@ -145,11 +173,78 @@ test('normalizes harness grid-cell steps into concrete pointer events', () => {
   assert.deepEqual(step.clicks.slice(1).map((click) => click.end), [250, 350, 450]);
   assert.ok(step.clicks[0].x >= 0 && step.clicks[0].x <= 50);
   assert.ok(step.clicks[0].y >= 0 && step.clicks[0].y <= 50);
-  assert.ok(step.clicks.slice(1).every((click) => click.x >= 750 && click.x <= 799));
-  assert.ok(step.clicks.slice(1).every((click) => click.y >= 750 && click.y <= 799));
+  assert.ok(step.clicks.slice(1).every((click) => click.x >= 600 && click.x <= 640));
+  assert.ok(step.clicks.slice(1).every((click) => click.y >= 480 && click.y <= 520));
   assert.deepEqual(step.drags[0].from.cells, [16]);
   assert.deepEqual(step.drags[0].to.cells, [31]);
   assert.deepEqual(step.cursorMoves[0].to.cells, [15]);
+});
+
+test('normalizes harness row and column grid steps in strict mode', () => {
+  const step = normalizeStep(
+    {
+      actions: [
+        { type: 'click', start: 100, cell: { row: 1, col: 2 } },
+        { type: 'multi_click', start: 200, cells: [{ row: 2, col: 0 }, { row: 2, col: 1 }], count: 2 },
+        { type: 'drag', start: 300, from: { row: 3, col: 4 }, to: { row: 3, col: 5 } },
+        { type: 'cursor_move', start: 400, cell: { row: 0, col: 7 } },
+      ],
+    },
+    { viewport: { width: 800, height: 800 }, markGridRows: 8, markGridCols: 8 },
+    1
+  );
+
+  assert.equal(step.duration, 450);
+  assert.equal(step.clicks[0].cells[0], 10);
+  assert.ok(step.clicks[0].x >= 200 && step.clicks[0].x <= 299);
+  assert.ok(step.clicks[0].y >= 100 && step.clicks[0].y <= 199);
+  assert.equal(step.clicks.slice(1).length, 2);
+  assert.ok(step.clicks.slice(1).every((click) => [16, 17].includes(click.cells[0])));
+  assert.deepEqual(step.drags[0].from.cells, [28]);
+  assert.deepEqual(step.drags[0].to.cells, [29]);
+  assert.deepEqual(step.cursorMoves[0].to.cells, [7]);
+});
+
+test('mark grid overlay keeps labels in the margins', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-grid-overlay-test-'));
+  const file = path.join(dir, 'screen.png');
+  const png = new PNG({ width: 240, height: 160 });
+  for (let y = 0; y < png.height; y += 1) {
+    for (let x = 0; x < png.width; x += 1) {
+      const index = (png.width * y + x) << 2;
+      png.data[index] = x % 256;
+      png.data[index + 1] = y % 256;
+      png.data[index + 2] = (x + y) % 256;
+      png.data[index + 3] = 255;
+    }
+  }
+  fs.writeFileSync(file, PNG.sync.write(png));
+
+  drawMarkGridOnScreenshot(file, { markGridRows: 20, markGridCols: 20 });
+  const output = PNG.sync.read(fs.readFileSync(file));
+  const marginX = (output.width - png.width) / 2;
+  const marginY = (output.height - png.height) / 2;
+  const cellWidth = png.width / 20;
+  const cellHeight = png.height / 20;
+
+  assert.ok(output.width > png.width);
+  assert.ok(output.height > png.height);
+  assert.equal(marginX, marginY);
+  assert.ok(marginX > 0);
+
+  for (let y = 1; y < png.height - 1; y += 1) {
+    for (let x = 1; x < png.width - 1; x += 1) {
+      const nearVerticalLine = Math.abs((x / cellWidth) - Math.round(x / cellWidth)) < 0.08;
+      const nearHorizontalLine = Math.abs((y / cellHeight) - Math.round(y / cellHeight)) < 0.12;
+      if (nearVerticalLine || nearHorizontalLine) continue;
+
+      const sourceIndex = (png.width * y + x) << 2;
+      const outputIndex = (output.width * (y + marginY) + x + marginX) << 2;
+      assert.equal(output.data[outputIndex], png.data[sourceIndex]);
+      assert.equal(output.data[outputIndex + 1], png.data[sourceIndex + 1]);
+      assert.equal(output.data[outputIndex + 2], png.data[sourceIndex + 2]);
+    }
+  }
 });
 
 test('infers harness duration from action timing fields only', () => {
@@ -619,7 +714,8 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.match(prompt, /"type":"drag"/);
   assert.match(prompt, /Single Player/);
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
-  assert.match(prompt, /light 16x16 red mark grid/);
+  assert.match(prompt, /light 20x20 red mark grid/);
+  assert.match(prompt, /Column labels are in the top\/bottom margins/);
   assert.match(prompt, /"type":"multi_click"/);
   assert.match(prompt, /JSON output contract/);
   assert.match(prompt, /Top-level keys must be exactly/);
@@ -633,13 +729,13 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.doesNotMatch(prompt, /"multi_clicks":/);
 });
 
-test('sequence schema guide uses configured numbered grid examples', () => {
-  const guide = sequenceSchemaGuide({ rows: 16, cols: 16 });
+test('sequence schema guide uses configured row-column grid examples', () => {
+  const guide = sequenceSchemaGuide({ rows: 20, cols: 20 });
 
-  assert.match(guide, /numbered grid cells 0-255/);
-  assert.match(guide, /"cell":136/);
-  assert.match(guide, /"from_cells":\[136\]/);
-  assert.match(guide, /"to_cells":\[137\]/);
+  assert.match(guide, /row\/column grid targets from the 20x20 overlay/);
+  assert.match(guide, /"cell":\{"row":10,"col":10\}/);
+  assert.match(guide, /"from":\{"row":10,"col":10\}/);
+  assert.match(guide, /"to":\{"row":10,"col":11\}/);
 });
 
 test('playtester prompt includes game-specific playtest instructions', () => {

@@ -32,7 +32,7 @@ function normalizeSequence(raw, options = {}) {
   const actions = normalizeActions(data.actions, maxDurationMs, {
     strict: false,
     viewport,
-    config: {},
+    config: options.config || {},
     maxDurationMs,
     scaleUnitPoints: true,
     clampToViewport: true,

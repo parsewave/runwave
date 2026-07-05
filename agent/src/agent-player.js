@@ -97,6 +97,7 @@ async function decideNextSequence({ job, screenshot, state, history, elapsedMs, 
   try {
     sequence = normalizeSequence(result.json, {
       viewport,
+      config: job,
       maxDurationMs: Number(job.agentMaxActionMs || 8000),
     });
   } catch (error) {

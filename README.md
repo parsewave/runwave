@@ -164,9 +164,11 @@ runwave '{
 }'
 ```
 
-Screenshots include a 16x16 red mark grid by default. Pointer actions may use
-up to 4 grid cell IDs instead of exact pixels. Cell IDs run row-major from `0`
-at the top-left to `255` at the bottom-right.
+Screenshots include a 20x20 red mark grid by default. Column labels are shown in
+the top and bottom margins, and row labels are shown in the left and right
+margins. Pointer actions may use row/column cells instead of exact pixels. Raw
+`x`/`y` coordinates are still supported, but they refer to the inner browser
+viewport, not the extra label margins in marked screenshots.
 
 Single grid-cell click:
 
@@ -176,7 +178,7 @@ runwave '{
   "action_name": "turn-003-click-start-cell",
   "session_id": "playtest-001",
   "actions": [
-    { "type": "click", "start": 100, "end": 500, "cells": [136] }
+    { "type": "click", "start": 100, "end": 500, "cell": { "row": 10, "col": 10 } }
   ]
 }'
 ```
@@ -189,7 +191,7 @@ runwave '{
   "action_name": "turn-003-multi-click",
   "session_id": "playtest-001",
   "actions": [
-    { "type": "multi_click", "start": 100, "cells": [136, 137], "count": 10 }
+    { "type": "multi_click", "start": 100, "cells": [{ "row": 10, "col": 10 }, { "row": 10, "col": 11 }], "count": 10 }
   ]
 }'
 ```
@@ -212,13 +214,13 @@ for browser-native draggable/drop elements.
 Drag endpoints can also use grid cells:
 
 ```json
-{ "type": "drag", "start": 100, "from_cells": [136], "to_cells": [137], "mode": "mouse" }
+{ "type": "drag", "start": 100, "from": { "row": 10, "col": 10 }, "to": { "row": 10, "col": 11 }, "mode": "mouse" }
 ```
 
 Move the cursor without clicking:
 
 ```json
-{ "action": "step", "action_name": "turn-005-hover", "session_id": "playtest-001", "actions": [{ "type": "cursor_move", "start": 100, "end": 500, "cells": [120] }] }
+{ "action": "step", "action_name": "turn-005-hover", "session_id": "playtest-001", "actions": [{ "type": "cursor_move", "start": 100, "end": 500, "cell": { "row": 9, "col": 10 } }] }
 ```
 
 Move the mouse without clicking for camera control:
