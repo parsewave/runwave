@@ -7,6 +7,22 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { defaultSshKey } = require('./lib/ssh-key');
 
+const DEFAULT_HARDWARE_WEBGL_GAMES = new Set(['aether-outpost-patrol']);
+const HARDWARE_WEBGL_CHROMIUM_ARGS = [
+  '--no-sandbox',
+  '--ignore-gpu-blocklist',
+  '--enable-gpu',
+  '--use-gl=egl',
+  '--autoplay-policy=no-user-gesture-required',
+];
+
+function parseList(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function parseArgs(argv) {
   const args = {
     gamesDir: path.resolve(process.cwd(), 'cruft/games'),
@@ -26,6 +42,8 @@ function parseArgs(argv) {
     viewportPreflightAttempts: null,
     playMode: 'scripted',
     skipPlaywrightInstall: false,
+    hardwareWebglGames: new Set(DEFAULT_HARDWARE_WEBGL_GAMES),
+    hardwareWebglChromiumArgs: [...HARDWARE_WEBGL_CHROMIUM_ARGS],
     runId: `run-${new Date().toISOString().replace(/[:.]/g, '-')}`,
   };
   for (let i = 2; i < argv.length; i += 1) {
@@ -52,6 +70,8 @@ function parseArgs(argv) {
     else if (arg === '--play-mode') args.playMode = next();
     else if (arg === '--agent') args.playMode = 'agent';
     else if (arg === '--skip-playwright-install') args.skipPlaywrightInstall = true;
+    else if (arg === '--hardware-webgl-games') args.hardwareWebglGames = new Set(parseList(next()));
+    else if (arg === '--no-default-hardware-webgl-games') args.hardwareWebglGames = new Set();
     else if (arg === '--run-id') args.runId = next();
     else if (arg === '--include-nonbrowser') args.includeNonbrowser = true;
     else if (arg === '--local-games') args.gamesS3Uri = '';
@@ -83,6 +103,8 @@ function usage() {
     '  --viewport-preflight-attempts N',
     '  --play-mode scripted|agent',
     '  --agent',
+    '  --hardware-webgl-games game-a,game-b',
+    '  --no-default-hardware-webgl-games',
     '  --skip-playwright-install',
     '  --dry-run',
   ].join('\n');
@@ -250,6 +272,13 @@ function buildJobs(args, games) {
       playtestDurationMs: args.playtestDurationMs,
       s3Uri: `${args.s3Uri.replace(/\/+$/, '')}/${args.runId}/${game}/attempt-${String(attempt).padStart(3, '0')}`,
     };
+    if (args.hardwareWebglGames && args.hardwareWebglGames.has(game)) {
+      job.requiresHardwareWebgl = true;
+      job.chromiumArgs = [...args.hardwareWebglChromiumArgs];
+      job.chromiumArgsMode = 'replace';
+      job.headless = true;
+      job.audioXvfb = false;
+    }
     if (args.playMode === 'agent') job.agentMinPlaytestMs = agentMinPlaytestMs(args);
     if (args.vlmViewportPreflight) job.vlmViewportPreflight = true;
     if (Number.isFinite(args.viewportPreflightAttempts)) {
@@ -370,6 +399,7 @@ async function main() {
   }
   if (games.length === 0) throw new Error('no browser games discovered');
   const jobs = buildJobs(args, games);
+  const hardwareJobs = jobs.filter((job) => job.requiresHardwareWebgl);
   const capacity = fleetCapacity(args, servers);
   if (jobs.length >= args.requiredConcurrency && capacity < args.requiredConcurrency) {
     throw new Error(
@@ -386,6 +416,9 @@ async function main() {
     `Jobs: ${jobs.length}; concurrency per server: ${args.concurrencyPerServer}; ` +
     `fleet capacity: ${capacity}; playtest duration: ${args.playtestDurationMs}ms`
   );
+  if (hardwareJobs.length) {
+    console.log(`Hardware WebGL jobs: ${hardwareJobs.map((job) => job.game).join(', ')}`);
+  }
   if (args.dryRun) {
     let serverIndex = 0;
     const ports = new Map(servers.map((server) => [server.name, args.basePort]));

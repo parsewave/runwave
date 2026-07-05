@@ -19,6 +19,8 @@ const defaultKeyAliases = {
 const STEP_FIELDS = new Set([
   'action',
   'action_name',
+  'session_id',
+  'sessionId',
   'name',
   'actions',
   'captures',

@@ -41,6 +41,7 @@ function actionLabelPart(action) {
   if (action.type === 'drag') return `drag(${action.from.x},${action.from.y}->${action.to.x},${action.to.y},${action.mode})`;
   if (action.type === 'cursor_move') return `cursor(${action.to.x},${action.to.y})`;
   if (action.type === 'view_move') return `view(${action.dx},${action.dy})`;
+  if (action.type === 'failed_action') return `failed_action(${String(action.error || '').slice(0, 80)})`;
   return action.type || 'unknown';
 }
 
@@ -133,6 +134,18 @@ function repeatedHistoryWarning(history) {
   return '';
 }
 
+function playtestInstructionsSection(job) {
+  const instructions = String(job.playtestInstructions || '').trim();
+  if (!instructions) return [];
+  return [
+    'Game-specific playtest.md:',
+    instructions.slice(0, 8000),
+    '',
+    'Use these game-specific controls when they apply. If they conflict with visible in-game instructions, follow the visible current screen.',
+    '',
+  ];
+}
+
 function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history }) {
   const secondsLeft = Math.max(0, Math.round((maxMs - elapsedMs) / 1000));
   const controls = job.agentControls || [
@@ -164,11 +177,14 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     `Viewport: ${viewport.width}x${viewport.height}. The screenshot has an 8x8 red mark grid labeled 0 through 63, row-major from top-left to bottom-right.`,
     `Available common controls: ${controls.join(', ')}. You may use literal Playwright keys.`,
     '',
+    ...playtestInstructionsSection(job),
     'Sequence guidance:',
     '- Prefer grid-cell targeting over raw x/y coordinates. For pointer actions, choose up to 4 relevant grid cell IDs using "cells": [id].',
     '- Put every input in the "actions" array. Each action must have a "type": "key", "click", "multi_click", "drag", "cursor_move", or "view_move".',
     '- Use "start" and "end" times in milliseconds. Instant actions such as click, multi_click, drag, and cursor_move only need "start".',
-    '- The sequence duration is inferred from the latest action "end", or from "start" for instant actions.',
+    '- The sequence duration is inferred from the latest action "end", or from "start" for instant actions. The runner will send that duration explicitly to the browser harness.',
+    '- For pointer-only sequences, do not put the final pointer action exactly at the end of the sequence. Leave at least 100ms after the final click, drag, multi_click, or cursor_move by scheduling it before the latest action end/start.',
+    '- Never use a pointer action start time beyond the sequence duration. Keep all click, multi_click, drag, and cursor_move start times strictly before the latest end/start in the sequence.',
     '- Use type "click" for a single click in the selected cell area. Use type "multi_click" when a target is imprecise or repeated clicking/tapping is useful; it sends quick clicks at random points inside the selected cells.',
     '- Use type "drag" for drag/swipe games with from_cells and to_cells. Use mode "mouse" for canvas or pointer games; use mode "html5" for browser-native drag/drop elements such as match-3 candy boards.',
     '- Use type "cursor_move" for cursor movement without clicking. Use type "view_move" only for relative camera/mouse-look movement where dx/dy matters.',

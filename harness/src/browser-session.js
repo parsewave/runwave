@@ -1,10 +1,82 @@
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
+const { AudioVideoRecorder } = require('./audio-recorder');
 const { ensureDir, safeName, sleep, timestamp } = require('./file-utils');
 const { drawGridOnScreenshot } = require('./grid-overlay');
-const { targetUrl } = require('./protocol');
+const { parseArgList, targetUrl } = require('./protocol');
 const { readPageState } = require('./state-reader');
+
+const DEFAULT_CHROMIUM_ARGS = ['--no-sandbox', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'];
+
+function chromiumArgs(config = {}, env = process.env) {
+  const configured = parseArgList(config.chromiumArgs ?? env.RUNWAVE_CHROMIUM_ARGS);
+  const mode = String(config.chromiumArgsMode || env.RUNWAVE_CHROMIUM_ARGS_MODE || 'append').toLowerCase();
+  if (mode === 'replace') return configured;
+  return [...DEFAULT_CHROMIUM_ARGS, ...configured];
+}
+
+function videoSize(config = {}) {
+  const size = config.videoSize || config.viewport || {};
+  const width = Number(size.width);
+  const height = Number(size.height);
+  return {
+    width: Number.isFinite(width) && width > 0 ? Math.round(width) : 1024,
+    height: Number.isFinite(height) && height > 0 ? Math.round(height) : 620,
+  };
+}
+
+function chromiumLaunchArgs(config = {}, env = process.env) {
+  const args = chromiumArgs(config, env);
+  if (!config.recordAudio) return args;
+  const size = videoSize(config);
+  return [
+    ...args,
+    '--window-position=0,0',
+    `--window-size=${size.width},${size.height}`,
+    '--kiosk',
+    '--start-fullscreen',
+    '--disable-infobars',
+  ];
+}
+
+function browserViewportStabilizerScript() {
+  const installStyle = () => {
+    if (!document.documentElement) return;
+    let style = document.getElementById('__runwave_capture_viewport_stabilizer__');
+    if (!style) {
+      style = document.createElement('style');
+      style.id = '__runwave_capture_viewport_stabilizer__';
+      style.textContent = 'html,body{overflow:hidden!important;}';
+      document.documentElement.appendChild(style);
+    }
+    window.scrollTo(0, 0);
+  };
+
+  const scrollingKeys = new Set([
+    'ArrowDown',
+    'ArrowLeft',
+    'ArrowRight',
+    'ArrowUp',
+    'End',
+    'Home',
+    'PageDown',
+    'PageUp',
+    ' ',
+    'Space',
+  ]);
+
+  window.addEventListener('keydown', (event) => {
+    const target = event.target;
+    const tagName = target && target.tagName ? String(target.tagName).toUpperCase() : '';
+    if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || target?.isContentEditable) return;
+    if (scrollingKeys.has(event.key) || scrollingKeys.has(event.code)) event.preventDefault();
+  }, true);
+
+  window.addEventListener('scroll', () => window.scrollTo(0, 0), true);
+  installStyle();
+  document.addEventListener('DOMContentLoaded', installStyle, { once: true });
+}
 
 class BrowserSession {
   constructor(config, paths, profiler = null) {
@@ -17,6 +89,8 @@ class BrowserSession {
     this.launchUrl = targetUrl(config);
     this.stateExpression = config.stateExpression || null;
     this.videoDir = null;
+    this.audioDir = undefined;
+    this.audioRecorder = null;
     this.mousePosition = { x: 0, y: 0 };
   }
 
@@ -34,13 +108,22 @@ class BrowserSession {
 
   async start() {
     this.timeSync('browser.start.ensure_run_dir', { dir: this.paths.runDir }, () => ensureDir(this.paths.runDir));
-    if (this.config.record) {
+    const recordPlaywrightVideo = Boolean(this.config.record && !this.config.recordAudio);
+    const recordFfmpegVideo = Boolean(this.config.recordAudio);
+    if (recordPlaywrightVideo || recordFfmpegVideo) {
       this.videoDir = this.timeSync('browser.start.ensure_video_dir', () => ensureDir(path.join(this.paths.runDir, 'video')));
+    }
+    if (this.config.recordAudio) {
+      this.audioRecorder = new AudioVideoRecorder(
+        this.config,
+        this.paths.runDir,
+        this.profiler ? this.profiler.child('audio-video-recorder') : null
+      );
     }
 
     const launchOptions = {
       headless: this.config.headless !== false,
-      args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
+      args: chromiumLaunchArgs(this.config),
     };
     if (this.config.channel) launchOptions.channel = String(this.config.channel);
     if (this.config.executablePath) launchOptions.executablePath = String(this.config.executablePath);
@@ -52,12 +135,12 @@ class BrowserSession {
     }, () => chromium.launch(launchOptions));
     this.context = await this.time('browser.start.new_context', {
       viewport: this.config.viewport || { width: 1024, height: 620 },
-      record: Boolean(this.config.record),
+      record: recordPlaywrightVideo,
     }, () =>
       this.browser.newContext({
         viewport: this.config.viewport || { width: 1024, height: 620 },
         deviceScaleFactor: Number(this.config.deviceScaleFactor ?? 1),
-        ...(this.config.record
+        ...(recordPlaywrightVideo
           ? {
               recordVideo: {
                 dir: this.videoDir,
@@ -67,7 +150,15 @@ class BrowserSession {
           : {}),
       })
     );
+    if (this.config.recordAudio) {
+      await this.time('browser.start.capture_viewport_stabilizer', () =>
+        this.context.addInitScript(browserViewportStabilizerScript)
+      );
+    }
     this.page = await this.time('browser.start.new_page', () => this.context.newPage());
+    if (this.audioRecorder) {
+      await this.time('browser.start.audio_video_recorder_start', () => this.audioRecorder.start());
+    }
     this.timeSync('browser.start.attach_console_logger', () => this.page.on('console', (msg) => {
       fs.appendFileSync(path.join(this.paths.runDir, 'browser-console.log'), `${msg.type()} ${msg.text()}\n`);
     }));
@@ -245,13 +336,23 @@ class BrowserSession {
 
   async close() {
     const video = this.timeSync('browser.close.get_video_handle', () => (this.page ? this.page.video() : null));
+    let audioVideoPath = null;
+    if (this.audioRecorder) {
+      audioVideoPath = await this.time('browser.close.audio_video_stop', () => this.audioRecorder.stop());
+    }
     if (this.context) await this.time('browser.close.context_close', () => this.context.close());
     const videoPath = video ? await this.time('browser.close.video_path', () => video.path()) : null;
     if (this.browser) await this.time('browser.close.browser_close', () => this.browser.close());
-    return videoPath;
+    return {
+      video: audioVideoPath || videoPath,
+      audioVideo: audioVideoPath || undefined,
+    };
   }
 }
 
 module.exports = {
   BrowserSession,
+  browserViewportStabilizerScript,
+  chromiumArgs,
+  chromiumLaunchArgs,
 };

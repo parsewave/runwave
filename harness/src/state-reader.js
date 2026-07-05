@@ -1,5 +1,27 @@
 async function readDefaultState(page) {
   return page.evaluate(() => {
+    const webglRenderer = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl') || canvas.getContext('webgl2');
+        if (!gl) return { supported: false };
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        return {
+          supported: true,
+          version: gl.getParameter(gl.VERSION),
+          shadingLanguageVersion: gl.getParameter(gl.SHADING_LANGUAGE_VERSION),
+          vendor: gl.getParameter(gl.VENDOR),
+          renderer: gl.getParameter(gl.RENDERER),
+          unmaskedVendor: debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) : null,
+          unmaskedRenderer: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : null,
+        };
+      } catch (error) {
+        return {
+          supported: false,
+          error: error.message,
+        };
+      }
+    };
     const canvases = Array.from(document.querySelectorAll('canvas')).map((canvas, index) => {
       const rect = canvas.getBoundingClientRect();
       return {
@@ -37,6 +59,7 @@ async function readDefaultState(page) {
           }
         : null,
       canvases,
+      webgl: webglRenderer(),
       timestamp: new Date().toISOString(),
     };
   });

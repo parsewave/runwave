@@ -8,6 +8,7 @@ const { spawn } = require('child_process');
 
 const DEFAULT_PROCESS_STOP_WAIT_MS = 5000;
 const DEFAULT_PROCESS_KILL_WAIT_MS = 5000;
+const DEFAULT_AUDIO_VIDEO_CAPTURE_Y = 94;
 
 function parseArgs(argv) {
   const out = {};
@@ -37,6 +38,10 @@ function mkdirp(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
 function safeName(value) {
   return String(value || '')
     .toLowerCase()
@@ -45,11 +50,135 @@ function safeName(value) {
     .slice(0, 120);
 }
 
+function positiveInteger(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.round(number) : fallback;
+}
+
+function nonNegativeInteger(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number) : fallback;
+}
+
 function runnerPaths(env = process.env) {
   return {
     gamesRoot: env.RUNWAVE_GAMES_ROOT || '/opt/runwave/games',
     jobsRoot: env.RUNWAVE_JOBS_ROOT || '/var/lib/runwave/jobs',
   };
+}
+
+function shouldRunJobInContainer(job = {}, env = process.env, platform = process.platform) {
+  if (platform !== 'linux') return false;
+  if (env.RUNWAVE_IN_CONTAINER === '1') return false;
+  if (env.RUNWAVE_PLAYTEST_CONTAINER === '0') return false;
+  if (job.containerized === false || job.runInContainer === false) return false;
+  return true;
+}
+
+function dockerEnvNames(env = process.env) {
+  const allowed = [
+    /^AWS_/,
+    /^OPENAI_/,
+    /^ANTHROPIC_/,
+    /^OPENROUTER_/,
+    /^PARSEWAVE_/,
+    /^GITHUB_/,
+    /^GH_TOKEN$/,
+    /^RUNWAVE_AGENT_/,
+    /^RUNWAVE_AUDIO_/,
+    /^RUNWAVE_CHROMIUM_ARGS(_MODE)?$/,
+    /^RUNWAVE_GSTREAMER$/,
+    /^RUNWAVE_SKIP_PLAYWRIGHT_INSTALL$/,
+    /^RUNWAVE_VERBOSE$/,
+    /^RUNWAVE_VIDEO_/,
+    /^RUNWAVE_VLM_VIEWPORT_PREFLIGHT$/,
+    /^RUNWAVE_XVFB_/,
+    /^RUNWAVE_PROCESS_(STOP|KILL)_WAIT_MS$/,
+    /^HTTP_PROXY$/i,
+    /^HTTPS_PROXY$/i,
+    /^NO_PROXY$/i,
+    /^ALL_PROXY$/i,
+  ];
+  return Object.keys(env)
+    .filter((name) => allowed.some((pattern) => pattern.test(name)))
+    .sort();
+}
+
+function dockerMountArgs(mounts) {
+  const args = [];
+  for (const mount of mounts) {
+    args.push('-v', `${mount.source}:${mount.target}${mount.readonly ? ':ro' : ''}`);
+  }
+  return args;
+}
+
+function dockerRunArgs(args, job, runner, options = {}) {
+  const jobPath = path.resolve(args.job);
+  const jobDir = path.dirname(jobPath);
+  const jobBase = path.basename(jobPath);
+  const image = job.containerImage || options.env?.RUNWAVE_PLAYTEST_IMAGE || 'runwave-playtest-runner:latest';
+  const jobsRoot = path.resolve(runner.jobsRoot);
+  const gamesRoot = path.resolve(runner.gamesRoot);
+  const scriptPath = path.resolve(options.scriptPath || __filename);
+  const envFile = options.envFile || '/etc/runwave-runner.env';
+  const containerName = `runwave-${safeName(job.jobId || `${job.game || 'job'}-${Date.now()}`)}`;
+  const mounts = [
+    { source: gamesRoot, target: '/opt/runwave/games', readonly: true },
+    { source: jobsRoot, target: '/var/lib/runwave/jobs' },
+    { source: jobDir, target: '/runwave/job', readonly: true },
+    { source: scriptPath, target: '/opt/runwave/bin/run-playtest.js', readonly: true },
+  ];
+  if (job.runwaveRepo && path.isAbsolute(String(job.runwaveRepo))) {
+    const runwaveRepo = path.resolve(String(job.runwaveRepo));
+    mounts.push({ source: runwaveRepo, target: runwaveRepo, readonly: true });
+  }
+  if (fs.existsSync(envFile)) {
+    mounts.push({ source: envFile, target: '/etc/runwave-runner.env', readonly: true });
+  }
+
+  const dockerArgs = [
+    'run',
+    '--rm',
+    '--init',
+    '--ipc=host',
+    '--shm-size=1g',
+    '--name',
+    containerName,
+    ...dockerMountArgs(mounts),
+    '-e',
+    'RUNWAVE_IN_CONTAINER=1',
+    '-e',
+    'RUNWAVE_GAMES_ROOT=/opt/runwave/games',
+    '-e',
+    'RUNWAVE_JOBS_ROOT=/var/lib/runwave/jobs',
+  ];
+  if (fs.existsSync('/dev/dri')) {
+    dockerArgs.push('--device', '/dev/dri');
+  }
+  for (const name of dockerEnvNames(options.env || process.env)) {
+    dockerArgs.push('-e', name);
+  }
+  dockerArgs.push(image, '--job', `/runwave/job/${jobBase}`);
+  return dockerArgs;
+}
+
+async function runJobInContainer(args, job, runner, env = process.env) {
+  if (!fs.existsSync(runner.gamesRoot)) {
+    throw new Error(`games root does not exist for container mount: ${runner.gamesRoot}`);
+  }
+  mkdirp(runner.jobsRoot);
+  await run('docker', dockerRunArgs(args, job, runner, { env }), { env });
+}
+
+function loadPlaytestInstructions(gameDir, game) {
+  const entries = fs.readdirSync(gameDir, { withFileTypes: true });
+  const playtestEntry = entries.find((entry) => entry.isFile() && entry.name === 'playtest.md');
+  if (!playtestEntry) {
+    throw new Error(`game has no playtest.md: ${game}`);
+  }
+
+  const playtestPath = path.join(gameDir, 'playtest.md');
+  return fs.readFileSync(playtestPath, 'utf8');
 }
 
 function run(command, args, options = {}) {
@@ -86,6 +215,80 @@ function run(command, args, options = {}) {
       }
     });
   });
+}
+
+async function prepareAudioCaptureEnv(env, job) {
+  const recordAudio = job.recordAudio !== false && process.platform === 'linux';
+  if (!recordAudio) return { env, recordAudio: false };
+
+  const sink = job.audioSink || env.RUNWAVE_AUDIO_SINK || 'runwave_sink';
+  const audioEnv = {
+    ...env,
+    PULSE_SINK: sink,
+  };
+
+  await run('pulseaudio', ['--start', '--exit-idle-time=-1'], { env: audioEnv });
+  const modules = await run('pactl', ['list', 'short', 'modules'], { env: audioEnv });
+  for (const line of modules.stdout.split(/\r?\n/)) {
+    const fields = line.trim().split(/\s+/);
+    if (fields[1] === 'module-suspend-on-idle') {
+      await run('pactl', ['unload-module', fields[0]], { env: audioEnv });
+    }
+  }
+  const activeModules = await run('pactl', ['list', 'short', 'modules'], { env: audioEnv });
+  if (!activeModules.stdout.includes(`sink_name=${sink}`)) {
+    await run('pactl', [
+      'load-module',
+      'module-null-sink',
+      `sink_name=${sink}`,
+      `sink_properties=device.description=${sink}`,
+    ], { env: audioEnv });
+  }
+  await run('pactl', ['set-default-sink', sink], { env: audioEnv });
+
+  return {
+    env: audioEnv,
+    recordAudio: true,
+    audioSource: job.audioSource || `${sink}.monitor`,
+  };
+}
+
+async function startXvfbForAudio(job, env) {
+  if (job.audioXvfb === false) return { env, process: null, display: env.DISPLAY || null };
+  const display = job.xvfbDisplay || env.RUNWAVE_XVFB_DISPLAY || `:${100 + (Number(job.port || 0) % 500)}`;
+  const captureSize = job.videoSize || job.viewport || { width: 1280, height: 720 };
+  const captureWidth = positiveInteger(captureSize.width, 1280);
+  const captureHeight = positiveInteger(captureSize.height, 720);
+  const captureX = nonNegativeInteger(
+    job.audioVideoCaptureX ?? env.RUNWAVE_AUDIO_VIDEO_CAPTURE_X ?? env.RUNWAVE_VIDEO_X,
+    0
+  );
+  const captureY = nonNegativeInteger(
+    job.audioVideoCaptureY ?? env.RUNWAVE_AUDIO_VIDEO_CAPTURE_Y ?? env.RUNWAVE_VIDEO_Y,
+    DEFAULT_AUDIO_VIDEO_CAPTURE_Y
+  );
+  const screenWidth = positiveInteger(job.xvfbWidth ?? env.RUNWAVE_XVFB_WIDTH, captureWidth + captureX);
+  const screenHeight = positiveInteger(job.xvfbHeight ?? env.RUNWAVE_XVFB_HEIGHT, captureHeight + captureY);
+  const screen = job.xvfbScreen || env.RUNWAVE_XVFB_SCREEN || `${screenWidth}x${screenHeight}x24`;
+  const xvfb = spawnLong('Xvfb', [display, '-screen', '0', screen, '-nolisten', 'tcp'], {
+    env,
+  });
+  const waitMs = Number(job.xvfbStartWaitMs ?? env.RUNWAVE_XVFB_START_WAIT_MS ?? 500);
+  if (waitMs > 0) await sleep(waitMs);
+  if (processHasClosed(xvfb)) {
+    throw new Error(`Xvfb exited during startup for display ${display}`);
+  }
+  return {
+    env: {
+      ...env,
+      DISPLAY: display,
+      NO_AT_BRIDGE: env.NO_AT_BRIDGE || '1',
+      RUNWAVE_VIDEO_X: String(captureX),
+      RUNWAVE_VIDEO_Y: String(captureY),
+    },
+    process: xvfb,
+    display,
+  };
 }
 
 function spawnLong(command, args, options = {}) {
@@ -193,6 +396,78 @@ function waitForHttp(url, timeoutMs) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+const DEFAULT_CHROMIUM_ARGS = ['--no-sandbox', '--enable-unsafe-swiftshader'];
+const HARDWARE_WEBGL_CHROMIUM_ARGS = [
+  '--no-sandbox',
+  '--ignore-gpu-blocklist',
+  '--enable-gpu',
+  '--use-gl=egl',
+  '--autoplay-policy=no-user-gesture-required',
+];
+
+function parseArgList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  const text = String(value).trim();
+  if (!text) return [];
+  if (text.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+    } catch {
+      // Fall through to whitespace parsing.
+    }
+  }
+  return text.split(/\s+/).filter(Boolean);
+}
+
+function chromiumArgs(job = {}, env = process.env) {
+  const configured = parseArgList(job.chromiumArgs ?? env.RUNWAVE_CHROMIUM_ARGS);
+  const mode = String(job.chromiumArgsMode || env.RUNWAVE_CHROMIUM_ARGS_MODE || 'append').toLowerCase();
+  if (mode === 'replace') return configured;
+  return [...DEFAULT_CHROMIUM_ARGS, ...configured];
+}
+
+function chromiumLaunchOptions(job = {}, env = process.env, extra = {}) {
+  const launchOptions = {
+    ...extra,
+    args: chromiumArgs(job, env),
+  };
+  if (job.channel) launchOptions.channel = String(job.channel);
+  if (job.executablePath) launchOptions.executablePath = String(job.executablePath);
+  return launchOptions;
+}
+
+function responseBody(response) {
+  if (!response || typeof response !== 'object') return {};
+  return response.output && typeof response.output === 'object' ? response.output : response;
+}
+
+function webglFromResponse(response) {
+  const body = responseBody(response);
+  const state = body.state || body.endState || {};
+  return state.generic && state.generic.webgl ? state.generic.webgl : null;
+}
+
+function isSwiftShaderWebgl(webgl) {
+  const renderer = `${webgl && (webgl.unmaskedRenderer || webgl.renderer || '')}`;
+  return /swiftshader/i.test(renderer);
+}
+
+function assertHardwareWebgl(job, response) {
+  if (!job.requiresHardwareWebgl) return null;
+  const webgl = webglFromResponse(response);
+  if (!webgl || webgl.supported === false) {
+    throw new Error(`hardware WebGL required for ${job.game || job.jobId || 'job'}, but WebGL renderer metadata is unavailable`);
+  }
+  if (isSwiftShaderWebgl(webgl)) {
+    throw new Error(
+      `hardware WebGL required for ${job.game || job.jobId || 'job'}, but Chromium is using ${webgl.unmaskedRenderer || webgl.renderer}`
+    );
+  }
+  return webgl;
 }
 
 function even(value) {
@@ -342,12 +617,7 @@ async function captureViewportCandidateScreenshots(job, dirs, url, env, candidat
   const outputDir = path.join(dirs.workspace, 'artifacts', 'viewport-preflight');
   mkdirp(outputDir);
   const { chromium } = require(path.join(dirs.runwave, 'node_modules', 'playwright'));
-  const launchOptions = {
-    headless: true,
-    args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
-  };
-  if (job.channel) launchOptions.channel = String(job.channel);
-  if (job.executablePath) launchOptions.executablePath = String(job.executablePath);
+  const launchOptions = chromiumLaunchOptions(job, env, { headless: true });
 
   const browser = await chromium.launch(launchOptions);
   try {
@@ -499,12 +769,7 @@ async function chooseViewportWithVlm(job, dirs, url, env, probe) {
 async function probeViewport(job, dirs, url, env = process.env) {
   const viewport = job.probeViewport || { width: 1280, height: 720 };
   const { chromium } = require(path.join(dirs.runwave, 'node_modules', 'playwright'));
-  const launchOptions = {
-    headless: true,
-    args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
-  };
-  if (job.channel) launchOptions.channel = String(job.channel);
-  if (job.executablePath) launchOptions.executablePath = String(job.executablePath);
+  const launchOptions = chromiumLaunchOptions(job, env, { headless: true });
 
   const browser = await chromium.launch(launchOptions);
   try {
@@ -699,8 +964,12 @@ function runwaveCliArgs(base, action, job) {
 }
 
 async function runRunwaveAction(base, dirs, env, job, action) {
-  const result = await run(base[0], runwaveCliArgs(base, action, job), { cwd: dirs.workspace, env });
-  return parseActionResponse(result, action);
+  const payload = {
+    ...action,
+    session_id: action.session_id || action.sessionId || job.runwaveSessionId,
+  };
+  const result = await run(base[0], runwaveCliArgs(base, payload, job), { cwd: dirs.workspace, env });
+  return parseActionResponse(result, payload);
 }
 
 function useAgentMode(job) {
@@ -721,20 +990,36 @@ async function runAgentPlan(job, dirs, initialResponse, runAction) {
 
 async function runRunwave(job, dirs, url, runnerEnv = process.env) {
   const runwaveBin = path.join(dirs.runwave, 'bin', 'runwave.js');
-  const env = {
+  let env = {
     ...runnerEnv,
     RUNWAVE_WORKSPACE: dirs.workspace,
-    RUNWAVE_SESSION_FILE: path.join(dirs.workspace, '.runwave-session.json'),
+    RUNWAVE_SESSION_DIR: path.join(dirs.workspace, '.runwave-sessions'),
   };
+  job.runwaveSessionId = job.runwaveSessionId || job.sessionId || job.jobId || `${job.game || 'runwave'}-${Date.now()}`;
+  const audioCapture = await prepareAudioCaptureEnv(env, job);
+  env = audioCapture.env;
+  let xvfb = null;
+  if (audioCapture.recordAudio) {
+    const xvfbSession = await startXvfbForAudio(job, env);
+    env = xvfbSession.env;
+    xvfb = xvfbSession.process;
+    if (xvfbSession.display) log('xvfb.ready', { display: xvfbSession.display });
+  }
   const base = ['node', runwaveBin];
   const start = {
     action: 'start',
     action_name: 'start',
+    session_id: job.runwaveSessionId,
     url,
     record: true,
-    headless: true,
+    recordAudio: audioCapture.recordAudio,
+    audioSource: audioCapture.audioSource,
+    gstreamerPath: job.gstreamerPath,
+    headless: job.headless ?? (audioCapture.recordAudio ? false : true),
     channel: job.channel,
     executablePath: job.executablePath,
+    chromiumArgs: job.chromiumArgs,
+    chromiumArgsMode: job.chromiumArgsMode,
     viewport: job.viewport || { width: 1280, height: 720 },
     videoSize: job.videoSize || job.viewport || { width: 1280, height: 720 },
     outputRoot: 'artifacts/state/output',
@@ -747,9 +1032,12 @@ async function runRunwave(job, dirs, url, runnerEnv = process.env) {
   };
 
   const runAction = (action) => runRunwaveAction(base, dirs, env, job, action);
-  const initialResponse = await runAction(start);
+  let initialResponse = null;
   let playtestResult = null;
   try {
+    initialResponse = await runAction(start);
+    job._runwaveInitialWebgl = webglFromResponse(initialResponse);
+    assertHardwareWebgl(job, initialResponse);
     if (useAgentMode(job)) {
       playtestResult = await runAgentPlan(job, dirs, initialResponse, runAction);
     } else {
@@ -759,9 +1047,20 @@ async function runRunwave(job, dirs, url, runnerEnv = process.env) {
       }
     }
   } finally {
-    await runAction({ action: 'stop', action_name: 'stop' }).catch((error) => {
-      log('runwave.stop.error', { error: error.message });
-    });
+    if (initialResponse) {
+      await runAction({ action: 'stop', action_name: 'stop', session_id: job.runwaveSessionId }).catch((error) => {
+        log('runwave.stop.error', { error: error.message });
+      });
+    }
+    if (xvfb) {
+      await stopLongProcess(xvfb, {
+        label: 'xvfb',
+        termWaitMs: Number(job.processStopWaitMs ?? DEFAULT_PROCESS_STOP_WAIT_MS),
+        killWaitMs: Number(job.processKillWaitMs ?? DEFAULT_PROCESS_KILL_WAIT_MS),
+      }).catch((error) => {
+        log('xvfb.stop.error', { error: error.message });
+      });
+    }
   }
   return playtestResult;
 }
@@ -785,6 +1084,11 @@ async function main() {
   Object.assign(process.env, envFile);
   const runnerEnv = { ...process.env, ...envFile };
   const runner = runnerPaths(runnerEnv);
+  if (shouldRunJobInContainer(job, runnerEnv)) {
+    await runJobInContainer(args, job, runner, runnerEnv);
+    return;
+  }
+
   const jobId = safeName(job.jobId || `${job.game}-attempt-${job.attempt || 1}-${Date.now()}`);
   const port = Number(job.port || 8800 + Math.floor(Math.random() * 800));
   const root = path.join(runner.jobsRoot, jobId);
@@ -807,12 +1111,19 @@ async function main() {
   fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
 
   const gameDir = path.join(runner.gamesRoot, job.game);
-  if (!fs.existsSync(path.join(gameDir, 'start.sh'))) {
-    throw new Error(`game has no start.sh: ${job.game}`);
-  }
 
   let gameProcess = null;
   try {
+    if (!fs.existsSync(path.join(gameDir, 'start.sh'))) {
+      throw new Error(`game has no start.sh: ${job.game}`);
+    }
+    job.playtestInstructions = loadPlaytestInstructions(gameDir, job.game);
+    summary.playtestInstructions = {
+      path: path.join(gameDir, 'playtest.md'),
+      bytes: Buffer.byteLength(job.playtestInstructions, 'utf8'),
+    };
+    fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
+
     log('job.start', { jobId, game: job.game, port });
     await checkoutRunwave(job, dirs.runwave, runnerEnv);
 
@@ -850,6 +1161,7 @@ async function main() {
       log('viewport.only.done', { jobId, viewport: job.viewport });
     } else {
       const playtest = await runRunwave(job, dirs, url, runnerEnv);
+      if (job._runwaveInitialWebgl) summary.webgl = job._runwaveInitialWebgl;
       if (playtest) {
         summary.playtest = {
           mode: playtest.mode,
@@ -863,6 +1175,7 @@ async function main() {
     summary.status = 'passed';
   } catch (error) {
     summary.status = 'failed';
+    if (job._runwaveInitialWebgl) summary.webgl = job._runwaveInitialWebgl;
     summary.error = error.message;
     summary.stack = error.stack;
     log('job.error', { jobId, error: error.message });
@@ -903,8 +1216,14 @@ if (require.main === module) {
 }
 
 module.exports = {
+  assertHardwareWebgl,
   chooseViewportFromProbe,
+  chromiumArgs,
+  dockerRunArgs,
+  isSwiftShaderWebgl,
+  loadPlaytestInstructions,
   normalizeVlmViewportChoice,
+  shouldRunJobInContainer,
   signalLongProcess,
   stopLongProcess,
   viewportCandidatesFromProbe,

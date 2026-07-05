@@ -9,6 +9,7 @@ const { chatCompletion, dataUrl, isModelJsonParseError } = require('./model-clie
 const { buildPlaytesterPrompt } = require('./prompt');
 
 const STOP_RESERVE_MS = 5000;
+const MODEL_SEQUENCE_ERROR_CODE = 'RUNWAVE_MODEL_SEQUENCE_INVALID';
 
 function responseBody(response) {
   if (!response || typeof response !== 'object') return {};
@@ -92,11 +93,21 @@ async function decideNextSequence({ job, screenshot, state, history, elapsedMs, 
     temperature: Number(job.agentTemperature ?? 0.2),
   });
 
-  return {
-    sequence: normalizeSequence(result.json, {
+  let sequence;
+  try {
+    sequence = normalizeSequence(result.json, {
       viewport,
       maxDurationMs: Number(job.agentMaxActionMs || 8000),
-    }),
+    });
+  } catch (error) {
+    error.code = MODEL_SEQUENCE_ERROR_CODE;
+    error.responseText = String(result.text || '').slice(0, 8000);
+    error.modelJson = result.json;
+    throw error;
+  }
+
+  return {
+    sequence,
     model: result.model,
     modelElapsedMs: Date.now() - modelStartedAt,
     rawText: String(result.text || '').slice(0, 8000),
@@ -104,32 +115,37 @@ async function decideNextSequence({ job, screenshot, state, history, elapsedMs, 
   };
 }
 
-function fallbackSequenceAfterInvalidJson({ history, viewport, error }) {
-  const lastWithKeyActions = history
-    .slice()
-    .reverse()
-    .find((item) => Array.isArray(item.actions) && item.actions.some((action) => action.type === 'key'));
-  const actions = lastWithKeyActions
-    ? lastWithKeyActions.actions
-        .filter((action) => action.type === 'key')
-        .slice(0, 2)
-        .map((action) => ({
-          type: 'key',
-          start: 0,
-          end: Math.max(500, Math.min(1500, Number(action.end || 1000) - Number(action.start || 0))),
-          key: action.key,
-        }))
-    : [{ type: 'key', start: 0, end: 600, key: 'Space' }];
+function isRecoverableModelSequenceError(error) {
+  return isModelJsonParseError(error) || Boolean(error && error.code === MODEL_SEQUENCE_ERROR_CODE);
+}
 
-  return normalizeSequence(
-    {
-      summary: 'The model returned invalid JSON, so the harness is continuing with a conservative fallback sequence.',
-      actions,
-      should_stop: false,
-      rationale: `Avoid ending the playtest because of a malformed model response: ${String(error.message || error).slice(0, 200)}`,
-    },
-    { viewport }
-  );
+function failedActionAfterInvalidJson({ error }) {
+  const schemaError = Boolean(error && error.code === MODEL_SEQUENCE_ERROR_CODE);
+  const message = String(error && (error.message || error) || 'model returned invalid JSON').slice(0, 500);
+  return {
+    durationMs: 0,
+    actions: [],
+    shouldStop: false,
+    summary: schemaError
+      ? 'Failed action: the model returned a sequence that did not match the action schema, so no gameplay input was sent.'
+      : 'Failed action: the model returned invalid JSON, so no gameplay input was sent.',
+    previousSequenceOutcome: '',
+    rationale: `Record the model output failure, keep the current screenshot and state unchanged, and ask for a new valid JSON action sequence. Error: ${message}`,
+    failedAction: true,
+    error: message,
+    errorType: schemaError ? 'schema' : 'json',
+  };
+}
+
+function failedActionResult({ screenshot, state, error }) {
+  return {
+    ok: false,
+    screenshot,
+    screenshotChanged: false,
+    captureCount: 0,
+    state,
+    error: String(error && (error.message || error) || 'action failed').slice(0, 500),
+  };
 }
 
 function actionsByType(actions, type) {
@@ -186,16 +202,19 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       }));
       consecutiveModelErrors = 0;
     } catch (error) {
-      if (!isModelJsonParseError(error)) throw error;
+      if (!isRecoverableModelSequenceError(error)) throw error;
       modelErrorCount += 1;
       consecutiveModelErrors += 1;
-      log('agent.model_json_error', {
+      log('agent.model_sequence_error', {
         step: step + 1,
         consecutiveModelErrors,
+        type: error.code === MODEL_SEQUENCE_ERROR_CODE ? 'schema' : 'json',
         error: String(error.message || error).slice(0, 500),
       });
-      sequence = fallbackSequenceAfterInvalidJson({ history, viewport: viewportFor(job), error });
-      model = 'fallback-after-invalid-json';
+      sequence = failedActionAfterInvalidJson({ error });
+      model = error.code === MODEL_SEQUENCE_ERROR_CODE
+        ? 'failed-action-after-invalid-model-sequence'
+        : 'failed-action-after-invalid-json';
       modelElapsedMs = 0;
       rawText = String(error.responseText || error.message || '').slice(0, 8000);
       usage = null;
@@ -207,6 +226,50 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
 
     const duration = Math.max(100, Math.min(sequence.durationMs, remainingMs));
     step += 1;
+    if (sequence.failedAction) {
+      const actionName = `agent-step-${String(step).padStart(3, '0')}-failed-action`;
+      const harnessStep = {
+        action: 'none',
+        action_name: actionName,
+        name: 'failed-action',
+        reason: sequence.error,
+      };
+      recorder.sequence({
+        step,
+        elapsedMs,
+        screenshot,
+        sequence,
+        harnessStep,
+        model,
+        modelElapsedMs,
+        rawText,
+        usage,
+      });
+      log('agent.failed_action', {
+        step,
+        model,
+        modelElapsedMs,
+        error: sequence.error,
+      });
+
+      const failedResult = failedActionResult({ screenshot, state, error: sequence.error });
+      history.push({
+        step,
+        summary: sequence.summary,
+        rationale: sequence.rationale,
+        actions: [{ type: 'failed_action', error: sequence.error }],
+        clicks: [],
+        drags: [],
+        cursorMoves: [],
+        viewMoves: [],
+        failedAction: true,
+        result: failedResult,
+      });
+
+      if (consecutiveModelErrors >= maxModelFallbacks) break;
+      continue;
+    }
+
     const harnessStep = {
       action: 'step',
       action_name: `agent-step-${String(step).padStart(3, '0')}`,
@@ -241,7 +304,37 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       viewMoveCount: buckets.viewMoves.length,
     });
 
-    lastResponse = await runAction(harnessStep);
+    let stepResponse;
+    try {
+      stepResponse = await runAction(harnessStep);
+    } catch (error) {
+      const message = String(error && (error.message || error) || 'runwave action failed').slice(0, 500);
+      log('agent.sequence_execution_error', {
+        step,
+        error: message,
+      });
+      log('agent.failed_action', {
+        step,
+        model,
+        modelElapsedMs,
+        error: message,
+      });
+      history.push({
+        step,
+        summary: sequence.summary || 'Failed action: the action sequence could not be executed.',
+        rationale: `Record the action execution failure, keep the current screenshot and state unchanged, and ask for a new action sequence. Error: ${message}`,
+        actions: sequence.actions,
+        clicks: buckets.clicks,
+        drags: buckets.drags,
+        cursorMoves: buckets.cursorMoves,
+        viewMoves: buckets.viewMoves,
+        failedAction: true,
+        result: failedActionResult({ screenshot, state, error: message }),
+      });
+      continue;
+    }
+
+    lastResponse = stepResponse;
     const result = postSequenceResult(lastResponse, screenshot);
     history.push({
       step,
@@ -283,7 +376,8 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
 
 module.exports = {
   decideNextSequence,
-  fallbackSequenceAfterInvalidJson,
+  failedActionAfterInvalidJson,
+  isRecoverableModelSequenceError,
   latestScreenshot,
   postSequenceResult,
   responseState,

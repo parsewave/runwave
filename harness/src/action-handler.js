@@ -1,7 +1,14 @@
 const { removeFileIfExists } = require('./file-utils');
-const { sessionFile } = require('./paths');
-const { assertActionName } = require('./protocol');
+const { assertActionName, assertSessionId, sessionId } = require('./protocol');
 const { runStep } = require('./step-runner');
+
+function assertRuntimeSession(runtime, input) {
+  assertSessionId(input);
+  const requested = sessionId(input);
+  if (runtime.sessionId !== requested) {
+    throw new Error(`request session_id "${requested}" does not match running session "${runtime.sessionId}"`);
+  }
+}
 
 async function readState(runtime, input) {
   return runtime.profiler.time('action.state.read', { action_name: input.action_name }, () =>
@@ -24,6 +31,7 @@ async function writeStateResponse(runtime, input) {
       ok: true,
       action: 'state',
       action_name: input.action_name,
+      session_id: runtime.sessionId,
       sessionDir: paths.runDir,
       state: await readState(runtime, input),
     })
@@ -42,6 +50,7 @@ async function writeScreenshotResponse(runtime, input) {
     ok: true,
     action: 'screenshot',
     action_name: input.action_name,
+    session_id: runtime.sessionId,
     sessionDir: paths.runDir,
     screenshot: await runtime.profiler.time('action.screenshot.capture', { action_name: input.action_name }, () =>
       browser.screenshot(outputDir, input.name || 'screenshot')
@@ -69,6 +78,7 @@ async function writeNavigateResponse(runtime, input) {
     ok: true,
     action: input.action,
     action_name: input.action_name,
+    session_id: runtime.sessionId,
     sessionDir: paths.runDir,
     screenshot: await runtime.profiler.time('action.navigate.screenshot', { action_name: input.action_name }, () =>
       browser.screenshot(outputDir, '000-after-navigate')
@@ -102,6 +112,7 @@ async function writeStepResponse(runtime, input) {
   return runtime.profiler.timeSync('action.step.write_response', { action_name: actionName }, () =>
     output.response(actionName, withVerboseLog(runtime, {
       ...result,
+      session_id: runtime.sessionId,
       sessionDir: paths.runDir,
     }))
   );
@@ -119,17 +130,24 @@ async function writeStopResponse(runtime, input) {
       : await runtime.profiler.time('action.stop.screenshot', { action_name: input.action_name }, () =>
           browser.screenshot(outputDir, '999-final')
         );
-  const video = await runtime.profiler.time('action.stop.browser_close', { action_name: input.action_name }, () => browser.close());
+  const recording = await runtime.profiler.time('action.stop.browser_close', { action_name: input.action_name }, () => browser.close());
+  const video = typeof recording === 'string' ? recording : recording.video;
 
-  runtime.profiler.timeSync('action.stop.remove_session_file', { sessionFile }, () => removeFileIfExists(sessionFile));
+  runtime.profiler.timeSync('action.stop.remove_session_file', { sessionFile: runtime.sessionFile }, () =>
+    removeFileIfExists(runtime.sessionFile)
+  );
   const payload = withVerboseLog(runtime, {
     ok: true,
     action: 'stop',
     action_name: input.action_name,
+    session_id: runtime.sessionId,
     sessionDir: paths.runDir,
     state: finalState,
     video,
   });
+  if (recording && typeof recording === 'object') {
+    if (recording.audioVideo) payload.audioVideo = recording.audioVideo;
+  }
   if (screenshot) payload.screenshot = screenshot;
   const response = runtime.profiler.timeSync('action.stop.write_response', { action_name: input.action_name }, () =>
     output.response(input.action_name, payload)
@@ -143,6 +161,7 @@ async function handleAction(runtime, input) {
   if (input.__runwaveVerbose) runtime.profiler.enable(runtime.paths.verboseLogPath);
   return runtime.profiler.time('action.handle', { action: input.action, action_name: input.action_name }, async () => {
     runtime.profiler.timeSync('action.assert_action_name', { action: input.action }, () => assertActionName(input));
+    runtime.profiler.timeSync('action.assert_session_id', { action: input.action }, () => assertRuntimeSession(runtime, input));
 
     if (input.action === 'ping') {
       return runtime.profiler.timeSync('action.ping.write_response', { action_name: input.action_name }, () =>
@@ -150,6 +169,7 @@ async function handleAction(runtime, input) {
           ok: true,
           action: 'ping',
           action_name: input.action_name,
+          session_id: runtime.sessionId,
           sessionDir: runtime.paths.runDir,
         }))
       );

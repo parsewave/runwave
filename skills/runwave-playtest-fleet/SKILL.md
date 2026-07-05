@@ -1,6 +1,6 @@
 ---
 name: runwave-playtest-fleet
-description: Run 20 or more simultaneous browser-game playtests with runwave using games from s3://pw-cruft/games, Hetzner workers or a local fallback, S3 artifact upload/download, and a generated browser video viewer. Use when asked to launch, test, orchestrate, monitor, or review a many-game runwave playtest batch.
+description: Run 20 or more simultaneous browser-game playtests with runwave using games from s3://pw-cruft/games, hardware-WebGL-verified workers for SwiftShader-sensitive games, Hetzner workers or a local fallback, S3 artifact upload/download, and a generated browser video viewer. Use when asked to launch, test, orchestrate, monitor, or review a many-game runwave playtest batch.
 ---
 
 # Runwave Playtest Fleet
@@ -14,12 +14,20 @@ Use this skill to run a many-game browser playtest batch end to end: discover ga
 - Local artifact root: `cruft/playtests/<run-id>/`
 - Viewer path: `cruft/playtests/<run-id>/viewer/index.html`
 - Playtest duration: `120000` ms per game
-- Fleet size target: `8 x ccx43`, `3` jobs per server, `24` concurrent slots
+- Fleet size target: `8` hardware-WebGL-verified workers, `3` jobs per server,
+  `24` concurrent slots
+- Every Linux playtest job runs inside a dedicated Docker container by default
+  so each game, Chromium instance, Xvfb session, PulseAudio null sink,
+  GStreamer recorder, and upload process has isolated runtime state.
 - Runwave repo: `https://github.com/parsewave/runwave`
 - SSH key: `RUNWAVE_SSH_KEY` / `SSH_KEY`, or an auto-detected local
   `~/.ssh/id_ed25519` / `~/.ssh/id_rsa`
 - Secrets may come from environment variables, local shell profiles, CI secrets,
   or `~/.c.yaml`; never print secret values
+- Hardware WebGL requirement: `aether-outpost-patrol` must only run on workers
+  where Chromium reports a non-SwiftShader WebGL renderer. A discrete GPU is not
+  required, but Chrome must use a real hardware backend such as Metal, EGL,
+  Vulkan, or OpenGL rather than SwiftShader.
 
 ## Required Secrets
 
@@ -78,6 +86,17 @@ aws s3api list-objects-v2 --bucket pw-cruft --prefix games/ --delimiter / --outp
 
 Skip hidden prefixes such as `games/.run/`. Schedule only directories with a `start.sh` that serves HTTP unless explicitly told otherwise.
 
+Hardware WebGL preflight:
+
+- Only use inventories whose workers have already been verified to report a
+  non-SwiftShader Chromium WebGL renderer. Do not use the old CPU-only Hetzner
+  `ccx43` fleet for full game batches that include `aether-outpost-patrol`.
+- If no verified hardware-WebGL workers are available, skip or fail
+  `aether-outpost-patrol` rather than producing a known-bad black-water
+  recording.
+- After a run, inspect each affected job's `summary.json` and confirm
+  `webgl.unmaskedRenderer` or `webgl.renderer` does not contain `SwiftShader`.
+
 ## Preferred Remote Run
 
 Use this path when Hetzner creation and SSH are working.
@@ -88,11 +107,13 @@ Use this path when Hetzner creation and SSH are working.
 export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
 # Optional if the Hetzner key name cannot be inferred from RUNWAVE_SSH_KEY.pub:
 # export RUNWAVE_SSH_KEY_NAME="<hetzner-ssh-key-name>"
-SERVER_TYPE=ccx43 SERVER_COUNT=8 LOCATION=hel1 ops/provision-hetzner.sh
+SERVER_TYPE=<hardware-webgl-approved-type> SERVER_COUNT=8 LOCATION=hel1 ops/provision-hetzner.sh
 ```
 
 2. Bootstrap servers in parallel. This syncs `s3://pw-cruft/games` to
-   `/opt/runwave/games` on every worker and installs runner dependencies.
+   `/opt/runwave/games` on every worker, installs runner dependencies, installs
+   Docker, and builds the `runwave-playtest-runner:latest` image used by each
+   job.
 
 ```sh
 ops/bootstrap-servers-parallel.sh cruft/inventory/<batch>.json
@@ -103,6 +124,11 @@ The bootstrap is idempotent enough to rerun for failed workers after apt/dpkg ha
 settled.
 
 3. Launch one playtest per discovered browser game:
+
+If the discovered games include `aether-outpost-patrol`, include
+only a hardware-WebGL-verified inventory: workers must report a
+non-SwiftShader Chromium WebGL renderer. Do not run that game on the old
+CPU-only inventory.
 
 ```sh
 export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
@@ -120,7 +146,11 @@ node ops/orchestrate-playtests.js \
   --concurrency-per-server 3
 ```
 
-The orchestrator refuses a 20-job run if capacity is below `20`. It assigns unique ports per server and uploads each job to:
+The orchestrator refuses a 20-job run if capacity is below `20`. For
+`aether-outpost-patrol`, it marks the job with
+`requiresHardwareWebgl`, uses hardware-backend Chromium flags, and fails the job
+if Chromium still reports SwiftShader. It assigns unique ports per server and
+uploads each job to:
 
 ```text
 s3://pw-cruft/playtests/<run-id>/<game>/attempt-001/
@@ -176,12 +206,19 @@ done < <(find cruft/playtests/_games-cache -mindepth 2 -maxdepth 2 -name package
 4. Run jobs with:
 
 ```sh
+docker build -f ops/remote/playtest-runner.Dockerfile \
+  -t runwave-playtest-runner:latest \
+  ops/remote
+
 RUNWAVE_GAMES_ROOT="$PWD/cruft/playtests/_games-cache" \
 RUNWAVE_JOBS_ROOT="$PWD/cruft/playtests/<run-id>/local-jobs" \
 node ops/remote/run-playtest.js --job cruft/playtests/<run-id>/job-specs/<job>.json
 ```
 
 For local parallel execution, spawn up to four of these commands at a time. Capture each job’s stdout/stderr to `cruft/playtests/<run-id>/<jobId>.log`, and write a `results.json` containing `{jobId, game, code, log, s3Uri}` for every job.
+On Linux, the runner launches the actual playtest inside Docker by default. Set
+`RUNWAVE_PLAYTEST_CONTAINER=0` only when debugging a single job directly on the
+host.
 
 ## Download And Viewer
 

@@ -80,6 +80,7 @@ runwave_bootstrap_one() {
   local ssh_opts=(-i "${SSH_KEY}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=15)
   local scp_files=(
     "${ROOT_DIR}/ops/remote/bootstrap-runner.sh"
+    "${ROOT_DIR}/ops/remote/playtest-runner.Dockerfile"
     "${ROOT_DIR}/ops/remote/run-playtest.js"
     "${env_file}"
   )

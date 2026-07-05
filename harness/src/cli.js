@@ -3,9 +3,19 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { postJson } = require('./http-json');
 const { readJson, removeFileIfExists, sleep } = require('./file-utils');
-const { sessionFile, workspaceRoot } = require('./paths');
+const { sessionDir, sessionFileForId, workspaceRoot } = require('./paths');
 const { createProfiler } = require('./profiler');
-const { assertActionName, parseCliInput, targetUrl, usage } = require('./protocol');
+const {
+  assertActionName,
+  assertSessionId,
+  diffStartSessionConfig,
+  isListSessionsAction,
+  parseCliInput,
+  sessionId,
+  startSessionConfig,
+  targetUrl,
+  usage,
+} = require('./protocol');
 
 const DEFAULT_SESSION_WAIT_MS = 60000;
 const DEFAULT_FORCE_STOP_WAIT_MS = 5000;
@@ -37,11 +47,26 @@ function readInput(inputArgs) {
   });
 }
 
-function currentSession() {
-  if (!fs.existsSync(sessionFile)) {
+function inputSessionFile(input) {
+  return sessionFileForId(sessionId(input));
+}
+
+function validateSessionId(session, requestedId, file) {
+  if (!session || session.sessionId === undefined) return;
+  if (session.sessionId !== requestedId) {
+    throw new Error(`session file ${file} belongs to session_id "${session.sessionId}", not "${requestedId}"`);
+  }
+}
+
+function currentSession(input) {
+  const requestedId = sessionId(input);
+  const file = inputSessionFile(input);
+  if (!fs.existsSync(file)) {
     throw new Error('runwave is not running; start it first');
   }
-  return readJson(sessionFile);
+  const session = readJson(file);
+  validateSessionId(session, requestedId, file);
+  return session;
 }
 
 function positiveNumber(value, fallback) {
@@ -82,11 +107,11 @@ async function waitForPidExit(pid, timeoutMs, sleepFn = sleep, kill = process.ki
   return !isPidRunning(parsed, kill);
 }
 
-async function waitForSession(pid, timeoutMs = DEFAULT_SESSION_WAIT_MS) {
+async function waitForSession(pid, timeoutMs = DEFAULT_SESSION_WAIT_MS, file) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    if (fs.existsSync(sessionFile)) {
-      const session = readJson(sessionFile);
+    if (fs.existsSync(file)) {
+      const session = readJson(file);
       if (!pid || session.pid === pid) return session;
     }
     await sleep(100);
@@ -95,7 +120,7 @@ async function waitForSession(pid, timeoutMs = DEFAULT_SESSION_WAIT_MS) {
 }
 
 async function stopExistingSessionForForce(input, profiler, options = {}) {
-  const file = options.sessionFilePath || sessionFile;
+  const file = options.sessionFilePath || inputSessionFile(input);
   const exists = options.existsSync || fs.existsSync;
   const read = options.readJson || readJson;
   const remove = options.removeFileIfExists || removeFileIfExists;
@@ -129,13 +154,16 @@ async function stopExistingSessionForForce(input, profiler, options = {}) {
   let stopError = null;
   if (session.port) {
     try {
+      const stopPayload = {
+        action: 'stop',
+        action_name: `${input.action_name}-force-stop`,
+        finalScreenshot: false,
+        __runwaveVerbose: input.__runwaveVerbose,
+      };
+      const id = input.session_id ?? input.sessionId;
+      if (id !== undefined) stopPayload.session_id = id;
       stopResponse = await profiler.time('cli.force_stop.post_stop', { port: session.port }, () =>
-        post(session.port, {
-          action: 'stop',
-          action_name: `${input.action_name}-force-stop`,
-          finalScreenshot: false,
-          __runwaveVerbose: input.__runwaveVerbose,
-        })
+        post(session.port, stopPayload)
       );
       if (!stopResponse || stopResponse.ok === false) {
         throw new Error(`forced stop failed: ${JSON.stringify(stopResponse).slice(0, 500)}`);
@@ -169,15 +197,52 @@ async function stopExistingSessionForForce(input, profiler, options = {}) {
   };
 }
 
-async function existingSessionStart(input, profiler) {
-  if (!fs.existsSync(sessionFile) || input.force) return null;
-  const session = currentSession();
+function incompatibleSessionError(differences) {
+  const shown = differences.slice(0, 6).join(', ');
+  const suffix = differences.length > 6 ? `, +${differences.length - 6} more` : '';
+  const error = new Error(
+    `runwave is already running with a different start configuration (${shown}${suffix}); stop it first or use "force": true`
+  );
+  error.code = 'RUNWAVE_SESSION_INCOMPATIBLE';
+  return error;
+}
+
+function assertReusableSession(input, session) {
+  const requested = startSessionConfig(input);
+  const differences = diffStartSessionConfig(requested, session.startConfig);
+  if (differences.length) throw incompatibleSessionError(differences);
+  return requested;
+}
+
+async function existingSessionStart(input, profiler, options = {}) {
+  const file = options.sessionFilePath || inputSessionFile(input);
+  const exists = options.existsSync || fs.existsSync;
+  const read = options.readJson || readJson;
+  const remove = options.removeFileIfExists || removeFileIfExists;
+  const post = options.postJson || postJson;
+
+  if (!exists(file) || input.force) return null;
+  const session = read(file);
+  if (!options.sessionFilePath) validateSessionId(session, sessionId(input), file);
   try {
     const ping = await profiler.time('cli.existing_session.ping', { port: session.port }, () =>
-      postJson(session.port, { action: 'ping', action_name: input.action_name, __runwaveVerbose: input.__runwaveVerbose })
+      post(session.port, {
+        action: 'ping',
+        action_name: input.action_name,
+        session_id: input.session_id ?? input.sessionId,
+        __runwaveVerbose: input.__runwaveVerbose,
+      })
+    );
+    profiler.timeSync('cli.existing_session.assert_reusable', { port: session.port }, () =>
+      assertReusableSession(input, session)
     );
     const state = await profiler.time('cli.existing_session.state', { port: session.port }, () =>
-      postJson(session.port, { action: 'state', action_name: input.action_name, __runwaveVerbose: input.__runwaveVerbose })
+      post(session.port, {
+        action: 'state',
+        action_name: input.action_name,
+        session_id: input.session_id ?? input.sessionId,
+        __runwaveVerbose: input.__runwaveVerbose,
+      })
     );
     return {
       ok: true,
@@ -189,16 +254,58 @@ async function existingSessionStart(input, profiler) {
       output: state,
       ...(input.__runwaveVerbose && session.verboseLogPath ? { verboseLog: session.verboseLogPath } : {}),
     };
-  } catch {
-    removeFileIfExists(sessionFile);
+  } catch (error) {
+    if (error && error.code === 'RUNWAVE_SESSION_INCOMPATIBLE') throw error;
+    remove(file);
     return null;
   }
 }
 
+function sessionSummary(file) {
+  try {
+    const session = readJson(file);
+    return {
+      ok: true,
+      session_id: session.sessionId || null,
+      pid: session.pid,
+      port: session.port,
+      sessionDir: session.sessionDir,
+      outputRoot: session.outputRoot,
+      launchUrl: session.launchUrl,
+      startedAt: session.startedAt,
+      sessionFile: file,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error.message,
+      sessionFile: file,
+    };
+  }
+}
+
+function listSessions() {
+  const files = [];
+  if (fs.existsSync(sessionDir)) {
+    for (const entry of fs.readdirSync(sessionDir, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith('.json')) files.push(path.join(sessionDir, entry.name));
+    }
+  }
+  files.sort();
+  return {
+    ok: true,
+    action: 'sessions',
+    sessionDir,
+    sessions: files.map(sessionSummary),
+  };
+}
+
 async function start(input, profiler) {
+  profiler.timeSync('cli.start.assert_session_id', () => assertSessionId(input));
+  const file = inputSessionFile(input);
   profiler.timeSync('cli.start.target_url', () => targetUrl(input));
   if (input.force) {
-    await profiler.time('cli.start.force_stop_existing_session', { sessionFile }, () =>
+    await profiler.time('cli.start.force_stop_existing_session', { sessionFile: file }, () =>
       stopExistingSessionForForce(input, profiler)
     );
   }
@@ -216,11 +323,11 @@ async function start(input, profiler) {
   child.unref();
 
   const waitMs = sessionWaitMs(input);
-  const session = await profiler.time('cli.start.wait_for_session', { pid: child.pid, timeoutMs: waitMs }, () =>
-    waitForSession(child.pid, waitMs)
+  const session = await profiler.time('cli.start.wait_for_session', { pid: child.pid, timeoutMs: waitMs, sessionFile: file }, () =>
+    waitForSession(child.pid, waitMs, file)
   );
   if (session.verboseLogPath) profiler.setLogPath(session.verboseLogPath);
-  profiler.mark('cli.start.session_ready', { sessionFile, sessionDir: session.sessionDir });
+  profiler.mark('cli.start.session_ready', { sessionFile: file, sessionDir: session.sessionDir });
   const output = profiler.timeSync('cli.start.read_initial_response', { path: session.initialResponsePath }, () =>
     readJson(session.initialResponsePath)
   );
@@ -235,9 +342,12 @@ async function start(input, profiler) {
 }
 
 async function dispatch(input, profiler) {
+  if (isListSessionsAction(input)) return profiler.timeSync('cli.dispatch.list_sessions', () => listSessions());
   profiler.timeSync('cli.dispatch.assert_action_name', () => assertActionName(input));
+  profiler.timeSync('cli.dispatch.assert_session_id', () => assertSessionId(input));
   if (input.action === 'start') return start(input, profiler);
-  const session = profiler.timeSync('cli.dispatch.current_session', { sessionFile }, () => currentSession());
+  const file = inputSessionFile(input);
+  const session = profiler.timeSync('cli.dispatch.current_session', { sessionFile: file }, () => currentSession(input));
   if (session.verboseLogPath) profiler.setLogPath(session.verboseLogPath);
   return profiler.time('cli.dispatch.post_json', { action: input.action, action_name: input.action_name, port: session.port }, () =>
     postJson(session.port, input)
@@ -278,6 +388,11 @@ module.exports = {
   sessionWaitMs,
   forceStopWaitMs,
   isPidRunning,
+  existingSessionStart,
+  assertReusableSession,
+  currentSession,
+  inputSessionFile,
+  listSessions,
   stopExistingSessionForForce,
   waitForPidExit,
   cliArgs,

@@ -5,7 +5,8 @@ const path = require('path');
 const test = require('node:test');
 
 const { createProfiler } = require('../harness/src/profiler');
-const { stopExistingSessionForForce } = require('../harness/src/cli');
+const { existingSessionStart, stopExistingSessionForForce } = require('../harness/src/cli');
+const { startSessionConfig } = require('../harness/src/protocol');
 
 function writeSession(dir, session) {
   const file = path.join(dir, 'session.json');
@@ -16,6 +17,125 @@ function writeSession(dir, session) {
 function profiler() {
   return createProfiler({ enabled: false, source: 'test' });
 }
+
+test('start reuses a live session only when the start configuration matches', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-compatible-start-'));
+  const start = {
+    action: 'start',
+    action_name: 'start-again',
+    url: 'http://127.0.0.1:3000/',
+    viewport: { width: 640, height: 420 },
+    record: true,
+    headless: true,
+    chromiumArgs: ['--no-sandbox'],
+  };
+  const sessionFile = writeSession(tmpDir, {
+    pid: 12345,
+    port: 43210,
+    startConfig: startSessionConfig(start),
+  });
+  const posted = [];
+
+  try {
+    const result = await existingSessionStart(start, profiler(), {
+      sessionFilePath: sessionFile,
+      postJson: async (port, payload) => {
+        posted.push({ port, payload });
+        return payload.action === 'ping'
+          ? { ok: true, action: 'ping' }
+          : { ok: true, action: 'state', state: { generic: { url: start.url } } };
+      },
+    });
+
+    assert.equal(result.alreadyRunning, true);
+    assert.equal(result.session.port, 43210);
+    assert.deepEqual(posted.map((entry) => entry.payload.action), ['ping', 'state']);
+    assert.equal(fs.existsSync(sessionFile), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('start rejects a live session with a different target instead of silently reusing it', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-target-mismatch-'));
+  const originalStart = {
+    action: 'start',
+    action_name: 'old-start',
+    url: 'http://127.0.0.1:3000/old',
+    viewport: { width: 640, height: 420 },
+  };
+  const sessionFile = writeSession(tmpDir, {
+    pid: 12345,
+    port: 43210,
+    startConfig: startSessionConfig(originalStart),
+  });
+  const posted = [];
+
+  try {
+    await assert.rejects(
+      existingSessionStart(
+        {
+          ...originalStart,
+          action_name: 'new-start',
+          url: 'http://127.0.0.1:3000/new',
+        },
+        profiler(),
+        {
+          sessionFilePath: sessionFile,
+          postJson: async (port, payload) => {
+            posted.push({ port, payload });
+            return { ok: true, action: payload.action };
+          },
+        }
+      ),
+      /different start configuration \(launchUrl\).*"force": true/
+    );
+
+    assert.deepEqual(posted.map((entry) => entry.payload.action), ['ping']);
+    assert.equal(fs.existsSync(sessionFile), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('start rejects a live session with different viewport or launch options', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-config-mismatch-'));
+  const originalStart = {
+    action: 'start',
+    action_name: 'old-start',
+    url: 'http://127.0.0.1:3000/',
+    viewport: { width: 640, height: 420 },
+    chromiumArgs: ['--no-sandbox'],
+  };
+  const sessionFile = writeSession(tmpDir, {
+    pid: 12345,
+    port: 43210,
+    startConfig: startSessionConfig(originalStart),
+  });
+
+  try {
+    await assert.rejects(
+      existingSessionStart(
+        {
+          ...originalStart,
+          action_name: 'new-start',
+          viewport: { width: 800, height: 600 },
+          chromiumArgs: ['--no-sandbox', '--disable-gpu'],
+        },
+        profiler(),
+        {
+          sessionFilePath: sessionFile,
+          postJson: async (port, payload) => ({ ok: true, action: payload.action }),
+        }
+      ),
+      /different start configuration \(browser, context\).*"force": true/
+    );
+
+    assert.equal(fs.existsSync(sessionFile), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
 
 test('force start stops an existing live session before removing the session file', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-force-stop-'));

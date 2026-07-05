@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INVENTORY_DIR="${INVENTORY_DIR:-${ROOT_DIR}/cruft/inventory}"
 SERVER_TYPE="${SERVER_TYPE:-ccx43}"
 SERVER_COUNT="${SERVER_COUNT:-8}"
+PROVISION_CONCURRENCY="${PROVISION_CONCURRENCY:-4}"
 LOCATION="${LOCATION:-hel1}"
 IMAGE="${IMAGE:-ubuntu-24.04}"
 SSH_KEY_NAME="${RUNWAVE_SSH_KEY_NAME:-${SSH_KEY_NAME:-}}"
@@ -59,14 +60,27 @@ if [ -z "${SSH_KEY_NAME}" ]; then
   echo "Missing RUNWAVE_SSH_KEY_NAME/SSH_KEY_NAME and could not infer it from the local SSH public key" >&2
   exit 1
 fi
+if ! [[ "${PROVISION_CONCURRENCY}" =~ ^[0-9]+$ ]] || [ "${PROVISION_CONCURRENCY}" -lt 1 ]; then
+  echo "PROVISION_CONCURRENCY must be a positive integer" >&2
+  exit 1
+fi
 
 mkdir -p "${INVENTORY_DIR}"
 
 echo "Creating ${SERVER_COUNT} ${SERVER_TYPE} servers in ${LOCATION} for batch ${BATCH}"
+echo "Provisioning concurrency: ${PROVISION_CONCURRENCY}"
 
-server_ids=()
-for i in $(seq 1 "${SERVER_COUNT}"); do
-  name="${BATCH}-$(printf '%02d' "${i}")"
+tmp_dir="$(mktemp -d)"
+cleanup() {
+  rm -rf "${tmp_dir}"
+}
+trap cleanup EXIT
+
+create_one() {
+  local i="$1"
+  local name="${BATCH}-$(printf '%02d' "${i}")"
+  local create_json
+
   echo "Creating ${name}"
   create_json="$(
     HCLOUD_TOKEN="${HCLOUD_TOKEN}" hcloud server create \
@@ -80,7 +94,45 @@ for i in $(seq 1 "${SERVER_COUNT}"); do
       --start-after-create \
       -o json
   )"
-  server_ids+=("$(printf '%s' "${create_json}" | jq -r '.server.id')")
+  printf '%s\n' "${create_json}" > "${tmp_dir}/server-${i}.json"
+  printf '%s\n' "${create_json}" | jq -r '.server.id' > "${tmp_dir}/server-${i}.id"
+}
+
+wait_batch() {
+  local exit_code=0
+  local pid
+
+  for pid in "$@"; do
+    if ! wait "${pid}"; then
+      exit_code=1
+    fi
+  done
+  return "${exit_code}"
+}
+
+pids=()
+for i in $(seq 1 "${SERVER_COUNT}"); do
+  create_one "${i}" &
+  pids+=("$!")
+  if [ "${#pids[@]}" -ge "${PROVISION_CONCURRENCY}" ]; then
+    wait_batch "${pids[@]}" || {
+      echo "One or more server creates failed" >&2
+      exit 1
+    }
+    pids=()
+  fi
+done
+
+if [ "${#pids[@]}" -gt 0 ]; then
+  wait_batch "${pids[@]}" || {
+    echo "One or more server creates failed" >&2
+    exit 1
+  }
+fi
+
+server_ids=()
+for i in $(seq 1 "${SERVER_COUNT}"); do
+  server_ids+=("$(<"${tmp_dir}/server-${i}.id")")
 done
 
 servers_json="[]"

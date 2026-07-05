@@ -49,9 +49,11 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
   if (!launchConfig) return;
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-smoke-'));
+  const sessionId = 'smoke-session';
+  const sessionDir = path.join(tmpDir, 'sessions');
   const env = {
     ...process.env,
-    RUNWAVE_SESSION_FILE: path.join(tmpDir, 'session.json'),
+    RUNWAVE_SESSION_DIR: sessionDir,
     RUNWAVE_WORKSPACE: packageRoot,
   };
   const outputRoot = path.join(tmpDir, 'state');
@@ -64,6 +66,7 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
       {
         action: 'start',
         action_name: 'smoke-start',
+        session_id: sessionId,
         file: 'test/fixtures/click-target.html',
         force: true,
         record: true,
@@ -83,13 +86,19 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
       { cwd: tmpDir, env }
     );
     assert.equal(start.ok, true);
+    assert.equal(start.session.sessionId, sessionId);
     assert.ok(fs.existsSync(start.output.screenshot));
+
+    const sessions = runCli({ action: 'sessions' }, { cwd: tmpDir, env });
+    assert.equal(sessions.ok, true);
+    assert.equal(sessions.sessions.some((session) => session.session_id === sessionId), true);
 
     const step = runCli(
       {
         action: 'step',
         action_name: 'smoke-click',
-        actions: [{ type: 'click', start: 50, end: 300, x: 320, y: 210 }],
+        session_id: sessionId,
+        actions: [{ type: 'click', start: 50, end: 100, x: 320, y: 210 }],
         captures: [300],
         autoCaptures: false,
       },
@@ -105,6 +114,7 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
       {
         action: 'step',
         action_name: 'smoke-drag',
+        session_id: sessionId,
         actions: [{ type: 'drag', start: 50, end: 300, from: { x: 260, y: 210 }, to: { x: 380, y: 210 }, mode: 'mouse', steps: 6 }],
         captures: [300],
         autoCaptures: false,
@@ -119,6 +129,7 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
       {
         action: 'stop',
         action_name: 'smoke-stop',
+        session_id: sessionId,
         finalScreenshot: false,
       },
       { cwd: tmpDir, env }
@@ -127,11 +138,11 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
     assert.ok(stop.video);
     assert.ok(fs.existsSync(stop.video));
   } finally {
-    if (fs.existsSync(env.RUNWAVE_SESSION_FILE)) {
+    if (fs.existsSync(path.join(sessionDir, `${sessionId}.json`))) {
       try {
-        runCli({ action: 'stop', action_name: 'smoke-cleanup', finalScreenshot: false }, { cwd: tmpDir, env });
+        runCli({ action: 'stop', action_name: 'smoke-cleanup', session_id: sessionId, finalScreenshot: false }, { cwd: tmpDir, env });
       } catch {
-        fs.rmSync(env.RUNWAVE_SESSION_FILE, { force: true });
+        fs.rmSync(path.join(sessionDir, `${sessionId}.json`), { force: true });
       }
     }
     fs.rmSync(tmpDir, { recursive: true, force: true });
