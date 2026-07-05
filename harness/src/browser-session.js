@@ -30,11 +30,58 @@ function chromiumLaunchArgs(config = {}, env = process.env) {
   const args = chromiumArgs(config, env);
   if (!config.recordAudio) return args;
   const size = videoSize(config);
+  const hideBrowserChrome = config.audioVideoBrowserChrome !== true &&
+    env.RUNWAVE_AUDIO_VIDEO_BROWSER_CHROME !== '1';
   return [
     ...args,
     '--window-position=0,0',
     `--window-size=${size.width},${size.height}`,
+    ...(hideBrowserChrome ? ['--kiosk', '--start-fullscreen', '--disable-infobars'] : []),
   ];
+}
+
+function shouldStabilizeBrowserViewport(config = {}, env = process.env) {
+  if (!config.recordAudio) return false;
+  return config.audioVideoStabilizeViewport !== false &&
+    env.RUNWAVE_AUDIO_VIDEO_STABILIZE_VIEWPORT !== '0';
+}
+
+function browserViewportStabilizerScript() {
+  const installStyle = () => {
+    if (!document.documentElement) return;
+    let style = document.getElementById('__runwave_capture_viewport_stabilizer__');
+    if (!style) {
+      style = document.createElement('style');
+      style.id = '__runwave_capture_viewport_stabilizer__';
+      style.textContent = 'html,body{overflow:hidden!important;}';
+      document.documentElement.appendChild(style);
+    }
+    window.scrollTo(0, 0);
+  };
+
+  const scrollingKeys = new Set([
+    'ArrowDown',
+    'ArrowLeft',
+    'ArrowRight',
+    'ArrowUp',
+    'End',
+    'Home',
+    'PageDown',
+    'PageUp',
+    ' ',
+    'Space',
+  ]);
+
+  window.addEventListener('keydown', (event) => {
+    const target = event.target;
+    const tagName = target && target.tagName ? String(target.tagName).toUpperCase() : '';
+    if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || target?.isContentEditable) return;
+    if (scrollingKeys.has(event.key) || scrollingKeys.has(event.code)) event.preventDefault();
+  }, true);
+
+  window.addEventListener('scroll', () => window.scrollTo(0, 0), true);
+  installStyle();
+  document.addEventListener('DOMContentLoaded', installStyle, { once: true });
 }
 
 class BrowserSession {
@@ -109,6 +156,11 @@ class BrowserSession {
           : {}),
       })
     );
+    if (shouldStabilizeBrowserViewport(this.config)) {
+      await this.time('browser.start.capture_viewport_stabilizer', () =>
+        this.context.addInitScript(browserViewportStabilizerScript)
+      );
+    }
     this.page = await this.time('browser.start.new_page', () => this.context.newPage());
     if (this.audioRecorder) {
       await this.time('browser.start.audio_video_recorder_start', () => this.audioRecorder.start());
@@ -306,6 +358,8 @@ class BrowserSession {
 
 module.exports = {
   BrowserSession,
+  browserViewportStabilizerScript,
   chromiumArgs,
   chromiumLaunchArgs,
+  shouldStabilizeBrowserViewport,
 };

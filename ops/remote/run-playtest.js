@@ -8,6 +8,7 @@ const { spawn } = require('child_process');
 
 const DEFAULT_PROCESS_STOP_WAIT_MS = 5000;
 const DEFAULT_PROCESS_KILL_WAIT_MS = 5000;
+const DEFAULT_AUDIO_VIDEO_CAPTURE_Y = 94;
 
 function parseArgs(argv) {
   const out = {};
@@ -49,6 +50,16 @@ function safeName(value) {
     .slice(0, 120);
 }
 
+function positiveInteger(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.round(number) : fallback;
+}
+
+function nonNegativeInteger(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number) : fallback;
+}
+
 function runnerPaths(env = process.env) {
   return {
     gamesRoot: env.RUNWAVE_GAMES_ROOT || '/opt/runwave/games',
@@ -79,6 +90,7 @@ function dockerEnvNames(env = process.env) {
     /^RUNWAVE_FFMPEG$/,
     /^RUNWAVE_SKIP_PLAYWRIGHT_INSTALL$/,
     /^RUNWAVE_VERBOSE$/,
+    /^RUNWAVE_VIDEO_/,
     /^RUNWAVE_VLM_VIEWPORT_PREFLIGHT$/,
     /^RUNWAVE_XVFB_/,
     /^RUNWAVE_PROCESS_(STOP|KILL)_WAIT_MS$/,
@@ -246,8 +258,18 @@ async function startXvfbForAudio(job, env) {
   if (job.audioXvfb === false) return { env, process: null, display: env.DISPLAY || null };
   const display = job.xvfbDisplay || env.RUNWAVE_XVFB_DISPLAY || `:${100 + (Number(job.port || 0) % 500)}`;
   const captureSize = job.videoSize || job.viewport || { width: 1280, height: 720 };
-  const screenWidth = Number.isFinite(Number(captureSize.width)) && Number(captureSize.width) > 0 ? Math.round(Number(captureSize.width)) : 1280;
-  const screenHeight = Number.isFinite(Number(captureSize.height)) && Number(captureSize.height) > 0 ? Math.round(Number(captureSize.height)) : 720;
+  const captureWidth = positiveInteger(captureSize.width, 1280);
+  const captureHeight = positiveInteger(captureSize.height, 720);
+  const captureX = nonNegativeInteger(
+    job.audioVideoCaptureX ?? job.audioVideoCaptureOffsetX ?? env.RUNWAVE_AUDIO_VIDEO_CAPTURE_X ?? env.RUNWAVE_VIDEO_X,
+    0
+  );
+  const captureY = nonNegativeInteger(
+    job.audioVideoCaptureY ?? job.audioVideoCaptureYOffset ?? env.RUNWAVE_AUDIO_VIDEO_CAPTURE_Y ?? env.RUNWAVE_VIDEO_Y,
+    DEFAULT_AUDIO_VIDEO_CAPTURE_Y
+  );
+  const screenWidth = positiveInteger(job.xvfbWidth ?? env.RUNWAVE_XVFB_WIDTH, captureWidth + captureX);
+  const screenHeight = positiveInteger(job.xvfbHeight ?? env.RUNWAVE_XVFB_HEIGHT, captureHeight + captureY);
   const screen = job.xvfbScreen || env.RUNWAVE_XVFB_SCREEN || `${screenWidth}x${screenHeight}x24`;
   const xvfb = spawnLong('Xvfb', [display, '-screen', '0', screen, '-nolisten', 'tcp'], {
     env,
@@ -262,6 +284,8 @@ async function startXvfbForAudio(job, env) {
       ...env,
       DISPLAY: display,
       NO_AT_BRIDGE: env.NO_AT_BRIDGE || '1',
+      RUNWAVE_VIDEO_X: String(captureX),
+      RUNWAVE_VIDEO_Y: String(captureY),
     },
     process: xvfb,
     display,
@@ -990,8 +1014,10 @@ async function runRunwave(job, dirs, url, runnerEnv = process.env) {
     url,
     record: true,
     recordAudio: audioCapture.recordAudio,
+    audioVideoRecorder: job.audioVideoRecorder,
     audioInputFormat: audioCapture.audioInputFormat,
     audioSource: audioCapture.audioSource,
+    gstreamerPath: job.gstreamerPath,
     headless: job.headless ?? (audioCapture.recordAudio ? false : true),
     channel: job.channel,
     executablePath: job.executablePath,

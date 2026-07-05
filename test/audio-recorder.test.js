@@ -2,12 +2,15 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  audioVideoRecorderBackend,
   defaultAudioInputFormat,
   defaultVideoInputFormat,
   defaultVideoSource,
   ffmpegAudioArgs,
   ffmpegAudioVideoArgs,
   ffmpegMuxArgs,
+  gstreamerAudioVideoArgs,
+  parseX11VideoSource,
 } = require('../harness/src/audio-recorder');
 
 test('default audio input format follows platform recorder conventions', () => {
@@ -25,6 +28,30 @@ test('default video input format follows platform recorder conventions', () => {
 test('default linux video source uses display and capture origin', () => {
   assert.equal(defaultVideoSource('linux', { DISPLAY: ':501' }), ':501+0,0');
   assert.equal(defaultVideoSource('linux', { DISPLAY: ':501.0', RUNWAVE_VIDEO_X: '12', RUNWAVE_VIDEO_Y: '34' }), ':501.0+12,34');
+});
+
+test('x11 video source parsing separates display and capture origin', () => {
+  assert.deepEqual(parseX11VideoSource(':501+12,34', {}), {
+    displayName: ':501',
+    x: 12,
+    y: 34,
+  });
+  assert.deepEqual(parseX11VideoSource(':501.0+0,94', {}), {
+    displayName: ':501.0',
+    x: 0,
+    y: 94,
+  });
+  assert.deepEqual(parseX11VideoSource('', { DISPLAY: ':777' }), {
+    displayName: ':777',
+    x: 0,
+    y: 0,
+  });
+});
+
+test('audio/video recorder backend defaults to ffmpeg and can select gstreamer', () => {
+  assert.equal(audioVideoRecorderBackend({}, {}), 'ffmpeg');
+  assert.equal(audioVideoRecorderBackend({ audioVideoRecorder: 'gstreamer' }, {}), 'gstreamer');
+  assert.equal(audioVideoRecorderBackend({}, { RUNWAVE_AUDIO_VIDEO_RECORDER: 'gstreamer' }), 'gstreamer');
 });
 
 test('ffmpeg audio args record only audio from configured source', () => {
@@ -84,6 +111,8 @@ test('ffmpeg audio/video args capture display and audio in one process', () => {
     'x11grab',
     '-framerate',
     '30',
+    '-draw_mouse',
+    '0',
     '-video_size',
     '656x496',
     '-i',
@@ -100,11 +129,139 @@ test('ffmpeg audio/video args capture display and audio in one process', () => {
     '1:a:0',
     '-c:v',
     'libvpx',
+    '-vf',
+    'fps=30',
+    '-r',
+    '30',
     '-pix_fmt',
     'yuv420p',
     '-c:a',
     'libopus',
     '/tmp/combined.webm',
+  ]);
+});
+
+test('ffmpeg audio/video args can disable constant frame rate output', () => {
+  const args = ffmpegAudioVideoArgs(
+    {
+      audioInputFormat: 'pulse',
+      audioSource: 'runwave_sink.monitor',
+      videoInputFormat: 'x11grab',
+      videoSource: ':501+0,0',
+      videoSize: { width: 656, height: 496 },
+      audioVideoConstantFrameRate: false,
+    },
+    '/tmp/combined.webm',
+    'linux',
+    {}
+  );
+
+  assert.equal(args.includes('-vf'), false);
+  assert.equal(args.includes('-r'), false);
+});
+
+test('ffmpeg audio/video args can opt into shared wallclock timestamps', () => {
+  const args = ffmpegAudioVideoArgs(
+    {
+      audioInputFormat: 'pulse',
+      audioSource: 'runwave_sink.monitor',
+      videoInputFormat: 'x11grab',
+      videoSource: ':501+0,0',
+      videoSize: { width: 656, height: 496 },
+      audioVideoWallclockTimestamps: true,
+    },
+    '/tmp/combined.webm',
+    'linux',
+    {}
+  );
+
+  assert.equal(args.filter((arg) => arg === '-use_wallclock_as_timestamps').length, 2);
+  assert.equal(args.includes('-copyts'), true);
+  assert.equal(args.includes('-start_at_zero'), true);
+});
+
+test('gstreamer audio/video args capture display and pulse audio into webm', () => {
+  const args = gstreamerAudioVideoArgs(
+    {
+      audioSource: 'runwave_sink.monitor',
+      videoSource: ':501+0,0',
+      videoFramerate: 30,
+      videoSize: { width: 656, height: 496 },
+    },
+    '/tmp/combined.webm',
+    'linux',
+    {}
+  );
+
+  assert.deepEqual(args, [
+    '-e',
+    'ximagesrc',
+    'display-name=:501',
+    'startx=0',
+    'starty=0',
+    'endx=655',
+    'endy=495',
+    'use-damage=false',
+    'show-pointer=false',
+    '!',
+    'video/x-raw,framerate=30/1,width=656,height=496',
+    '!',
+    'queue',
+    '!',
+    'videoconvert',
+    '!',
+    'vp8enc',
+    'deadline=1',
+    '!',
+    'queue',
+    '!',
+    'mux.',
+    'pulsesrc',
+    'device=runwave_sink.monitor',
+    '!',
+    'audio/x-raw,rate=48000,channels=2',
+    '!',
+    'queue',
+    '!',
+    'audioconvert',
+    '!',
+    'audioresample',
+    '!',
+    'opusenc',
+    '!',
+    'queue',
+    '!',
+    'mux.',
+    'webmmux',
+    'name=mux',
+    '!',
+    'filesink',
+    'location=/tmp/combined.webm',
+  ]);
+});
+
+test('gstreamer audio/video args honor x11 capture origin', () => {
+  const args = gstreamerAudioVideoArgs(
+    {
+      audioSource: 'runwave_sink.monitor',
+      videoSource: ':501+0,94',
+      videoFramerate: 25,
+      videoSize: { width: 656, height: 496 },
+    },
+    '/tmp/combined.webm',
+    'linux',
+    {}
+  );
+
+  assert.deepEqual(args.slice(0, 8), [
+    '-e',
+    'ximagesrc',
+    'display-name=:501',
+    'startx=0',
+    'starty=94',
+    'endx=655',
+    'endy=589',
+    'use-damage=false',
   ]);
 });
 

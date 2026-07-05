@@ -9,6 +9,10 @@ const DEFAULT_MUX_OFFSET_THRESHOLD_MS = 1;
 const DEFAULT_VIDEO_FRAMERATE = 25;
 const DEFAULT_INPUT_THREAD_QUEUE_SIZE = 512;
 
+function audioVideoRecorderBackend(config = {}, env = process.env) {
+  return String(config.audioVideoRecorder || env.RUNWAVE_AUDIO_VIDEO_RECORDER || 'ffmpeg').toLowerCase();
+}
+
 function defaultAudioInputFormat(platform = process.platform) {
   if (platform === 'darwin') return 'avfoundation';
   if (platform === 'win32') return 'dshow';
@@ -30,6 +34,23 @@ function defaultVideoSource(platform = process.platform, env = process.env) {
   return `${display}+${Number.isFinite(x) ? x : 0},${Number.isFinite(y) ? y : 0}`;
 }
 
+function parseX11VideoSource(source, env = process.env) {
+  const fallbackDisplay = env.DISPLAY || ':0';
+  const match = String(source || '').match(/^(.*)\+(-?\d+),(-?\d+)$/);
+  if (!match) {
+    return {
+      displayName: String(source || fallbackDisplay),
+      x: 0,
+      y: 0,
+    };
+  }
+  return {
+    displayName: match[1] || fallbackDisplay,
+    x: Number(match[2]),
+    y: Number(match[3]),
+  };
+}
+
 function normalizedVideoSize(config) {
   const size = config.videoSize || config.viewport || {};
   const width = Number(size.width);
@@ -47,7 +68,16 @@ function ffmpegAudioVideoArgs(config, outputPath, platform = process.platform, e
   const videoSource = config.videoSource || env.RUNWAVE_VIDEO_SOURCE || defaultVideoSource(platform, env);
   const videoSize = normalizedVideoSize(config);
   const framerate = Number(config.videoFramerate || env.RUNWAVE_VIDEO_FRAMERATE || DEFAULT_VIDEO_FRAMERATE);
+  const outputFramerate = String(Number.isFinite(framerate) && framerate > 0 ? framerate : DEFAULT_VIDEO_FRAMERATE);
   const queueSize = String(config.inputThreadQueueSize || env.RUNWAVE_INPUT_THREAD_QUEUE_SIZE || DEFAULT_INPUT_THREAD_QUEUE_SIZE);
+  const constantFrameRate = config.audioVideoConstantFrameRate !== false &&
+    env.RUNWAVE_AUDIO_VIDEO_CFR !== '0';
+  const cfrArgs = constantFrameRate ? ['-vf', `fps=${outputFramerate}`, '-r', outputFramerate] : [];
+  const useWallclockTimestamps = config.audioVideoWallclockTimestamps === true ||
+    env.RUNWAVE_AUDIO_VIDEO_WALLCLOCK_TIMESTAMPS === '1';
+  const timestampArgs = useWallclockTimestamps ? ['-use_wallclock_as_timestamps', '1'] : [];
+  const outputTimestampArgs = useWallclockTimestamps ? ['-copyts', '-start_at_zero'] : [];
+  const pointerArgs = videoFormat === 'x11grab' ? ['-draw_mouse', '0'] : [];
   return [
     '-hide_banner',
     '-loglevel',
@@ -57,8 +87,10 @@ function ffmpegAudioVideoArgs(config, outputPath, platform = process.platform, e
     queueSize,
     '-f',
     videoFormat,
+    ...timestampArgs,
     '-framerate',
-    String(Number.isFinite(framerate) && framerate > 0 ? framerate : DEFAULT_VIDEO_FRAMERATE),
+    outputFramerate,
+    ...pointerArgs,
     '-video_size',
     `${videoSize.width}x${videoSize.height}`,
     '-i',
@@ -67,6 +99,7 @@ function ffmpegAudioVideoArgs(config, outputPath, platform = process.platform, e
     queueSize,
     '-f',
     audioFormat,
+    ...timestampArgs,
     '-i',
     audioSource,
     '-map',
@@ -75,11 +108,71 @@ function ffmpegAudioVideoArgs(config, outputPath, platform = process.platform, e
     '1:a:0',
     '-c:v',
     config.videoCodec || 'libvpx',
+    ...cfrArgs,
     '-pix_fmt',
     'yuv420p',
     '-c:a',
     config.audioCodec || 'libopus',
+    ...outputTimestampArgs,
     outputPath,
+  ];
+}
+
+function gstreamerAudioVideoArgs(config, outputPath, platform = process.platform, env = process.env) {
+  if (platform !== 'linux') {
+    throw new Error('gstreamer audio/video recording is currently supported only on linux');
+  }
+  const audioSource = config.audioSource || env.RUNWAVE_AUDIO_SOURCE || 'default';
+  const videoSource = config.videoSource || env.RUNWAVE_VIDEO_SOURCE || defaultVideoSource(platform, env);
+  const videoSize = normalizedVideoSize(config);
+  const framerate = Number(config.videoFramerate || env.RUNWAVE_VIDEO_FRAMERATE || DEFAULT_VIDEO_FRAMERATE);
+  const outputFramerate = String(Number.isFinite(framerate) && framerate > 0 ? framerate : DEFAULT_VIDEO_FRAMERATE);
+  const capture = parseX11VideoSource(videoSource, env);
+
+  return [
+    '-e',
+    'ximagesrc',
+    `display-name=${capture.displayName}`,
+    `startx=${capture.x}`,
+    `starty=${capture.y}`,
+    `endx=${capture.x + videoSize.width - 1}`,
+    `endy=${capture.y + videoSize.height - 1}`,
+    'use-damage=false',
+    'show-pointer=false',
+    '!',
+    `video/x-raw,framerate=${outputFramerate}/1,width=${videoSize.width},height=${videoSize.height}`,
+    '!',
+    'queue',
+    '!',
+    'videoconvert',
+    '!',
+    'vp8enc',
+    'deadline=1',
+    '!',
+    'queue',
+    '!',
+    'mux.',
+    'pulsesrc',
+    `device=${audioSource}`,
+    '!',
+    'audio/x-raw,rate=48000,channels=2',
+    '!',
+    'queue',
+    '!',
+    'audioconvert',
+    '!',
+    'audioresample',
+    '!',
+    'opusenc',
+    '!',
+    'queue',
+    '!',
+    'mux.',
+    'webmmux',
+    'name=mux',
+    '!',
+    'filesink',
+    `location=${outputPath}`,
   ];
 }
 
@@ -174,10 +267,16 @@ class AudioVideoRecorder {
 
   async start() {
     this.timeSync('audio_video.start.ensure_video_dir', { dir: this.videoDir }, () => ensureDir(this.videoDir));
-    const ffmpeg = this.config.ffmpegPath || process.env.RUNWAVE_FFMPEG || 'ffmpeg';
-    const args = ffmpegAudioVideoArgs(this.config, this.videoPath, process.platform, this.env);
-    this.proc = this.timeSync('audio_video.start.spawn_ffmpeg', { ffmpeg, args }, () =>
-      spawn(ffmpeg, args, { stdio: ['pipe', 'ignore', 'pipe'], env: this.env })
+    const backend = audioVideoRecorderBackend(this.config, this.env);
+    const command = backend === 'gstreamer'
+      ? this.config.gstreamerPath || this.env.RUNWAVE_GSTREAMER || 'gst-launch-1.0'
+      : this.config.ffmpegPath || this.env.RUNWAVE_FFMPEG || 'ffmpeg';
+    const args = backend === 'gstreamer'
+      ? gstreamerAudioVideoArgs(this.config, this.videoPath, process.platform, this.env)
+      : ffmpegAudioVideoArgs(this.config, this.videoPath, process.platform, this.env);
+    this.backend = backend;
+    this.proc = this.timeSync('audio_video.start.spawn_recorder', { backend, command, args }, () =>
+      spawn(command, args, { stdio: ['pipe', 'ignore', 'pipe'], env: this.env })
     );
     this.proc.stderr.on('data', (chunk) => this.stderr.push(Buffer.from(chunk)));
     this.closed = new Promise((resolve) => {
@@ -194,7 +293,7 @@ class AudioVideoRecorder {
     const probeMs = Number(this.config.audioStartProbeMs ?? DEFAULT_START_PROBE_MS);
     if (probeMs > 0) await this.time('audio_video.start.probe_wait', { probeMs }, () => sleep(probeMs));
     if (this.exit) {
-      throw new Error(`ffmpeg audio/video recorder exited during startup: ${this.exitSummary()}`);
+      throw new Error(`${backend} audio/video recorder exited during startup: ${this.exitSummary()}`);
     }
     return this.videoPath;
   }
@@ -223,24 +322,33 @@ class AudioVideoRecorder {
 
   async stop() {
     if (!this.proc) return null;
-    if (!this.exit && this.proc.stdin && !this.proc.stdin.destroyed) {
-      this.timeSync('audio_video.stop.request_quit', () => this.proc.stdin.write('q'));
-    }
-
     const waitMs = Number(this.config.audioStopWaitMs ?? DEFAULT_STOP_WAIT_MS);
-    if (!(await this.time('audio_video.stop.wait_for_quit', { waitMs }, () => this.waitForClose(waitMs)))) {
-      this.timeSync('audio_video.stop.sigint', () => this.proc.kill('SIGINT'));
-    }
-    if (!(await this.time('audio_video.stop.wait_for_sigint', { waitMs }, () => this.waitForClose(waitMs)))) {
-      this.timeSync('audio_video.stop.sigkill', () => this.proc.kill('SIGKILL'));
-      await this.closed;
+
+    if (this.backend === 'gstreamer') {
+      if (!this.exit) {
+        this.timeSync('audio_video.stop.sigint', () => this.proc.kill('SIGINT'));
+      }
+      if (!(await this.time('audio_video.stop.wait_for_sigint', { waitMs }, () => this.waitForClose(waitMs)))) {
+        this.timeSync('audio_video.stop.sigkill', () => this.proc.kill('SIGKILL'));
+        await this.closed;
+      }
+    } else if (!this.exit && this.proc.stdin && !this.proc.stdin.destroyed) {
+      this.timeSync('audio_video.stop.request_quit', () => this.proc.stdin.write('q'));
+
+      if (!(await this.time('audio_video.stop.wait_for_quit', { waitMs }, () => this.waitForClose(waitMs)))) {
+        this.timeSync('audio_video.stop.sigint', () => this.proc.kill('SIGINT'));
+      }
+      if (!(await this.time('audio_video.stop.wait_for_sigint', { waitMs }, () => this.waitForClose(waitMs)))) {
+        this.timeSync('audio_video.stop.sigkill', () => this.proc.kill('SIGKILL'));
+        await this.closed;
+      }
     }
 
     if (this.exit && this.exit.error) {
-      throw new Error(`ffmpeg audio/video recorder failed: ${this.exitSummary()}`);
+      throw new Error(`${this.backend || 'recorder'} audio/video recorder failed: ${this.exitSummary()}`);
     }
     if (this.exit && this.exit.code !== 0 && !fs.existsSync(this.videoPath)) {
-      throw new Error(`ffmpeg audio/video recorder failed: ${this.exitSummary()}`);
+      throw new Error(`${this.backend || 'recorder'} audio/video recorder failed: ${this.exitSummary()}`);
     }
     return fs.existsSync(this.videoPath) ? this.videoPath : null;
   }
@@ -249,10 +357,13 @@ class AudioVideoRecorder {
 module.exports = {
   AudioRecorder: AudioVideoRecorder,
   AudioVideoRecorder,
+  audioVideoRecorderBackend,
   defaultAudioInputFormat,
   defaultVideoInputFormat,
   defaultVideoSource,
   ffmpegAudioArgs,
   ffmpegAudioVideoArgs,
   ffmpegMuxArgs,
+  gstreamerAudioVideoArgs,
+  parseX11VideoSource,
 };
