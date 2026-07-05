@@ -6,6 +6,8 @@ const {
   BrowserSession,
   browserViewportStabilizerScript,
   chromiumLaunchArgs,
+  launchHeadless,
+  pageViewportVideoSource,
 } = require('../controller/src/browser-session');
 
 test('chromium launch args leave non-recording runs unchanged', () => {
@@ -31,6 +33,28 @@ test('chromium launch args hide browser chrome for gstreamer capture', () => {
   assert.ok(args.includes('--kiosk'));
   assert.ok(args.includes('--start-fullscreen'));
   assert.ok(args.includes('--disable-infobars'));
+});
+
+test('recording sessions force a visible headed browser', () => {
+  assert.equal(launchHeadless({ record: true }), false);
+  assert.equal(launchHeadless({ record: true, headless: true }), false);
+  assert.equal(launchHeadless({ record: false }), true);
+  assert.equal(launchHeadless({ record: false, headless: false }), false);
+});
+
+test('page viewport video source crops past browser chrome', async () => {
+  const page = {
+    evaluate: async () => ({
+      screenX: 0,
+      screenY: 0,
+      outerWidth: 1296,
+      outerHeight: 812,
+      innerWidth: 1280,
+      innerHeight: 720,
+    }),
+  };
+
+  assert.equal(await pageViewportVideoSource(page, { DISPLAY: ':123' }), ':123+8,92');
 });
 
 test('browser viewport stabilizer hides overflow and prevents scrolling keys', () => {

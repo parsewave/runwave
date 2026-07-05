@@ -14,6 +14,7 @@ const {
   signalLongProcess,
   startOverridesFromJob,
   stopLongProcess,
+  xvfbCaptureConfig,
 } = require('../ops/remote/run-playtest');
 
 function fakeChild(pid = 12345) {
@@ -135,6 +136,25 @@ test('remote playtest start overrides carry mark grid dimensions', () => {
   assert.equal(overrides.gridScreenshots, true);
   assert.equal(overrides.audioSource, 'pulse.monitor');
   assert.deepEqual(overrides.videoSize, { width: 1280, height: 720 });
+});
+
+test('xvfb capture config leaves room for measured browser chrome', () => {
+  const capture = xvfbCaptureConfig(
+    {
+      port: 9311,
+      viewport: { width: 656, height: 496 },
+      videoSize: { width: 656, height: 496 },
+      xvfbWidth: 656,
+      xvfbHeight: 496,
+    },
+    {}
+  );
+
+  assert.equal(capture.captureX, 0);
+  assert.equal(capture.captureY, 0);
+  assert.equal(capture.screenWidth, 656);
+  assert.equal(capture.screenHeight, 656);
+  assert.equal(capture.screen, '656x656x24');
 });
 
 test('linux playtest jobs run in a container by default unless disabled or already inside one', () => {

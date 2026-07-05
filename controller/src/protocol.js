@@ -122,7 +122,7 @@ function startSessionConfig(input, options = {}) {
   return {
     launchUrl: targetUrl(input, options),
     browser: {
-      headless: input.headless !== false,
+      headless: record ? false : input.headless !== false,
       channel: optionalString(input.channel),
       executablePath: optionalString(input.executablePath),
       chromiumArgsMode: String(input.chromiumArgsMode || process.env.RUNWAVE_CHROMIUM_ARGS_MODE || 'append').toLowerCase(),

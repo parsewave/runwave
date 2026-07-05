@@ -44,6 +44,27 @@ function chromiumLaunchArgs(config = {}, env = process.env) {
   ];
 }
 
+function launchHeadless(config = {}) {
+  return isRecording(config) ? false : config.headless !== false;
+}
+
+async function pageViewportVideoSource(page, env = process.env) {
+  const display = env.DISPLAY || ':0';
+  const metrics = await page.evaluate(() => ({
+    screenX: Number(window.screenX || window.screenLeft || 0),
+    screenY: Number(window.screenY || window.screenTop || 0),
+    outerWidth: Number(window.outerWidth || window.innerWidth || 0),
+    outerHeight: Number(window.outerHeight || window.innerHeight || 0),
+    innerWidth: Number(window.innerWidth || 0),
+    innerHeight: Number(window.innerHeight || 0),
+  }));
+  const horizontalChrome = Math.max(0, metrics.outerWidth - metrics.innerWidth);
+  const verticalChrome = Math.max(0, metrics.outerHeight - metrics.innerHeight);
+  const x = Math.max(0, Math.round(metrics.screenX + horizontalChrome / 2));
+  const y = Math.max(0, Math.round(metrics.screenY + verticalChrome));
+  return `${display}+${x},${y}`;
+}
+
 function browserViewportStabilizerScript() {
   const installStyle = () => {
     if (!document.documentElement) return;
@@ -115,15 +136,10 @@ class BrowserSession {
     const record = isRecording(this.config);
     if (record) {
       this.videoDir = this.timeSync('browser.start.ensure_video_dir', () => ensureDir(path.join(this.paths.runDir, 'video')));
-      this.audioRecorder = new AudioVideoRecorder(
-        this.config,
-        this.paths.runDir,
-        this.profiler ? this.profiler.child('audio-video-recorder') : null
-      );
     }
 
     const launchOptions = {
-      headless: this.config.headless !== false,
+      headless: launchHeadless(this.config),
       args: chromiumLaunchArgs(this.config),
     };
     if (this.config.channel) launchOptions.channel = String(this.config.channel);
@@ -149,15 +165,23 @@ class BrowserSession {
       );
     }
     this.page = await this.time('browser.start.new_page', () => this.context.newPage());
-    if (this.audioRecorder) {
-      await this.time('browser.start.audio_video_recorder_start', () => this.audioRecorder.start());
-    }
     this.timeSync('browser.start.attach_console_logger', () => this.page.on('console', (msg) => {
       fs.appendFileSync(path.join(this.paths.runDir, 'browser-console.log'), `${msg.type()} ${msg.text()}\n`);
     }));
     await this.time('browser.start.initial_navigate', { url: this.launchUrl }, () =>
       this.navigate({ url: this.launchUrl, waitAfterLoad: this.config.waitAfterLoad })
     );
+    if (record) {
+      const videoSource = this.config.videoSource || await this.time('browser.start.page_viewport_video_source', () =>
+        pageViewportVideoSource(this.page)
+      );
+      this.audioRecorder = new AudioVideoRecorder(
+        { ...this.config, videoSource },
+        this.paths.runDir,
+        this.profiler ? this.profiler.child('audio-video-recorder') : null
+      );
+      await this.time('browser.start.audio_video_recorder_start', () => this.audioRecorder.start());
+    }
   }
 
   async navigate(input) {
@@ -352,4 +376,6 @@ module.exports = {
   browserViewportStabilizerScript,
   chromiumArgs,
   chromiumLaunchArgs,
+  launchHeadless,
+  pageViewportVideoSource,
 };
