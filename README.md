@@ -186,16 +186,17 @@ runwave '{
   "action_name": "turn-003-click-start",
   "session_id": "playtest-001",
   "actions": [
-    { "type": "click", "start": 100, "end": 500, "x": 512, "y": 310 }
+    { "type": "click", "start": 100, "x": 512, "y": 310 }
   ]
 }'
 ```
 
-Screenshots include a 20x20 red mark grid by default. Column labels are shown
-in the top/bottom margins and row labels are shown in the left/right margins.
-Pointer actions may use row/column grid objects instead of exact pixels.
+Screenshots include a 16x16 red mark grid by default. Overlay column labels are
+shown in the top/bottom margins and overlay row labels are shown in the
+left/right margins. Pointer actions may use overlay row/column grid objects
+instead of exact pixels.
 
-Single row/column grid click:
+Single overlay grid click:
 
 ```sh
 runwave '{
@@ -203,7 +204,7 @@ runwave '{
   "action_name": "turn-003-click-start-cell",
   "session_id": "playtest-001",
   "actions": [
-    { "type": "click", "start": 100, "end": 500, "cell": { "row": 6, "col": 7 } }
+    { "type": "click", "start": 100, "cell": { "overlay_row": 6, "overlay_col": 7 } }
   ]
 }'
 ```
@@ -216,7 +217,7 @@ runwave '{
   "action_name": "turn-003-multi-click",
   "session_id": "playtest-001",
   "actions": [
-    { "type": "multi_click", "start": 100, "cells": [{ "row": 6, "col": 7 }, { "row": 6, "col": 8 }], "count": 10 }
+    { "type": "multi_click", "start": 100, "cells": [{ "overlay_row": 6, "overlay_col": 7 }, { "overlay_row": 6, "overlay_col": 8 }], "count": 10 }
   ]
 }'
 ```
@@ -239,13 +240,13 @@ for browser-native draggable/drop elements.
 Drag endpoints can also use grid cells:
 
 ```json
-{ "type": "drag", "start": 100, "from": { "row": 8, "col": 10 }, "to": { "row": 8, "col": 11 }, "mode": "mouse" }
+{ "type": "drag", "start": 100, "from": { "overlay_row": 8, "overlay_col": 10 }, "to": { "overlay_row": 8, "overlay_col": 11 }, "mode": "mouse" }
 ```
 
 Move the cursor without clicking:
 
 ```json
-{ "action": "step", "action_name": "turn-005-hover", "session_id": "playtest-001", "actions": [{ "type": "cursor_move", "start": 100, "end": 500, "cell": { "row": 6, "col": 7 } }] }
+{ "action": "step", "action_name": "turn-005-hover", "session_id": "playtest-001", "actions": [{ "type": "cursor_move", "start": 100, "end": 500, "cell": { "overlay_row": 6, "overlay_col": 7 } }] }
 ```
 
 Move the mouse without clicking for camera control:

@@ -70,7 +70,7 @@ test('normalizes grid-cell model actions into concrete pointer events', () => {
         { type: 'cursor_move', start: 400, cells: [27] },
       ],
     },
-    { viewport: { width: 800, height: 800 } }
+    { viewport: { width: 800, height: 800 }, config: { markGridRows: 20, markGridCols: 20 } }
   );
 
   const clicks = sequence.actions.filter((action) => action.type === 'click');
@@ -96,14 +96,14 @@ test('normalizes grid-cell model actions into concrete pointer events', () => {
   assert.equal(step.clicks.length, 11);
 });
 
-test('normalizes row and column grid targets into concrete pointer events', () => {
+test('normalizes overlay row and column grid targets into concrete pointer events', () => {
   const sequence = normalizeSequence(
     {
       actions: [
-        { type: 'click', start: 100, cell: { row: 1, col: 2 } },
-        { type: 'multi_click', start: 200, cells: [{ row: 2, col: 0 }, { row: 2, col: 1 }], count: 2 },
-        { type: 'drag', start: 300, from: { row: 3, col: 4 }, to: { row: 3, col: 5 }, mode: 'mouse' },
-        { type: 'cursor_move', start: 400, cell: { row: 0, col: 7 } },
+        { type: 'click', start: 100, cell: { overlay_row: 1, overlay_col: 2 } },
+        { type: 'multi_click', start: 200, cells: [{ overlay_row: 2, overlay_col: 0 }, { overlay_row: 2, overlay_col: 1 }], count: 2 },
+        { type: 'drag', start: 300, from: { overlay_row: 3, overlay_col: 4 }, to: { overlay_row: 3, overlay_col: 5 }, mode: 'mouse' },
+        { type: 'cursor_move', start: 400, cell: { overlay_row: 0, overlay_col: 7 } },
       ],
     },
     { viewport: { width: 800, height: 800 }, config: { markGridRows: 8, markGridCols: 8 } }
@@ -120,6 +120,24 @@ test('normalizes row and column grid targets into concrete pointer events', () =
   assert.deepEqual(drag.from.cells, [28]);
   assert.deepEqual(drag.to.cells, [29]);
   assert.deepEqual(cursorMove.cells, [7]);
+});
+
+test('keeps legacy row and column grid targets compatible', () => {
+  const sequence = normalizeSequence(
+    {
+      actions: [
+        { type: 'click', start: 100, cell: { row: 1, col: 2 } },
+        { type: 'drag', start: 300, from: { row: 3, col: 4 }, to: { row: 3, col: 5 }, mode: 'mouse' },
+      ],
+    },
+    { viewport: { width: 800, height: 800 }, config: { markGridRows: 8, markGridCols: 8 } }
+  );
+
+  const click = sequence.actions.find((action) => action.type === 'click');
+  const drag = sequence.actions.find((action) => action.type === 'drag');
+  assert.equal(click.cells[0], 10);
+  assert.deepEqual(drag.from.cells, [28]);
+  assert.deepEqual(drag.to.cells, [29]);
 });
 
 test('samples grid-cell points away from cell boundaries by default', () => {
@@ -212,7 +230,7 @@ test('normalizes controller grid-cell steps into concrete pointer events', () =>
         { type: 'cursor_move', start: 400, cells: [19] },
       ],
     },
-    { viewport: { width: 800, height: 800 } },
+    { viewport: { width: 800, height: 800 }, markGridRows: 20, markGridCols: 20 },
     1
   );
 
@@ -229,14 +247,14 @@ test('normalizes controller grid-cell steps into concrete pointer events', () =>
   assert.deepEqual(step.cursorMoves[0].to.cells, [19]);
 });
 
-test('normalizes controller row and column grid steps in strict mode', () => {
+test('normalizes controller overlay row and column grid steps in strict mode', () => {
   const step = normalizeStep(
     {
       actions: [
-        { type: 'click', start: 100, cell: { row: 1, col: 2 } },
-        { type: 'multi_click', start: 200, cells: [{ row: 2, col: 0 }, { row: 2, col: 1 }], count: 2 },
-        { type: 'drag', start: 300, from: { row: 3, col: 4 }, to: { row: 3, col: 5 } },
-        { type: 'cursor_move', start: 400, cell: { row: 0, col: 7 } },
+        { type: 'click', start: 100, cell: { overlay_row: 1, overlay_col: 2 } },
+        { type: 'multi_click', start: 200, cells: [{ overlay_row: 2, overlay_col: 0 }, { overlay_row: 2, overlay_col: 1 }], count: 2 },
+        { type: 'drag', start: 300, from: { overlay_row: 3, overlay_col: 4 }, to: { overlay_row: 3, overlay_col: 5 } },
+        { type: 'cursor_move', start: 400, cell: { overlay_row: 0, overlay_col: 7 } },
       ],
     },
     { viewport: { width: 800, height: 800 }, markGridRows: 8, markGridCols: 8 },
@@ -831,8 +849,8 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.match(prompt, /"type":"drag"/);
   assert.match(prompt, /Single Player/);
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
-  assert.match(prompt, /light 20x20 red mark grid/);
-  assert.match(prompt, /Column labels are in the top\/bottom margins/);
+  assert.match(prompt, /light 16x16 red mark grid/);
+  assert.match(prompt, /Overlay column labels are in the top\/bottom margins/);
   assert.match(prompt, /"type":"multi_click"/);
   assert.match(prompt, /JSON output contract/);
   assert.match(prompt, /Top-level keys must be exactly/);
@@ -840,8 +858,9 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.match(prompt, /"start":0/);
   assert.match(prompt, /"end":500/);
   assert.match(prompt, /RunWave adds a short default/);
-  assert.match(prompt, /"cell":\{"row":10,"col":10\}/);
-  assert.match(prompt, /row\/column grid targeting/);
+  assert.match(prompt, /"cell":\{"overlay_row":8,"overlay_col":8\}/);
+  assert.match(prompt, /overlay grid targeting/);
+  assert.match(prompt, /reason about that game structure separately/);
   assert.match(prompt, /failed about 3-5 times/);
   assert.match(prompt, /learn the pattern/);
   assert.doesNotMatch(prompt, /"commands":/);
@@ -850,13 +869,13 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.doesNotMatch(prompt, /"multi_clicks":/);
 });
 
-test('sequence schema guide uses configured row and column grid examples', () => {
+test('sequence schema guide uses configured overlay row and column grid examples', () => {
   const guide = sequenceSchemaGuide({ rows: 16, cols: 16 });
 
-  assert.match(guide, /row\/column grid targets from the 16x16 overlay/);
-  assert.match(guide, /"cell":\{"row":8,"col":8\}/);
-  assert.match(guide, /"from":\{"row":8,"col":8\}/);
-  assert.match(guide, /"to":\{"row":8,"col":9\}/);
+  assert.match(guide, /overlay_row\/overlay_col targets from the 16x16 overlay/);
+  assert.match(guide, /"cell":\{"overlay_row":8,"overlay_col":8\}/);
+  assert.match(guide, /"from":\{"overlay_row":8,"overlay_col":8\}/);
+  assert.match(guide, /"to":\{"overlay_row":8,"overlay_col":9\}/);
 });
 
 test('playtester prompt includes game-specific playtest instructions', () => {

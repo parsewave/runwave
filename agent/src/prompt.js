@@ -5,14 +5,14 @@ const { markGridFromConfig } = require('../../controller/src/mark-grid');
 function gridExampleCells(grid) {
   const row = Math.min(grid.rows - 1, Math.max(0, Math.floor(grid.rows / 2)));
   const col = Math.min(grid.cols - 1, Math.max(0, Math.floor(grid.cols / 2)));
-  const center = { row, col };
-  const right = { row, col: Math.min(grid.cols - 1, col + 1) };
-  const above = { row: Math.max(0, row - 1), col };
+  const center = { overlay_row: row, overlay_col: col };
+  const right = { overlay_row: row, overlay_col: Math.min(grid.cols - 1, col + 1) };
+  const above = { overlay_row: Math.max(0, row - 1), overlay_col: col };
   return { center, right, above };
 }
 
 function cellJson(cell) {
-  return `{"row":${cell.row},"col":${cell.col}}`;
+  return `{"overlay_row":${cell.overlay_row},"overlay_col":${cell.overlay_col}}`;
 }
 
 function sequenceSchemaGuide(grid = markGridFromConfig({})) {
@@ -29,7 +29,7 @@ function sequenceSchemaGuide(grid = markGridFromConfig({})) {
     `{"type":"cursor_move","start":100,"cell":${cellJson(examples.above)},"steps":8}`,
     '{"type":"view_move","start":0,"end":800,"dx":120,"dy":0,"steps":8}',
     'Timing rules: use milliseconds; click <=100ms if end is provided; drag/cursor_move <=2000ms if end is provided; key/view_move may be longer; whole sequence must stay under 8000ms.',
-    `Click, multi_click, drag, and cursor_move may omit end; RunWave adds a short default. Prefer row/column grid targets from the ${grid.rows}x${grid.cols} overlay over raw x/y.`,
+    `Click, multi_click, drag, and cursor_move may omit end; RunWave adds a short default. Prefer overlay_row/overlay_col targets from the ${grid.rows}x${grid.cols} overlay over raw x/y.`,
   ].join('\n');
 }
 
@@ -210,12 +210,13 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     sequenceSchemaGuide(grid),
     '',
     `Time remaining: ${secondsLeft}s.`,
-    `Viewport: ${viewport.width}x${viewport.height}. The screenshot has a light ${grid.rows}x${grid.cols} red mark grid over the inner game area. Column labels are in the top/bottom margins and row labels are in the left/right margins.`,
+    `Viewport: ${viewport.width}x${viewport.height}. The screenshot has a light ${grid.rows}x${grid.cols} red mark grid over the inner game area. Overlay column labels are in the top/bottom margins and overlay row labels are in the left/right margins.`,
     `Available common controls: ${controls.join(', ')}. You may use literal Playwright keys.`,
     '',
     ...playtestInstructionsSection(job),
     'Sequence guidance:',
-    '- Prefer row/column grid targeting over raw x/y coordinates. For a single pointer target use "cell": {"row": r, "col": c}; for up to 4 possible targets use "cells": [{"row": r, "col": c}].',
+    '- If the game has its own board, tiles, cells, lanes, or grid, reason about that game structure separately. Use the red overlay only to choose approximate mouse positions.',
+    '- Prefer overlay grid targeting over raw x/y coordinates. For a single pointer target use "cell": {"overlay_row": r, "overlay_col": c}; for up to 4 possible targets use "cells": [{"overlay_row": r, "overlay_col": c}].',
     '- Only use raw x/y if the grid is not enough. Raw x/y coordinates are inside the inner game viewport only; ignore the label margins and do not use full-image pixel coordinates.',
     '- Put every input in the "actions" array. Each action must have a "type": "key", "click", "multi_click", "drag", "cursor_move", or "view_move".',
     '- Use "start" and "end" times in milliseconds. Instant actions such as click, multi_click, drag, and cursor_move only need "start".',
@@ -223,7 +224,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '- For pointer-only sequences, do not put the final pointer action exactly at the end of the sequence. Leave at least 100ms after the final click, drag, multi_click, or cursor_move by scheduling it before the latest action end/start.',
     '- Never use a pointer action start time beyond the sequence duration. Keep all click, multi_click, drag, and cursor_move start times strictly before the latest end/start in the sequence.',
     '- Use type "click" for a single click in the selected cell area. Use type "multi_click" when a target is imprecise or repeated clicking/tapping is useful; it sends quick clicks at random points inside the selected cells.',
-    '- Use type "drag" for drag/swipe games with "from" and "to" row/column objects. Use mode "mouse" for canvas or pointer games; use mode "html5" for browser-native drag/drop elements such as match-3 candy boards.',
+    '- Use type "drag" for drag/swipe games with "from" and "to" overlay row/column objects. Use mode "mouse" for canvas or pointer games; use mode "html5" for browser-native drag/drop elements such as match-3 candy boards.',
     '- If the game says paused, resume, continue, start, or shows tutorial controls, follow that visible instruction before doing anything else.',
     '- On menus, prefer options that clearly enter gameplay: Play, Start, New Game, Single Player, Campaign, Level 1, Continue, Resume, or a default character/level choice.',
     '- Avoid Options, Settings, Credits, Help, Leaderboard, and Multiplayer unless they are the only visible path into gameplay.',

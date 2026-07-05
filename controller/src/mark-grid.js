@@ -1,6 +1,6 @@
 const DEFAULT_MARK_GRID = {
-  rows: 20,
-  cols: 20,
+  rows: 16,
+  cols: 16,
 };
 const DEFAULT_GRID_SAFE_SAMPLE_RATIO = 0.9;
 
@@ -44,7 +44,8 @@ function normalizeCellList(value, grid = DEFAULT_MARK_GRID, limit = 4) {
 
 function cellFromRowCol(value, grid = DEFAULT_MARK_GRID) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const { row, col } = value;
+  const row = value.overlay_row ?? value.row;
+  const col = value.overlay_col ?? value.col;
   if (typeof row !== 'number' || typeof col !== 'number') return null;
   if (!Number.isInteger(row) || !Number.isInteger(col)) return null;
   if (row < 0 || row >= grid.rows || col < 0 || col >= grid.cols) return null;
