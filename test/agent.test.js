@@ -10,6 +10,7 @@ const { normalizeSequence } = require('../agent/src/action-parser');
 const { actionsWithinDuration, failedActionAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
 const { chatCompletion, parseJsonResponse } = require('../agent/src/model-client');
 const { buildPlaytesterPrompt, compactHistory, sequenceSchemaGuide } = require('../agent/src/prompt');
+const { gridSafeSampleRatio, randomPointInCells } = require('../controller/src/mark-grid');
 const { normalizeStep } = require('../controller/src/step-normalizer');
 
 test('normalizes model sequences into controller steps', () => {
@@ -91,6 +92,20 @@ test('normalizes grid-cell model actions into concrete pointer events', () => {
 
   const step = normalizeStep({ actions: sequence.actions }, { viewport: { width: 800, height: 800 } }, 1);
   assert.equal(step.clicks.length, 11);
+});
+
+test('samples grid-cell points away from cell boundaries by default', () => {
+  const grid = { rows: 8, cols: 8 };
+  const viewport = { width: 800, height: 800 };
+  const lower = randomPointInCells([0], viewport, grid, () => 0);
+  const upper = randomPointInCells([0], viewport, grid, () => 0.999999);
+
+  assert.deepEqual(lower, { x: 5, y: 5, cells: [0] });
+  assert.deepEqual(upper, { x: 95, y: 95, cells: [0] });
+  assert.equal(gridSafeSampleRatio({}), 0.9);
+  assert.equal(gridSafeSampleRatio({ markGridSafeSampleRatio: 0.95 }), 0.95);
+  assert.equal(gridSafeSampleRatio({ gridSafeSampleRatio: 1 }), 1);
+  assert.equal(gridSafeSampleRatio({ gridSafeSampleRatio: 0 }), 0.9);
 });
 
 test('rejects model sequence fields outside the canonical schema', () => {
