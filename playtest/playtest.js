@@ -9,7 +9,6 @@ const DEFAULT_PLAYTEST_DURATION_MS = 150000;
 const DEFAULT_PROCESS_STOP_WAIT_MS = 5000;
 const DEFAULT_PROCESS_KILL_WAIT_MS = 5000;
 const DEFAULT_HTTP_TIMEOUT_MS = 60000;
-const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
 
 function defaultLog(event, fields = {}) {
   process.stdout.write(`${JSON.stringify({ ts: new Date().toISOString(), event, ...fields })}\n`);
@@ -158,54 +157,6 @@ function waitForHttp(url, timeoutMs) {
   });
 }
 
-async function probeViewport(url, options, log) {
-  const { chromium } = require('playwright');
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--enable-unsafe-swiftshader'] });
-  try {
-    const context = await browser.newContext({ viewport: DEFAULT_VIEWPORT });
-    const page = await context.newPage();
-    await page.goto(url, { waitUntil: 'load' });
-    await sleep(700);
-    const probe = await page.evaluate(() => {
-      const canvases = Array.from(document.querySelectorAll('canvas')).map((canvas, index) => {
-        const rect = canvas.getBoundingClientRect();
-        return {
-          index,
-          width: Math.round(rect.width),
-          height: Math.round(rect.height),
-        };
-      });
-      return {
-        viewport: { width: window.innerWidth, height: window.innerHeight },
-        canvases,
-      };
-    });
-    const largest = probe.canvases
-      .filter((c) => c.width > 0 && c.height > 0)
-      .sort((a, b) => b.width * b.height - a.width * a.height)[0];
-    const even = (v) => (Math.round(v) % 2 === 0 ? Math.round(v) : Math.round(v) + 1);
-    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-    let choice;
-    if (largest) {
-      const coversViewport = largest.width >= probe.viewport.width * 0.85 && largest.height >= probe.viewport.height * 0.85;
-      if (coversViewport) {
-        choice = { width: even(probe.viewport.width), height: even(probe.viewport.height) };
-      } else {
-        choice = {
-          width: even(clamp(largest.width + 16, 480, 1280)),
-          height: even(clamp(largest.height + 16, 360, 1000)),
-        };
-      }
-    } else {
-      choice = { width: even(probe.viewport.width), height: even(probe.viewport.height) };
-    }
-    log('viewport.probe', { choice, canvases: probe.canvases });
-    return choice;
-  } finally {
-    await browser.close();
-  }
-}
-
 function parseActionResponse(result, action) {
   let response;
   try {
@@ -241,10 +192,9 @@ async function runPlaytest(options) {
     httpTimeoutMs = DEFAULT_HTTP_TIMEOUT_MS,
     processStopWaitMs = DEFAULT_PROCESS_STOP_WAIT_MS,
     processKillWaitMs = DEFAULT_PROCESS_KILL_WAIT_MS,
-    viewport: viewportOverride,
+    viewport,
     startOverrides = {},
     env: envOverrides = {},
-    onGameReady,
     onInitialResponse,
   } = options || {};
 
@@ -252,6 +202,9 @@ async function runPlaytest(options) {
   if (!outDir) throw new Error('runPlaytest: outDir is required');
   if (!port) throw new Error('runPlaytest: port is required');
   if (!openRouterApiKey) throw new Error('runPlaytest: openRouterApiKey is required');
+  if (!viewport || !Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) || viewport.width <= 0 || viewport.height <= 0) {
+    throw new Error('runPlaytest: viewport {width,height} is required');
+  }
 
   const log = typeof onLog === 'function' ? onLog : defaultLog;
   const absoluteGameDir = path.resolve(gameDir);
@@ -312,13 +265,6 @@ async function runPlaytest(options) {
     const url = `http://127.0.0.1:${port}/`;
     await waitForHttp(url, httpTimeoutMs);
     log('game.ready', { url });
-
-    let viewport = viewportOverride;
-    if (typeof onGameReady === 'function') {
-      const hookResult = await onGameReady({ url, absoluteOutDir });
-      if (hookResult && hookResult.viewport) viewport = hookResult.viewport;
-    }
-    if (!viewport) viewport = await probeViewport(url, options, log);
 
     const start = {
       ...startOverrides,
