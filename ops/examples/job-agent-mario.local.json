@@ -11,7 +11,6 @@
   "playMode": "agent",
   "playtestDurationMs": 30000,
   "agentMinPlaytestMs": 15000,
-  "agentMaxActionMs": 5000,
   "viewport": { "width": 960, "height": 540 },
   "videoSize": { "width": 960, "height": 540 }
 }
