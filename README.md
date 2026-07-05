@@ -153,11 +153,11 @@ runwave '{
 }'
 ```
 
-Screenshots include a 24x24 red mark grid by default. Column labels are shown in
-the top and bottom margins, and row labels are shown in the left and right
-margins. Pointer actions may use row/column cells instead of exact pixels. Raw
-`x`/`y` coordinates are still supported, but they always refer to the inner
-browser viewport, not the extra label margins in marked screenshots.
+Screenshots include a 12x12 red mark grid by default. Each cell is labeled with
+a number in the center, starting at 0 in the top-left and increasing row-major
+to 143 in the bottom-right. Pointer actions may use these numbered cells instead
+of exact pixels. Raw `x`/`y` coordinates are still supported and refer to the
+browser viewport.
 
 Single grid-cell click:
 
@@ -166,7 +166,7 @@ runwave '{
   "action": "step",
   "action_name": "turn-003-click-start-cell",
   "actions": [
-    { "type": "click", "start": 100, "cell": { "row": 12, "col": 12 } }
+    { "type": "click", "start": 100, "cell": 78 }
   ]
 }'
 ```
@@ -178,7 +178,7 @@ runwave '{
   "action": "step",
   "action_name": "turn-003-multi-click",
   "actions": [
-    { "type": "multi_click", "start": 100, "cells": [{ "row": 12, "col": 12 }, { "row": 12, "col": 13 }], "count": 10 }
+    { "type": "multi_click", "start": 100, "cells": [78, 79], "count": 10 }
   ]
 }'
 ```
@@ -200,13 +200,13 @@ for browser-native draggable/drop elements.
 Drag endpoints can also use grid cells:
 
 ```json
-{ "type": "drag", "start": 100, "from": { "row": 12, "col": 12 }, "to": { "row": 12, "col": 13 }, "mode": "mouse" }
+{ "type": "drag", "start": 100, "from_cells": [78], "to_cells": [79], "mode": "mouse" }
 ```
 
 Move the cursor without clicking:
 
 ```json
-{ "action": "step", "action_name": "turn-005-hover", "actions": [{ "type": "cursor_move", "start": 100, "end": 150, "cell": { "row": 13, "col": 12 } }] }
+{ "action": "step", "action_name": "turn-005-hover", "actions": [{ "type": "cursor_move", "start": 100, "end": 150, "cell": 66 }] }
 ```
 
 Move the mouse without clicking for camera control:

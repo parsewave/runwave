@@ -8,7 +8,7 @@ const {
   viewportFromConfig,
 } = require('./mark-grid');
 
-const CELL_FIELDS = ['cells', 'grid_cells', 'gridCells', 'grid_ids', 'gridIds', 'cell', 'grid_id', 'row', 'col'];
+const CELL_FIELDS = ['cells', 'grid_cells', 'gridCells', 'grid_ids', 'gridIds', 'cell', 'grid_id'];
 const POINT_FIELDS = new Set(['x', 'y', ...CELL_FIELDS]);
 
 const ACTION_FIELDS = {
@@ -169,6 +169,7 @@ function normalizePoint(point, label, options) {
 
   const grid = markGridFromConfig(options.config || {});
   const viewport = options.viewport || viewportFromConfig(options.config || {});
+  const hasCellTarget = point && typeof point === 'object' && CELL_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(point, field));
   const cells = cellsFromObject(point, grid, 4);
   if (cells.length) {
     try {
@@ -177,6 +178,10 @@ function normalizePoint(point, label, options) {
       if (options.strict) throw new Error(`${label} ${error.message}`);
       return null;
     }
+  }
+  if (hasCellTarget) {
+    if (options.strict) throw new Error(`${label} requires valid integer grid cell id`);
+    return null;
   }
 
   if (!point || typeof point !== 'object') {
