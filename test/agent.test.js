@@ -169,6 +169,28 @@ test('rejects model sequence fields outside the canonical schema', () => {
   );
 });
 
+test('rejects model sequences that cannot produce gameplay actions', () => {
+  assert.throws(
+    () => normalizeSequence([], { viewport: { width: 800, height: 800 } }),
+    /model sequence must be a plain object/
+  );
+  assert.throws(
+    () => normalizeSequence({ summary: 'thinking only' }, { viewport: { width: 800, height: 800 } }),
+    /actions must contain at least one action/
+  );
+  assert.throws(
+    () => normalizeSequence({ summary: 'no action', actions: [] }, { viewport: { width: 800, height: 800 } }),
+    /actions must contain at least one action/
+  );
+
+  const stopOnly = normalizeSequence(
+    { summary: 'done', actions: [], should_stop: true },
+    { viewport: { width: 800, height: 800 } }
+  );
+  assert.equal(stopOnly.shouldStop, true);
+  assert.deepEqual(stopOnly.actions, []);
+});
+
 test('drops model actions with invalid short-action timing', () => {
   const sequence = normalizeSequence(
     {

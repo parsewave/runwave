@@ -24,13 +24,24 @@ function inferDurationMs(actions, fallback = DEFAULT_DURATION_MS) {
   return Math.max(MIN_DURATION_MS, latest || fallback);
 }
 
+function assertPlainSequence(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('model sequence must be a plain object');
+  }
+  return raw;
+}
+
 function normalizeSequence(raw, options = {}) {
   const viewport = options.viewport || null;
   const maxDurationMs = Number(options.maxDurationMs || MAX_DURATION_MS);
-  const data = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const data = assertPlainSequence(raw);
   assertAllowedFields(data, AGENT_SEQUENCE_FIELDS, 'sequence');
 
+  const shouldStop = Boolean(data.should_stop);
   const rawActions = asActionArray(data.actions);
+  if (!shouldStop && !rawActions.length) {
+    throw new Error('sequence actions must contain at least one action unless should_stop is true');
+  }
   const actions = normalizeActions(rawActions, maxDurationMs, {
     strict: false,
     viewport,
@@ -50,7 +61,7 @@ function normalizeSequence(raw, options = {}) {
   return {
     durationMs: inferDurationMs(actions, DEFAULT_DURATION_MS),
     actions,
-    shouldStop: Boolean(data.should_stop),
+    shouldStop,
     summary: String(data.summary || '').trim().slice(0, 500),
     previousSequenceOutcome: String(data.previous_sequence_outcome ?? '').trim().slice(0, 500),
     rationale: String(data.rationale || '').trim().slice(0, 1000),
