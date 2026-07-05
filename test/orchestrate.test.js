@@ -74,12 +74,12 @@ test('fleet jobs can enable VLM viewport preflight', () => {
   assert.equal(job.viewportPreflightAttempts, 2);
 });
 
-test('known SwiftShader-sensitive games require hardware WebGL and GPU launch args', () => {
+test('known SwiftShader-sensitive games require hardware WebGL launch args', () => {
   const args = parseArgs([
     'node',
     'ops/orchestrate-playtests.js',
-    '--gpu-inventory',
-    'gpu-inventory.json',
+    '--inventory',
+    'inventory.json',
     '--s3-uri',
     's3://example/runwave',
     '--games',

@@ -5,6 +5,11 @@ const { ensureDir, sleep } = require('./file-utils');
 
 const DEFAULT_STOP_WAIT_MS = 3000;
 const DEFAULT_START_PROBE_MS = 500;
+const DEFAULT_MUX_OFFSET_THRESHOLD_MS = 1;
+
+function monotonicMs() {
+  return Number(process.hrtime.bigint()) / 1e6;
+}
 
 function defaultAudioInputFormat(platform = process.platform) {
   if (platform === 'darwin') return 'avfoundation';
@@ -32,7 +37,22 @@ function ffmpegAudioArgs(config, audioPath, platform = process.platform) {
   ];
 }
 
-function ffmpegMuxArgs(config, videoPath, audioPath, outputPath) {
+function formatSeconds(ms) {
+  return (Math.abs(ms) / 1000).toFixed(6);
+}
+
+function ffmpegMuxArgs(config, videoPath, audioPath, outputPath, options = {}) {
+  const offsetMs = Number(options.audioOffsetMs ?? config.audioMuxOffsetMs ?? 0);
+  const thresholdMs = Number(config.audioMuxOffsetThresholdMs ?? DEFAULT_MUX_OFFSET_THRESHOLD_MS);
+  const audioInputArgs = [];
+  if (Number.isFinite(offsetMs) && Math.abs(offsetMs) >= thresholdMs) {
+    if (offsetMs > 0) {
+      audioInputArgs.push('-itsoffset', formatSeconds(offsetMs));
+    } else {
+      audioInputArgs.push('-ss', formatSeconds(offsetMs));
+    }
+  }
+
   return [
     '-hide_banner',
     '-loglevel',
@@ -40,6 +60,7 @@ function ffmpegMuxArgs(config, videoPath, audioPath, outputPath) {
     '-y',
     '-i',
     videoPath,
+    ...audioInputArgs,
     '-i',
     audioPath,
     '-map',
@@ -67,6 +88,8 @@ class AudioRecorder {
     this.audioDir = path.join(runDir, 'audio');
     this.audioPath = path.join(this.audioDir, config.audioFileName || 'runwave-audio.webm');
     this.combinedPath = null;
+    this.startedAtMs = null;
+    this.audioOffsetMs = null;
   }
 
   timeSync(event, fields, fn) {
@@ -89,9 +112,11 @@ class AudioRecorder {
     this.timeSync('audio.start.ensure_audio_dir', { dir: this.audioDir }, () => ensureDir(this.audioDir));
     const ffmpeg = this.config.ffmpegPath || process.env.RUNWAVE_FFMPEG || 'ffmpeg';
     const args = ffmpegAudioArgs(this.config, this.audioPath);
-    this.proc = this.timeSync('audio.start.spawn_ffmpeg', { ffmpeg, args }, () =>
-      spawn(ffmpeg, args, { stdio: ['pipe', 'ignore', 'pipe'] })
-    );
+    this.proc = this.timeSync('audio.start.spawn_ffmpeg', { ffmpeg, args }, () => {
+      const proc = spawn(ffmpeg, args, { stdio: ['pipe', 'ignore', 'pipe'] });
+      this.startedAtMs = monotonicMs();
+      return proc;
+    });
     this.proc.stderr.on('data', (chunk) => this.stderr.push(Buffer.from(chunk)));
     this.closed = new Promise((resolve) => {
       this.proc.on('error', (error) => {
@@ -158,12 +183,22 @@ class AudioRecorder {
     return fs.existsSync(this.audioPath) ? this.audioPath : null;
   }
 
+  setVideoStartedAt(videoStartedAtMs) {
+    if (!Number.isFinite(videoStartedAtMs) || !Number.isFinite(this.startedAtMs)) {
+      this.audioOffsetMs = null;
+      return;
+    }
+    this.audioOffsetMs = this.startedAtMs - videoStartedAtMs;
+  }
+
   async mux(videoPath, audioPath) {
     if (!videoPath || !audioPath) return null;
     this.combinedPath = path.join(path.dirname(videoPath), this.config.audioVideoFileName || '000-runwave-with-audio.webm');
     const ffmpeg = this.config.ffmpegPath || process.env.RUNWAVE_FFMPEG || 'ffmpeg';
-    const args = ffmpegMuxArgs(this.config, videoPath, audioPath, this.combinedPath);
-    await this.time('audio.mux.ffmpeg', { ffmpeg, args }, () =>
+    const args = ffmpegMuxArgs(this.config, videoPath, audioPath, this.combinedPath, {
+      audioOffsetMs: this.audioOffsetMs,
+    });
+    await this.time('audio.mux.ffmpeg', { ffmpeg, args, audioOffsetMs: this.audioOffsetMs }, () =>
       new Promise((resolve, reject) => {
         const stderr = [];
         const proc = spawn(ffmpeg, args, { stdio: ['ignore', 'ignore', 'pipe'] });

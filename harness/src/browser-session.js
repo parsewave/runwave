@@ -32,6 +32,10 @@ function chromiumArgs(config = {}, env = process.env) {
   return [...DEFAULT_CHROMIUM_ARGS, ...configured];
 }
 
+function monotonicMs() {
+  return Number(process.hrtime.bigint()) / 1e6;
+}
+
 class BrowserSession {
   constructor(config, paths, profiler = null) {
     this.config = config;
@@ -43,6 +47,7 @@ class BrowserSession {
     this.launchUrl = targetUrl(config);
     this.stateExpression = config.stateExpression || null;
     this.videoDir = null;
+    this.videoStartedAtMs = null;
     this.audioDir = null;
     this.audioRecorder = null;
     this.mousePosition = { x: 0, y: 0 };
@@ -100,10 +105,12 @@ class BrowserSession {
           : {}),
       })
     );
-    this.page = await this.time('browser.start.new_page', () => this.context.newPage());
     if (this.audioRecorder) {
       await this.time('browser.start.audio_recorder_start', () => this.audioRecorder.start());
     }
+    this.page = await this.time('browser.start.new_page', () => this.context.newPage());
+    if (recordVideo) this.videoStartedAtMs = monotonicMs();
+    if (this.audioRecorder) this.audioRecorder.setVideoStartedAt(this.videoStartedAtMs);
     this.timeSync('browser.start.attach_console_logger', () => this.page.on('console', (msg) => {
       fs.appendFileSync(path.join(this.paths.runDir, 'browser-console.log'), `${msg.type()} ${msg.text()}\n`);
     }));
@@ -297,6 +304,7 @@ class BrowserSession {
       rawVideo: audioVideoPath ? videoPath : undefined,
       audio: audioPath,
       audioVideo: audioVideoPath || undefined,
+      audioVideoOffsetMs: this.audioRecorder ? this.audioRecorder.audioOffsetMs : undefined,
     };
   }
 }

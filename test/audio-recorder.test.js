@@ -66,3 +66,39 @@ test('ffmpeg mux args copy video and add opus audio', () => {
     '/tmp/combined.webm',
   ]);
 });
+
+test('ffmpeg mux args delay audio that starts after video', () => {
+  const args = ffmpegMuxArgs(
+    { audioCodec: 'libopus' },
+    '/tmp/raw.webm',
+    '/tmp/audio.webm',
+    '/tmp/combined.webm',
+    { audioOffsetMs: 735 }
+  );
+
+  assert.deepEqual(args.slice(6, 11), [
+    '-itsoffset',
+    '0.735000',
+    '-i',
+    '/tmp/audio.webm',
+    '-map',
+  ]);
+});
+
+test('ffmpeg mux args trim audio that starts before video', () => {
+  const args = ffmpegMuxArgs(
+    { audioCodec: 'libopus' },
+    '/tmp/raw.webm',
+    '/tmp/audio.webm',
+    '/tmp/combined.webm',
+    { audioOffsetMs: -512 }
+  );
+
+  assert.deepEqual(args.slice(6, 11), [
+    '-ss',
+    '0.512000',
+    '-i',
+    '/tmp/audio.webm',
+    '-map',
+  ]);
+});

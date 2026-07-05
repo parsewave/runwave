@@ -135,6 +135,7 @@ async function writeStopResponse(runtime, input) {
     if (recording.rawVideo) payload.rawVideo = recording.rawVideo;
     if (recording.audio) payload.audio = recording.audio;
     if (recording.audioVideo) payload.audioVideo = recording.audioVideo;
+    if (recording.audioVideoOffsetMs !== undefined) payload.audioVideoOffsetMs = recording.audioVideoOffsetMs;
   }
   if (screenshot) payload.screenshot = screenshot;
   const response = runtime.profiler.timeSync('action.stop.write_response', { action_name: input.action_name }, () =>
