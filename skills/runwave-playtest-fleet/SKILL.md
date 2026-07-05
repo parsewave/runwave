@@ -139,8 +139,6 @@ node ops/orchestrate-playtests.js \
   --runwave-ref runwave-agentic-player \
   --playtest-duration-ms 120000 \
   --agent-min-playtest-ms 110000 \
-  --vlm-viewport-preflight \
-  --viewport-preflight-attempts 2 \
   --ssh-key "$RUNWAVE_SSH_KEY" \
   --agent \
   --concurrency-per-server 3
@@ -159,11 +157,6 @@ s3://pw-cruft/playtests/<run-id>/<game>/attempt-001/
 For agent jobs, if `--agent-min-playtest-ms` is omitted, the orchestrator sets
 it to `--playtest-duration-ms - 10000`. A 120 second run therefore requires
 about 110 seconds of agent play before early stop is allowed.
-
-Use `--vlm-viewport-preflight --viewport-preflight-attempts 2` when visual
-framing matters. This asks the VLM to choose among deterministic viewport
-candidates before the agent starts playing, with one retry before deterministic
-fallback.
 
 ## Local Fallback
 

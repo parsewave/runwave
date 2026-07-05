@@ -104,8 +104,6 @@ node ops/orchestrate-playtests.js \
   --play-mode agent \
   --playtest-duration-ms 120000 \
   --agent-min-playtest-ms 110000 \
-  --vlm-viewport-preflight \
-  --viewport-preflight-attempts 2 \
   --ssh-key "$RUNWAVE_SSH_KEY" \
   --concurrency-per-server 3
 ```
@@ -121,11 +119,6 @@ runwave drives browser targets.
 For agent jobs, if `--agent-min-playtest-ms` is not provided, the orchestrator
 sets it to `--playtest-duration-ms - 10000`. A 120 second run therefore requires
 about 110 seconds of play before the agent is allowed to stop.
-
-Add `--vlm-viewport-preflight` to let the model choose among viewport candidate
-screenshots before gameplay starts. The generated job sets
-`vlmViewportPreflight: true`; `--viewport-preflight-attempts 2` gives the model
-one retry before falling back to the deterministic viewport probe.
 
 ## Agent Mode
 

@@ -92,7 +92,6 @@ function dockerEnvNames(env = process.env) {
     /^RUNWAVE_SKIP_PLAYWRIGHT_INSTALL$/,
     /^RUNWAVE_VERBOSE$/,
     /^RUNWAVE_VIDEO_/,
-    /^RUNWAVE_VLM_VIEWPORT_PREFLIGHT$/,
     /^RUNWAVE_XVFB_/,
     /^RUNWAVE_PROCESS_(STOP|KILL)_WAIT_MS$/,
     /^HTTP_PROXY$/i,

@@ -40,8 +40,6 @@ function parseArgs(argv) {
     agentMinPlaytestMs: null,
     markGridRows: null,
     markGridCols: null,
-    vlmViewportPreflight: false,
-    viewportPreflightAttempts: null,
     playMode: 'scripted',
     skipPlaywrightInstall: false,
     hardwareWebglGames: new Set(DEFAULT_HARDWARE_WEBGL_GAMES),
@@ -69,8 +67,6 @@ function parseArgs(argv) {
     else if (arg === '--agent-min-playtest-ms') args.agentMinPlaytestMs = Number(next());
     else if (arg === '--mark-grid-rows') args.markGridRows = Number(next());
     else if (arg === '--mark-grid-cols') args.markGridCols = Number(next());
-    else if (arg === '--vlm-viewport-preflight') args.vlmViewportPreflight = true;
-    else if (arg === '--viewport-preflight-attempts') args.viewportPreflightAttempts = Number(next());
     else if (arg === '--play-mode') args.playMode = next();
     else if (arg === '--agent') args.playMode = 'agent';
     else if (arg === '--skip-playwright-install') args.skipPlaywrightInstall = true;
@@ -105,8 +101,6 @@ function usage() {
     '  --agent-min-playtest-ms N',
     '  --mark-grid-rows N',
     '  --mark-grid-cols N',
-    '  --vlm-viewport-preflight',
-    '  --viewport-preflight-attempts N',
     '  --play-mode scripted|agent',
     '  --agent',
     '  --hardware-webgl-games game-a,game-b',
@@ -288,10 +282,6 @@ function buildJobs(args, games) {
     if (args.playMode === 'agent') job.agentMinPlaytestMs = agentMinPlaytestMs(args);
     if (Number.isFinite(args.markGridRows)) job.markGridRows = Math.max(1, Math.round(args.markGridRows));
     if (Number.isFinite(args.markGridCols)) job.markGridCols = Math.max(1, Math.round(args.markGridCols));
-    if (args.vlmViewportPreflight) job.vlmViewportPreflight = true;
-    if (Number.isFinite(args.viewportPreflightAttempts)) {
-      job.viewportPreflightAttempts = Math.max(1, Math.round(args.viewportPreflightAttempts));
-    }
     jobs.push(job);
   };
 
