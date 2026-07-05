@@ -175,6 +175,14 @@ test('rejects model sequences that cannot produce gameplay actions', () => {
     /model sequence must be a plain object/
   );
   assert.throws(
+    () => normalizeSequence({ summary: 'bad stop', actions: [], should_stop: 'false' }, { viewport: { width: 800, height: 800 } }),
+    /should_stop must be a boolean/
+  );
+  assert.throws(
+    () => normalizeSequence({ summary: 'bad stop', actions: [], should_stop: 1 }, { viewport: { width: 800, height: 800 } }),
+    /should_stop must be a boolean/
+  );
+  assert.throws(
     () => normalizeSequence({ summary: 'thinking only' }, { viewport: { width: 800, height: 800 } }),
     /actions must contain at least one action/
   );

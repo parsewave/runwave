@@ -31,13 +31,21 @@ function assertPlainSequence(raw) {
   return raw;
 }
 
+function normalizeShouldStop(data) {
+  if (!Object.prototype.hasOwnProperty.call(data, 'should_stop')) return false;
+  if (typeof data.should_stop !== 'boolean') {
+    throw new Error('sequence should_stop must be a boolean');
+  }
+  return data.should_stop === true;
+}
+
 function normalizeSequence(raw, options = {}) {
   const viewport = options.viewport || null;
   const maxDurationMs = Number(options.maxDurationMs || MAX_DURATION_MS);
   const data = assertPlainSequence(raw);
   assertAllowedFields(data, AGENT_SEQUENCE_FIELDS, 'sequence');
 
-  const shouldStop = Boolean(data.should_stop);
+  const shouldStop = normalizeShouldStop(data);
   const rawActions = asActionArray(data.actions);
   if (!shouldStop && !rawActions.length) {
     throw new Error('sequence actions must contain at least one action unless should_stop is true');
