@@ -199,7 +199,7 @@ function buildAgentJob({ playtestDurationMs, minPlaytestMs, viewport, playtestIn
   };
 }
 
-function harnessArgs(runwaveBin, action, verbose) {
+function controllerArgs(runwaveBin, action, verbose) {
   const args = [runwaveBin];
   if (verbose) args.push('-v');
   args.push(JSON.stringify(action));
@@ -275,12 +275,12 @@ async function runPlaytest(options) {
   fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2));
 
   let gameProcess = null;
-  let harnessStarted = false;
+  let controllerStarted = false;
   let failure = null;
 
-  const runHarnessAction = async (action) => {
+  const runControllerAction = async (action) => {
     const payload = { ...action, session_id: action.session_id || runwaveSessionId };
-    const result = await run('node', harnessArgs(runwaveBin, payload, verbose), { cwd: absoluteOutDir, env }, log);
+    const result = await run('node', controllerArgs(runwaveBin, payload, verbose), { cwd: absoluteOutDir, env }, log);
     return parseActionResponse(result, payload);
   };
 
@@ -313,8 +313,8 @@ async function runPlaytest(options) {
       sessionWaitMs: 120000,
     };
 
-    const initialResponse = await runHarnessAction(start);
-    harnessStarted = true;
+    const initialResponse = await runControllerAction(start);
+    controllerStarted = true;
 
     if (typeof onInitialResponse === 'function') {
       await onInitialResponse(initialResponse);
@@ -331,7 +331,7 @@ async function runPlaytest(options) {
     const playtest = await runAgenticPlaytest({
       job,
       initialResponse,
-      runAction: runHarnessAction,
+      runAction: runControllerAction,
       outputDir: path.join(absoluteOutDir, 'agent'),
       log,
     });
@@ -352,16 +352,16 @@ async function runPlaytest(options) {
     summary.stack = error.stack;
     log('playtest.error', { error: error.message });
   } finally {
-    if (harnessStarted) {
+    if (controllerStarted) {
       try {
-        const stopResponse = await runHarnessAction({ action: 'stop', action_name: 'stop', session_id: runwaveSessionId });
+        const stopResponse = await runControllerAction({ action: 'stop', action_name: 'stop', session_id: runwaveSessionId });
         summary.recording = validateRecordingArtifact(stopResponse);
       } catch (error) {
         if (!failure) failure = error;
         summary.status = 'failed';
         summary.error = summary.error || error.message;
         summary.recordingError = error.message;
-        log('harness.stop.error', { error: error.message });
+        log('controller.stop.error', { error: error.message });
       }
     }
     if (gameProcess) {

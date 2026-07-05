@@ -24,7 +24,7 @@ fallback. Any run that sets `record: true` requires all of:
   `PULSE_SINK` before starting Chromium; pass `audioSource: "runwave_sink.monitor"`
   (or `RUNWAVE_AUDIO_SOURCE`) to the start action.
 
-The harness checks these prerequisites before spawning gstreamer and fails
+The controller checks these prerequisites before spawning gstreamer and fails
 fast with a message naming the missing piece.
 
 Non-recording usage (screenshots, state, keyboard/mouse) has no such
