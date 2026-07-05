@@ -6,9 +6,9 @@ const { BrowserSession } = require('./browser-session');
 const { OutputWriter } = require('./output-writer');
 const { handleAction } = require('./action-handler');
 const { readRequestJson, writeResponse } = require('./http-json');
-const { defaultOutputRoot, defaultRecordingRoot, sessionFile, workspaceRoot } = require('./paths');
+const { defaultOutputRoot, defaultRecordingRoot, sessionFileForId, workspaceRoot } = require('./paths');
 const { createProfiler } = require('./profiler');
-const { assertActionName, targetUrl } = require('./protocol');
+const { assertActionName, assertSessionId, sessionId, startSessionConfig, targetUrl } = require('./protocol');
 const { ensureDir, timestamp, writeJson } = require('./file-utils');
 
 function buildPaths(config) {
@@ -30,6 +30,9 @@ async function main() {
   profiler.mark('daemon.start', { action: config.action, action_name: config.action_name });
 
   profiler.timeSync('daemon.assert_action_name', () => assertActionName(config));
+  profiler.timeSync('daemon.assert_session_id', () => assertSessionId(config));
+  const id = sessionId(config);
+  const sessionFile = sessionFileForId(id);
   profiler.timeSync('daemon.target_url', () => targetUrl(config));
   profiler.timeSync('daemon.ensure_run_dir', { dir: paths.runDir }, () => ensureDir(paths.runDir));
   profiler.timeSync('daemon.ensure_output_root', { dir: paths.outputRoot }, () => ensureDir(paths.outputRoot));
@@ -48,6 +51,8 @@ async function main() {
     output,
     browser,
     profiler,
+    sessionId: id,
+    sessionFile,
     stepIndex: 0,
   };
 
@@ -88,6 +93,7 @@ async function main() {
       ok: true,
       action: 'start',
       action_name: config.action_name,
+      session_id: id,
       sessionDir: paths.runDir,
       outputRoot: paths.outputRoot,
       videoDir: browser.videoDir,
@@ -112,7 +118,9 @@ async function main() {
       videoDir: browser.videoDir,
       audioDir: browser.audioDir,
       verboseLogPath: paths.verboseLogPath,
+      sessionId: id,
       launchUrl: browser.launchUrl,
+      startConfig: startSessionConfig(config),
       initialOutputDir: outputDir,
       initialResponsePath: startResponse.responsePath,
       startedAt: new Date().toISOString(),

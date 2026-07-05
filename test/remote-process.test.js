@@ -7,7 +7,13 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { loadPlaytestInstructions, signalLongProcess, stopLongProcess } = require('../ops/remote/run-playtest');
+const {
+  dockerRunArgs,
+  loadPlaytestInstructions,
+  shouldRunJobInContainer,
+  signalLongProcess,
+  stopLongProcess,
+} = require('../ops/remote/run-playtest');
 
 function fakeChild(pid = 12345) {
   const child = new EventEmitter();
@@ -110,4 +116,82 @@ test('rejects missing or mis-cased playtest.md instructions', () => {
     () => loadPlaytestInstructions(casedDir, 'cased-game'),
     /game has no playtest\.md: cased-game/
   );
+});
+
+test('linux playtest jobs run in a container by default unless disabled or already inside one', () => {
+  assert.equal(shouldRunJobInContainer({}, {}, 'linux'), true);
+  assert.equal(shouldRunJobInContainer({}, { RUNWAVE_IN_CONTAINER: '1' }, 'linux'), false);
+  assert.equal(shouldRunJobInContainer({}, { RUNWAVE_PLAYTEST_CONTAINER: '0' }, 'linux'), false);
+  assert.equal(shouldRunJobInContainer({ containerized: false }, {}, 'linux'), false);
+  assert.equal(shouldRunJobInContainer({}, {}, 'darwin'), false);
+});
+
+test('docker runner isolates games and job workspaces without exposing secret values in args', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-docker-args-'));
+  const gamesRoot = path.join(root, 'games');
+  const jobsRoot = path.join(root, 'jobs');
+  const inputRoot = path.join(root, 'input');
+  const script = path.join(root, 'run-playtest.js');
+  const envFile = path.join(root, 'runner.env');
+  fs.mkdirSync(gamesRoot);
+  fs.mkdirSync(jobsRoot);
+  fs.mkdirSync(inputRoot);
+  fs.writeFileSync(path.join(inputRoot, 'job.json'), '{}');
+  fs.writeFileSync(script, '#!/usr/bin/env node\n');
+  fs.writeFileSync(envFile, "export AWS_SECRET_ACCESS_KEY='hidden'\n");
+
+  const args = dockerRunArgs(
+    { job: path.join(inputRoot, 'job.json') },
+    { jobId: 'run-123-mario-attempt-001' },
+    { gamesRoot, jobsRoot },
+    {
+      env: {
+        AWS_ACCESS_KEY_ID: 'id-value',
+        AWS_SECRET_ACCESS_KEY: 'secret-value',
+        RUNWAVE_PLAYTEST_IMAGE: 'custom-runner:test',
+      },
+      scriptPath: script,
+      envFile,
+    }
+  );
+
+  assert.equal(args[0], 'run');
+  assert.ok(args.includes('--rm'));
+  assert.ok(args.includes('--init'));
+  assert.ok(args.includes('--ipc=host'));
+  assert.ok(args.includes('--shm-size=1g'));
+  assert.ok(args.includes('custom-runner:test'));
+  assert.ok(args.includes('/runwave/job/job.json'));
+  assert.ok(args.includes(`${gamesRoot}:/opt/runwave/games:ro`));
+  assert.ok(args.includes(`${jobsRoot}:/var/lib/runwave/jobs`));
+  assert.ok(args.includes(`${inputRoot}:/runwave/job:ro`));
+  assert.ok(args.includes(`${script}:/opt/runwave/bin/run-playtest.js:ro`));
+  assert.ok(args.includes(`${envFile}:/etc/runwave-runner.env:ro`));
+  assert.ok(args.includes('RUNWAVE_IN_CONTAINER=1'));
+  assert.ok(args.includes('AWS_ACCESS_KEY_ID'));
+  assert.ok(args.includes('AWS_SECRET_ACCESS_KEY'));
+  assert.equal(args.includes('id-value'), false);
+  assert.equal(args.includes('secret-value'), false);
+});
+
+test('docker runner mounts absolute local runwave repos into the container', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-docker-repo-'));
+  const gamesRoot = path.join(root, 'games');
+  const jobsRoot = path.join(root, 'jobs');
+  const inputRoot = path.join(root, 'input');
+  const repoRoot = path.join(root, 'runwave-source');
+  fs.mkdirSync(gamesRoot);
+  fs.mkdirSync(jobsRoot);
+  fs.mkdirSync(inputRoot);
+  fs.mkdirSync(repoRoot);
+  fs.writeFileSync(path.join(inputRoot, 'job.json'), '{}');
+
+  const args = dockerRunArgs(
+    { job: path.join(inputRoot, 'job.json') },
+    { jobId: 'run-123-local-repo-attempt-001', runwaveRepo: repoRoot },
+    { gamesRoot, jobsRoot },
+    { env: {}, scriptPath: path.join(root, 'run-playtest.js'), envFile: path.join(root, 'missing.env') }
+  );
+
+  assert.ok(args.includes(`${repoRoot}:${repoRoot}:ro`));
 });

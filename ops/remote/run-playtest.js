@@ -56,6 +56,108 @@ function runnerPaths(env = process.env) {
   };
 }
 
+function shouldRunJobInContainer(job = {}, env = process.env, platform = process.platform) {
+  if (platform !== 'linux') return false;
+  if (env.RUNWAVE_IN_CONTAINER === '1') return false;
+  if (env.RUNWAVE_PLAYTEST_CONTAINER === '0') return false;
+  if (job.containerized === false || job.runInContainer === false) return false;
+  return true;
+}
+
+function dockerEnvNames(env = process.env) {
+  const allowed = [
+    /^AWS_/,
+    /^OPENAI_/,
+    /^ANTHROPIC_/,
+    /^OPENROUTER_/,
+    /^PARSEWAVE_/,
+    /^GITHUB_/,
+    /^GH_TOKEN$/,
+    /^RUNWAVE_AGENT_/,
+    /^RUNWAVE_AUDIO_/,
+    /^RUNWAVE_CHROMIUM_ARGS(_MODE)?$/,
+    /^RUNWAVE_FFMPEG$/,
+    /^RUNWAVE_SKIP_PLAYWRIGHT_INSTALL$/,
+    /^RUNWAVE_VERBOSE$/,
+    /^RUNWAVE_VLM_VIEWPORT_PREFLIGHT$/,
+    /^RUNWAVE_XVFB_/,
+    /^RUNWAVE_PROCESS_(STOP|KILL)_WAIT_MS$/,
+    /^HTTP_PROXY$/i,
+    /^HTTPS_PROXY$/i,
+    /^NO_PROXY$/i,
+    /^ALL_PROXY$/i,
+  ];
+  return Object.keys(env)
+    .filter((name) => allowed.some((pattern) => pattern.test(name)))
+    .sort();
+}
+
+function dockerMountArgs(mounts) {
+  const args = [];
+  for (const mount of mounts) {
+    args.push('-v', `${mount.source}:${mount.target}${mount.readonly ? ':ro' : ''}`);
+  }
+  return args;
+}
+
+function dockerRunArgs(args, job, runner, options = {}) {
+  const jobPath = path.resolve(args.job);
+  const jobDir = path.dirname(jobPath);
+  const jobBase = path.basename(jobPath);
+  const image = job.containerImage || options.env?.RUNWAVE_PLAYTEST_IMAGE || 'runwave-playtest-runner:latest';
+  const jobsRoot = path.resolve(runner.jobsRoot);
+  const gamesRoot = path.resolve(runner.gamesRoot);
+  const scriptPath = path.resolve(options.scriptPath || __filename);
+  const envFile = options.envFile || '/etc/runwave-runner.env';
+  const containerName = `runwave-${safeName(job.jobId || `${job.game || 'job'}-${Date.now()}`)}`;
+  const mounts = [
+    { source: gamesRoot, target: '/opt/runwave/games', readonly: true },
+    { source: jobsRoot, target: '/var/lib/runwave/jobs' },
+    { source: jobDir, target: '/runwave/job', readonly: true },
+    { source: scriptPath, target: '/opt/runwave/bin/run-playtest.js', readonly: true },
+  ];
+  if (job.runwaveRepo && path.isAbsolute(String(job.runwaveRepo))) {
+    const runwaveRepo = path.resolve(String(job.runwaveRepo));
+    mounts.push({ source: runwaveRepo, target: runwaveRepo, readonly: true });
+  }
+  if (fs.existsSync(envFile)) {
+    mounts.push({ source: envFile, target: '/etc/runwave-runner.env', readonly: true });
+  }
+
+  const dockerArgs = [
+    'run',
+    '--rm',
+    '--init',
+    '--ipc=host',
+    '--shm-size=1g',
+    '--name',
+    containerName,
+    ...dockerMountArgs(mounts),
+    '-e',
+    'RUNWAVE_IN_CONTAINER=1',
+    '-e',
+    'RUNWAVE_GAMES_ROOT=/opt/runwave/games',
+    '-e',
+    'RUNWAVE_JOBS_ROOT=/var/lib/runwave/jobs',
+  ];
+  if (fs.existsSync('/dev/dri')) {
+    dockerArgs.push('--device', '/dev/dri');
+  }
+  for (const name of dockerEnvNames(options.env || process.env)) {
+    dockerArgs.push('-e', name);
+  }
+  dockerArgs.push(image, '--job', `/runwave/job/${jobBase}`);
+  return dockerArgs;
+}
+
+async function runJobInContainer(args, job, runner, env = process.env) {
+  if (!fs.existsSync(runner.gamesRoot)) {
+    throw new Error(`games root does not exist for container mount: ${runner.gamesRoot}`);
+  }
+  mkdirp(runner.jobsRoot);
+  await run('docker', dockerRunArgs(args, job, runner, { env }), { env });
+}
+
 function loadPlaytestInstructions(gameDir, game) {
   const entries = fs.readdirSync(gameDir, { withFileTypes: true });
   const playtestEntry = entries.find((entry) => entry.isFile() && entry.name === 'playtest.md');
@@ -836,8 +938,12 @@ function runwaveCliArgs(base, action, job) {
 }
 
 async function runRunwaveAction(base, dirs, env, job, action) {
-  const result = await run(base[0], runwaveCliArgs(base, action, job), { cwd: dirs.workspace, env });
-  return parseActionResponse(result, action);
+  const payload = {
+    ...action,
+    session_id: action.session_id || action.sessionId || job.runwaveSessionId,
+  };
+  const result = await run(base[0], runwaveCliArgs(base, payload, job), { cwd: dirs.workspace, env });
+  return parseActionResponse(result, payload);
 }
 
 function useAgentMode(job) {
@@ -861,8 +967,9 @@ async function runRunwave(job, dirs, url, runnerEnv = process.env) {
   let env = {
     ...runnerEnv,
     RUNWAVE_WORKSPACE: dirs.workspace,
-    RUNWAVE_SESSION_FILE: path.join(dirs.workspace, '.runwave-session.json'),
+    RUNWAVE_SESSION_DIR: path.join(dirs.workspace, '.runwave-sessions'),
   };
+  job.runwaveSessionId = job.runwaveSessionId || job.sessionId || job.jobId || `${job.game || 'runwave'}-${Date.now()}`;
   const audioCapture = await prepareAudioCaptureEnv(env, job);
   env = audioCapture.env;
   let xvfb = null;
@@ -876,6 +983,7 @@ async function runRunwave(job, dirs, url, runnerEnv = process.env) {
   const start = {
     action: 'start',
     action_name: 'start',
+    session_id: job.runwaveSessionId,
     url,
     record: true,
     recordAudio: audioCapture.recordAudio,
@@ -914,7 +1022,7 @@ async function runRunwave(job, dirs, url, runnerEnv = process.env) {
     }
   } finally {
     if (initialResponse) {
-      await runAction({ action: 'stop', action_name: 'stop' }).catch((error) => {
+      await runAction({ action: 'stop', action_name: 'stop', session_id: job.runwaveSessionId }).catch((error) => {
         log('runwave.stop.error', { error: error.message });
       });
     }
@@ -950,6 +1058,11 @@ async function main() {
   Object.assign(process.env, envFile);
   const runnerEnv = { ...process.env, ...envFile };
   const runner = runnerPaths(runnerEnv);
+  if (shouldRunJobInContainer(job, runnerEnv)) {
+    await runJobInContainer(args, job, runner, runnerEnv);
+    return;
+  }
+
   const jobId = safeName(job.jobId || `${job.game}-attempt-${job.attempt || 1}-${Date.now()}`);
   const port = Number(job.port || 8800 + Math.floor(Math.random() * 800));
   const root = path.join(runner.jobsRoot, jobId);
@@ -1080,9 +1193,11 @@ module.exports = {
   assertHardwareWebgl,
   chooseViewportFromProbe,
   chromiumArgs,
+  dockerRunArgs,
   isSwiftShaderWebgl,
   loadPlaytestInstructions,
   normalizeVlmViewportChoice,
+  shouldRunJobInContainer,
   signalLongProcess,
   stopLongProcess,
   viewportCandidatesFromProbe,

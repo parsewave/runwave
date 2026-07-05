@@ -51,13 +51,14 @@ Relative `file`, `outputRoot`, and `outDir` paths resolve from:
 Useful environment variables:
 
 - `RUNWAVE_WORKSPACE`: base directory for relative paths.
-- `RUNWAVE_SESSION_FILE`: active session JSON path. Defaults to
-  `<workspace>/.runwave-session.json`.
+- `RUNWAVE_SESSION_DIR`: directory for session JSON files. Defaults to
+  `<workspace>/.runwave-sessions`.
 - `RUNWAVE_SESSION_WAIT_MS`: startup wait for the daemon session file.
   Defaults to `60000`.
 
-Each operation must include `action_name`. By default, operation artifacts are
-written under:
+Each browser operation must include `action_name` and `session_id`. Use the same
+`session_id` for `start`, subsequent actions, and `stop`. By default, operation
+artifacts are written under:
 
 ```text
 state/output/<action_name>/
@@ -71,6 +72,7 @@ Start from a local file:
 runwave '{
   "action": "start",
   "action_name": "run-start",
+  "session_id": "playtest-001",
   "file": "game/index.html",
   "record": true,
   "viewport": { "width": 1024, "height": 620 },
@@ -89,6 +91,7 @@ Start from a URL:
 runwave '{
   "action": "start",
   "action_name": "run-start",
+  "session_id": "playtest-001",
   "url": "http://localhost:3000",
   "record": true
 }'
@@ -97,6 +100,8 @@ runwave '{
 Useful `start` options:
 
 - `url` or `file`: required target.
+- `session_id`: required session identifier. Reuse it for all actions targeting
+  the same browser session.
 - `record`: enable Playwright WebM recording.
 - `recordAudio`: enable ffmpeg audio capture and mux it into the final WebM.
   This implies video recording. On Linux the default input is PulseAudio
@@ -117,13 +122,13 @@ Useful `start` options:
 Inspect state:
 
 ```sh
-runwave '{"action":"state","action_name":"turn-001-state"}'
+runwave '{"action":"state","action_name":"turn-001-state","session_id":"playtest-001"}'
 ```
 
 Capture a screenshot:
 
 ```sh
-runwave '{"action":"screenshot","action_name":"turn-001-screen","name":"screen"}'
+runwave '{"action":"screenshot","action_name":"turn-001-screen","session_id":"playtest-001","name":"screen"}'
 ```
 
 Execute timed keyboard controls:
@@ -132,6 +137,7 @@ Execute timed keyboard controls:
 runwave '{
   "action": "step",
   "action_name": "turn-002-jump-right",
+  "session_id": "playtest-001",
   "actions": [
     { "type": "key", "start": 0, "end": 900, "key": "right" },
     { "type": "key", "start": 150, "end": 230, "key": "jump" }
@@ -150,6 +156,7 @@ Click:
 runwave '{
   "action": "step",
   "action_name": "turn-003-click-start",
+  "session_id": "playtest-001",
   "actions": [
     { "type": "click", "start": 100, "end": 500, "x": 512, "y": 310 }
   ]
@@ -166,6 +173,7 @@ Single grid-cell click:
 runwave '{
   "action": "step",
   "action_name": "turn-003-click-start-cell",
+  "session_id": "playtest-001",
   "actions": [
     { "type": "click", "start": 100, "end": 500, "cells": [27] }
   ]
@@ -178,6 +186,7 @@ Multi-click sends quick clicks at random points inside the selected cells:
 runwave '{
   "action": "step",
   "action_name": "turn-003-multi-click",
+  "session_id": "playtest-001",
   "actions": [
     { "type": "multi_click", "start": 100, "cells": [27, 28], "count": 10 }
   ]
@@ -190,6 +199,7 @@ Drag:
 runwave '{
   "action": "step",
   "action_name": "turn-004-drag",
+  "session_id": "playtest-001",
   "actions": [
     { "type": "drag", "start": 100, "end": 700, "from": { "x": 420, "y": 300 }, "to": { "x": 500, "y": 300 }, "mode": "mouse", "steps": 12 }
   ]
@@ -207,7 +217,7 @@ Drag endpoints can also use grid cells:
 Move the cursor without clicking:
 
 ```json
-{ "action": "step", "action_name": "turn-005-hover", "actions": [{ "type": "cursor_move", "start": 100, "end": 500, "cells": [27] }] }
+{ "action": "step", "action_name": "turn-005-hover", "session_id": "playtest-001", "actions": [{ "type": "cursor_move", "start": 100, "end": 500, "cells": [27] }] }
 ```
 
 Move the mouse without clicking for camera control:
@@ -216,6 +226,7 @@ Move the mouse without clicking for camera control:
 runwave '{
   "action": "step",
   "action_name": "turn-005-look-around",
+  "session_id": "playtest-001",
   "actions": [
     { "type": "view_move", "start": 200, "end": 900, "dx": 260, "dy": -40, "steps": 16 }
   ]
@@ -228,13 +239,19 @@ negative `dx` moves left, positive `dy` moves down, and negative `dy` moves up.
 Navigate or reset:
 
 ```sh
-runwave '{"action":"reset","action_name":"reset-001"}'
+runwave '{"action":"reset","action_name":"reset-001","session_id":"playtest-001"}'
 ```
 
 Stop and finalize the recording:
 
 ```sh
-runwave '{"action":"stop","action_name":"run-stop"}'
+runwave '{"action":"stop","action_name":"run-stop","session_id":"playtest-001"}'
+```
+
+List known sessions:
+
+```sh
+runwave '{"action":"sessions"}'
 ```
 
 When `recordAudio` is enabled, `stop` returns `video` pointing at the muxed
@@ -277,5 +294,5 @@ Each turn writes:
   `video/000-runwave-with-audio.webm` is the combined recording.
 - `audio/*.webm`: raw captured audio when `recordAudio` is enabled.
 
-The active session is tracked in `.runwave-session.json` by default and
-is removed by `stop`.
+Active sessions are tracked as JSON files in `.runwave-sessions/` by default.
+The matching session file is removed by `stop`.

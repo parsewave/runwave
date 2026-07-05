@@ -4,26 +4,10 @@ const { chromium } = require('playwright');
 const { AudioRecorder } = require('./audio-recorder');
 const { ensureDir, safeName, sleep, timestamp } = require('./file-utils');
 const { drawGridOnScreenshot } = require('./grid-overlay');
-const { targetUrl } = require('./protocol');
+const { parseArgList, targetUrl } = require('./protocol');
 const { readPageState } = require('./state-reader');
 
 const DEFAULT_CHROMIUM_ARGS = ['--no-sandbox', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'];
-
-function parseArgList(value) {
-  if (!value) return [];
-  if (Array.isArray(value)) return value.map(String).filter(Boolean);
-  const text = String(value).trim();
-  if (!text) return [];
-  if (text.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(text);
-      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
-    } catch {
-      // Fall through to whitespace parsing.
-    }
-  }
-  return text.split(/\s+/).filter(Boolean);
-}
 
 function chromiumArgs(config = {}, env = process.env) {
   const configured = parseArgList(config.chromiumArgs ?? env.RUNWAVE_CHROMIUM_ARGS);

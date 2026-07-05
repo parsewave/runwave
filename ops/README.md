@@ -11,10 +11,10 @@ running many browser-game playtests across Hetzner servers.
 - Games: synced from `s3://pw-cruft/games` to every server at
   `/opt/runwave/games`.
 - Runner: installed at `/opt/runwave/bin/run-playtest.js`.
-- Per playtest: clone the requested runwave repo/ref, install dependencies, run
-  a browser playtest in an isolated workspace for 2 minutes by default, capture
-  video plus browser audio on Linux workers, then upload the full workspace to
-  S3.
+- Per playtest: start a dedicated Docker container, clone the requested runwave
+  repo/ref inside it, install dependencies, run a browser playtest in an
+  isolated workspace for 2 minutes by default, capture video plus browser audio,
+  then upload the full workspace to S3.
 - SSH: set `RUNWAVE_SSH_KEY` to the local private key used for workers. During
   provisioning, set `RUNWAVE_SSH_KEY_NAME` if the Hetzner key name cannot be
   inferred from the matching local public key.
@@ -57,11 +57,15 @@ This reads credentials from `~/.c.yaml` and writes them to
 `/etc/runwave-runner.env` on each server with mode `0600`. Per-worker logs are
 written under `cruft/playtests/_bootstrap-logs/<batch>/`.
 
-Bootstrap installs `ffmpeg` and PulseAudio. The remote runner creates a
-PulseAudio null sink named `runwave_sink`, launches Chromium with that sink as
-the default output, records `runwave_sink.monitor`, and muxes that audio into
-`video/000-runwave-with-audio.webm`. Set `recordAudio: false` in a job JSON to
-fall back to Playwright's video-only recording.
+Bootstrap installs Docker and builds the `runwave-playtest-runner:latest` image.
+The host runner re-execs each job in its own container, mounting the game cache,
+job workspace root, job JSON, runner script, and `/etc/runwave-runner.env`.
+Inside that container, the runner creates a PulseAudio null sink named
+`runwave_sink`, launches Chromium with that sink as the default output, records
+`runwave_sink.monitor`, and muxes that audio into
+`video/000-runwave-with-audio.webm`. This keeps audio from concurrent games on
+the same worker out of each other's recordings. Set `recordAudio: false` in a
+job JSON to fall back to Playwright's video-only recording.
 
 The default game source is `s3://pw-cruft/games`. Override it with:
 
@@ -131,6 +135,10 @@ model-calling planner. The planner currently uses OpenRouter, reading
 For a single local game smoke:
 
 ```sh
+docker build -f ops/remote/playtest-runner.Dockerfile \
+  -t runwave-playtest-runner:latest \
+  ops/remote
+
 aws s3 sync s3://pw-cruft/games/mario-html5/ \
   cruft/playtests/_games-cache/mario-html5/ \
   --delete --only-show-errors
@@ -139,6 +147,10 @@ RUNWAVE_GAMES_ROOT="$PWD/cruft/playtests/_games-cache" \
 RUNWAVE_JOBS_ROOT="$PWD/cruft/playtests/local-agent-smoke/jobs" \
 node ops/remote/run-playtest.js --job ops/examples/job-agent-mario.local.json
 ```
+
+Linux local smoke runs use the same Docker wrapper by default. Set
+`RUNWAVE_PLAYTEST_CONTAINER=0` only for debugging the runner directly on the
+host.
 
 On machines with Chrome already installed and Playwright downloads blocked, set
 `skipPlaywrightInstall: true` and `channel: "chrome"` in the job JSON.

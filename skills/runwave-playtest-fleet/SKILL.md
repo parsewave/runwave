@@ -16,6 +16,9 @@ Use this skill to run a many-game browser playtest batch end to end: discover ga
 - Playtest duration: `120000` ms per game
 - Fleet size target: `8` hardware-WebGL-verified workers, `3` jobs per server,
   `24` concurrent slots
+- Every Linux playtest job runs inside a dedicated Docker container by default
+  so each game, Chromium instance, Xvfb session, PulseAudio null sink, ffmpeg
+  recorder, and upload process has isolated runtime state.
 - Runwave repo: `https://github.com/parsewave/runwave`
 - SSH key: `RUNWAVE_SSH_KEY` / `SSH_KEY`, or an auto-detected local
   `~/.ssh/id_ed25519` / `~/.ssh/id_rsa`
@@ -108,7 +111,9 @@ SERVER_TYPE=<hardware-webgl-approved-type> SERVER_COUNT=8 LOCATION=hel1 ops/prov
 ```
 
 2. Bootstrap servers in parallel. This syncs `s3://pw-cruft/games` to
-   `/opt/runwave/games` on every worker and installs runner dependencies.
+   `/opt/runwave/games` on every worker, installs runner dependencies, installs
+   Docker, and builds the `runwave-playtest-runner:latest` image used by each
+   job.
 
 ```sh
 ops/bootstrap-servers-parallel.sh cruft/inventory/<batch>.json
@@ -201,12 +206,19 @@ done < <(find cruft/playtests/_games-cache -mindepth 2 -maxdepth 2 -name package
 4. Run jobs with:
 
 ```sh
+docker build -f ops/remote/playtest-runner.Dockerfile \
+  -t runwave-playtest-runner:latest \
+  ops/remote
+
 RUNWAVE_GAMES_ROOT="$PWD/cruft/playtests/_games-cache" \
 RUNWAVE_JOBS_ROOT="$PWD/cruft/playtests/<run-id>/local-jobs" \
 node ops/remote/run-playtest.js --job cruft/playtests/<run-id>/job-specs/<job>.json
 ```
 
 For local parallel execution, spawn up to four of these commands at a time. Capture each job’s stdout/stderr to `cruft/playtests/<run-id>/<jobId>.log`, and write a `results.json` containing `{jobId, game, code, log, s3Uri}` for every job.
+On Linux, the runner launches the actual playtest inside Docker by default. Set
+`RUNWAVE_PLAYTEST_CONTAINER=0` only when debugging a single job directly on the
+host.
 
 ## Download And Viewer
 

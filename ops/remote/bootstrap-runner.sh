@@ -14,7 +14,7 @@ else
 fi
 
 apt-get update
-apt-get install -y ca-certificates curl ffmpeg gnupg git jq pulseaudio pulseaudio-utils python3 python3-pip rsync unzip xvfb
+apt-get install -y ca-certificates curl docker.io ffmpeg gnupg git jq pulseaudio pulseaudio-utils python3 python3-pip rsync unzip xvfb
 
 if [ "${need_node_install}" -eq 1 ]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
@@ -41,6 +41,15 @@ fi
 install -d -m 0755 /opt/runwave/bin /opt/runwave/games /var/lib/runwave/jobs /var/log/runwave
 install -m 0755 /tmp/run-playtest.js /opt/runwave/bin/run-playtest.js
 install -m 0600 /tmp/runwave-runner.env /etc/runwave-runner.env
+
+systemctl enable --now docker >/dev/null 2>&1 || service docker start >/dev/null 2>&1 || true
+docker_context="$(mktemp -d)"
+cp /tmp/playtest-runner.Dockerfile "${docker_context}/Dockerfile"
+cp /tmp/run-playtest.js "${docker_context}/run-playtest.js"
+docker build \
+  -t "${RUNWAVE_PLAYTEST_IMAGE:-runwave-playtest-runner:latest}" \
+  "${docker_context}"
+rm -rf "${docker_context}"
 
 # shellcheck disable=SC1091
 source /etc/runwave-runner.env
