@@ -36,22 +36,11 @@ function sequenceSchemaGuide(grid = markGridFromConfig({})) {
 function compactPostSequenceResult(result) {
   if (!result || typeof result !== 'object') return '';
   const parts = [];
-
-  if (result.ok === false) {
-    parts.push('after action: the harness reported a failure');
-  } else if (result.screenshotChanged === false) {
-    parts.push('after action: it ran, but the screenshot stayed identical, so it likely made no visible progress');
-  } else if (result.screenshotChanged === true) {
-    parts.push('after action: it ran and the screenshot changed');
-  } else if (result.ok === true) {
-    parts.push('after action: it ran');
-  }
-
-  if (typeof result.captureCount === 'number') {
-    parts.push(result.captureCount === 1 ? 'captured 1 screenshot' : `captured ${result.captureCount} screenshots`);
-  }
-  if (result.error) parts.push(`error: ${String(result.error).slice(0, 120)}`);
-  return parts.length ? `; ${parts.join('; ')}` : '';
+  if (typeof result.ok === 'boolean') parts.push(`ok=${result.ok}`);
+  if (typeof result.screenshotChanged === 'boolean') parts.push(`screenshot_changed=${result.screenshotChanged}`);
+  if (typeof result.captureCount === 'number') parts.push(`captures=${result.captureCount}`);
+  if (result.error) parts.push(`error=${String(result.error).slice(0, 120)}`);
+  return parts.length ? `; post_sequence=${parts.join(',')}` : '';
 }
 
 function compactOutcomeSummary(outcomeSummary) {
@@ -178,27 +167,6 @@ function repeatedHistoryWarning(history) {
   return '';
 }
 
-function unchangedScreenshotWarning(history, threshold = 3) {
-  const recent = history.slice(-threshold);
-  if (recent.length < threshold) return '';
-  if (!recent.every((item) => item.result && item.result.screenshotChanged === false)) return '';
-
-  const signatures = recent.map(actionSignature);
-  const sameControls = signatures.every(Boolean) && signatures.every((signature) => signature === signatures[0]);
-  if (sameControls) {
-    return `Warning: the last ${threshold} attempts repeated the same controls and the screenshot did not change. Treat that action as failed; say that in previous_sequence_outcome and choose a different target, route, control, or strategy now.`;
-  }
-
-  return `Warning: the last ${threshold} attempts did not visibly change the screenshot. Treat the current approach as no progress; say that in previous_sequence_outcome and choose a different target, route, control, or strategy now.`;
-}
-
-function historyWarnings(history) {
-  return [
-    repeatedHistoryWarning(history),
-    unchangedScreenshotWarning(history),
-  ].filter(Boolean).join('\n');
-}
-
 function playtestInstructionsSection(job) {
   const instructions = String(job.playtestInstructions || '').trim();
   if (!instructions) return [];
@@ -226,7 +194,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     'KeyS',
     'KeyD',
   ];
-  const warnings = historyWarnings(history);
+  const warning = repeatedHistoryWarning(history);
   const grid = markGridFromConfig(job || {});
 
   return [
@@ -269,7 +237,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '- Avoid idle waiting. Each step should do something visible or useful for the gameplay video.',
     '- In previous_sequence_outcome, summarize what visibly happened after the most recent prior sequence. If a prior control moved the player, camera, board, score, menu, or level state, say that clearly. On the first sequence, use an empty string.',
     '',
-    warnings ? `${warnings}\n` : '',
+    warning ? `${warning}\n` : '',
     'Recent history:',
     compactHistory(history) || 'none',
     '',

@@ -921,59 +921,7 @@ test('playtester prompt warns when recent sequences repeat a control cycle up to
   assert.match(prompt, /Break the loop now/);
 });
 
-test('playtester prompt warns after three unchanged screenshots', () => {
-  const prompt = buildPlaytesterPrompt({
-    job: {},
-    elapsedMs: 10000,
-    maxMs: 120000,
-    viewport: { width: 1280, height: 720 },
-    state: {},
-    history: [
-      {
-        step: 1,
-        summary: 'tried one swap',
-        actions: [{ type: 'drag', from: { x: 100, y: 100 }, to: { x: 140, y: 100 }, mode: 'mouse' }],
-        result: { ok: true, screenshotChanged: false, captureCount: 1 },
-      },
-      {
-        step: 2,
-        summary: 'tried another swap',
-        actions: [{ type: 'drag', from: { x: 200, y: 100 }, to: { x: 240, y: 100 }, mode: 'mouse' }],
-        result: { ok: true, screenshotChanged: false, captureCount: 1 },
-      },
-      {
-        step: 3,
-        summary: 'tried a third swap',
-        actions: [{ type: 'drag', from: { x: 300, y: 100 }, to: { x: 340, y: 100 }, mode: 'mouse' }],
-        result: { ok: true, screenshotChanged: false, captureCount: 1 },
-      },
-    ],
-  });
-
-  assert.match(prompt, /last 3 attempts did not visibly change the screenshot/);
-  assert.match(prompt, /choose a different target, route, control, or strategy/);
-});
-
-test('playtester prompt gives stronger warning when unchanged screenshots repeat the same controls', () => {
-  const prompt = buildPlaytesterPrompt({
-    job: {},
-    elapsedMs: 10000,
-    maxMs: 120000,
-    viewport: { width: 1280, height: 720 },
-    state: {},
-    history: [1, 2, 3].map((step) => ({
-      step,
-      summary: 'same drag failed',
-      actions: [{ type: 'drag', from: { x: 100, y: 100 }, to: { x: 140, y: 100 }, mode: 'mouse' }],
-      result: { ok: true, screenshotChanged: false, captureCount: 1 },
-    })),
-  });
-
-  assert.match(prompt, /last 3 attempts repeated the same controls/);
-  assert.match(prompt, /Treat that action as failed/);
-});
-
-test('compact history explains post-sequence result signals', () => {
+test('compact history includes post-sequence result signals', () => {
   const text = compactHistory([
     {
       step: 1,
@@ -985,23 +933,8 @@ test('compact history explains post-sequence result signals', () => {
   ]);
 
   assert.match(text, /controls=ArrowRight/);
-  assert.match(text, /after action: it ran and the screenshot changed/);
-  assert.match(text, /captured 1 screenshot/);
+  assert.match(text, /post_sequence=ok=true,screenshot_changed=true,captures=1/);
   assert.match(text, /outcome="The ball rolled right and the camera followed into a new corridor\."/);
-});
-
-test('compact history explains unchanged screenshots as no visible progress', () => {
-  const text = compactHistory([
-    {
-      step: 1,
-      summary: 'swap did not work',
-      actions: [{ type: 'drag', from: { x: 100, y: 100 }, to: { x: 140, y: 100 }, mode: 'mouse' }],
-      result: { ok: true, screenshotChanged: false, captureCount: 1 },
-    },
-  ]);
-
-  assert.match(text, /after action: it ran, but the screenshot stayed identical/);
-  assert.match(text, /likely made no visible progress/);
 });
 
 test('agent loop attaches previous sequence outcome to the prior history step', async () => {
