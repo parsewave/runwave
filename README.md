@@ -54,6 +54,23 @@ The installed CLI is:
 runwave '<json>'
 ```
 
+The agentic playtester CLI expects a game directory with `start.sh` and
+`playtest.md`:
+
+```sh
+OPENROUTER_API_KEY=... runwave-playtest \
+  --game-dir ./game \
+  --out-dir ./out \
+  --port 3000 \
+  --viewport 1280x720
+```
+
+`runwave-playtest` also reads `metadata.json` from the game directory when that
+file exists. The metadata file may provide `viewport`, `videoSize`, and
+`startOverrides`; otherwise the CLI uses its default viewport. Python callers can
+use the wrapper in `python/runwave/playtest.py` and pass `viewport=`,
+`video_size=`, or `metadata_path=` without writing any JavaScript.
+
 Use verbose mode to create profiling logs:
 
 ```sh

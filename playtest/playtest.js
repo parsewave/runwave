@@ -294,7 +294,7 @@ async function runPlaytest(options) {
       playtestDurationMs,
       agentMinPlaytestMs: minPlaytestMs ?? Math.max(0, playtestDurationMs - 10000),
       viewport,
-      videoSize: viewport,
+      videoSize: start.videoSize,
       playtestInstructions,
     };
 
@@ -314,6 +314,7 @@ async function runPlaytest(options) {
       outputDir: playtest.outputDir,
     };
     summary.viewport = viewport;
+    summary.videoSize = start.videoSize;
     summary.status = 'passed';
   } catch (error) {
     summary.status = 'failed';

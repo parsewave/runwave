@@ -18,6 +18,7 @@ from typing import Any, Callable, Mapping, Optional, Union
 
 PathLike = Union[str, "os.PathLike[str]"]
 LogHandler = Callable[[dict], None]
+Size = Mapping[str, Union[int, float]]
 
 
 class PlaytestError(RuntimeError):
@@ -55,12 +56,34 @@ def _resolve_cli(cli_path: Optional[PathLike]) -> str:
     )
 
 
+def _dimension(value: Union[int, float], name: str) -> int:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if not number.is_integer() or number <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return int(number)
+
+
+def _format_size(size: Size, name: str) -> str:
+    try:
+        width = _dimension(size["width"], f"{name}.width")
+        height = _dimension(size["height"], f"{name}.height")
+    except KeyError as exc:
+        raise ValueError(f"{name} must provide numeric width and height") from exc
+    return f"{width}x{height}"
+
+
 def run_playtest(
     *,
     game_dir: PathLike,
     out_dir: PathLike,
     port: int,
     openrouter_api_key: Optional[str] = None,
+    viewport: Optional[Size] = None,
+    video_size: Optional[Size] = None,
+    metadata_path: Optional[PathLike] = None,
     playtest_duration_ms: Optional[int] = None,
     min_playtest_ms: Optional[int] = None,
     model: Optional[str] = None,
@@ -84,6 +107,16 @@ def run_playtest(
     openrouter_api_key:
         OpenRouter API key. If omitted, ``OPENROUTER_API_KEY`` must already be
         in the environment (or in ``env``).
+    viewport:
+        Browser viewport as ``{"width": int, "height": int}``. If omitted, the
+        CLI uses ``metadata.json`` from the game directory when present, then its
+        default viewport.
+    video_size:
+        Recording size as ``{"width": int, "height": int}``. Defaults to the
+        resolved viewport unless metadata/start overrides provide one.
+    metadata_path:
+        Optional metadata JSON file. When omitted, the CLI reads
+        ``<game_dir>/metadata.json`` only if that file exists.
     playtest_duration_ms:
         Max playtest wall time. Defaults to 150000 (2m30s) if omitted.
     min_playtest_ms:
@@ -126,6 +159,12 @@ def run_playtest(
         "--out-dir", str(out_dir_path),
         "--port", str(port),
     ]
+    if viewport is not None:
+        args += ["--viewport", _format_size(viewport, "viewport")]
+    if video_size is not None:
+        args += ["--video-size", _format_size(video_size, "video_size")]
+    if metadata_path is not None:
+        args += ["--metadata", str(Path(metadata_path).resolve())]
     if playtest_duration_ms is not None:
         args += ["--playtest-duration-ms", str(playtest_duration_ms)]
     if min_playtest_ms is not None:
