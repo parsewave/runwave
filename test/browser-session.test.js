@@ -1,7 +1,9 @@
 const assert = require('node:assert/strict');
+const os = require('os');
 const test = require('node:test');
 
 const {
+  BrowserSession,
   browserViewportStabilizerScript,
   chromiumLaunchArgs,
 } = require('../controller/src/browser-session');
@@ -38,4 +40,26 @@ test('browser viewport stabilizer hides overflow and prevents scrolling keys', (
   assert.match(source, /window\.scrollTo\(0, 0\)/);
   assert.match(source, /ArrowDown/);
   assert.match(source, /preventDefault/);
+});
+
+test('browser clicks hold the mouse down for the normalized click interval', async () => {
+  const session = new BrowserSession({ url: 'about:blank' }, { runDir: os.tmpdir() });
+  const calls = [];
+  session.page = {
+    mouse: {
+      move: async (x, y) => calls.push({ type: 'move', x, y }),
+      down: async (options) => calls.push({ type: 'down', options, at: Date.now() }),
+      up: async (options) => calls.push({ type: 'up', options, at: Date.now() }),
+    },
+  };
+
+  const startedAt = Date.now();
+  await session.click({ type: 'click', start: 100, end: 150, x: 321, y: 222, button: 'left', clickCount: 1 });
+
+  assert.deepEqual(calls.map((call) => call.type), ['move', 'down', 'up']);
+  assert.deepEqual(calls[0], { type: 'move', x: 321, y: 222 });
+  assert.deepEqual(calls[1].options, { button: 'left', clickCount: 1 });
+  assert.deepEqual(calls[2].options, { button: 'left', clickCount: 1 });
+  assert.ok(Date.now() - startedAt >= 45);
+  assert.deepEqual(session.mousePosition, { x: 321, y: 222 });
 });

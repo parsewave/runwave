@@ -193,17 +193,23 @@ class BrowserSession {
   }
 
   async click(click) {
+    const holdMs = Math.max(0, Number(click.end ?? click.start) - Number(click.start ?? 0));
+    const clickCount = Math.max(1, Math.round(Number(click.clickCount || 1)));
     await this.time('browser.mouse.click', {
       x: click.x,
       y: click.y,
       button: click.button,
-      clickCount: click.clickCount,
-    }, () =>
-      this.page.mouse.click(click.x, click.y, {
-        button: click.button,
-        clickCount: click.clickCount,
-      })
-    );
+      clickCount,
+      holdMs,
+    }, async () => {
+      await this.page.mouse.move(click.x, click.y);
+      for (let index = 0; index < clickCount; index += 1) {
+        const eventClickCount = index + 1;
+        await this.page.mouse.down({ button: click.button, clickCount: eventClickCount });
+        if (holdMs > 0) await sleep(holdMs);
+        await this.page.mouse.up({ button: click.button, clickCount: eventClickCount });
+      }
+    });
     this.mousePosition = { x: click.x, y: click.y };
   }
 
