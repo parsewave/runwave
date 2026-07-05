@@ -218,8 +218,9 @@ function run(command, args, options = {}) {
 }
 
 async function prepareAudioCaptureEnv(env, job) {
-  const recordAudio = job.recordAudio !== false && process.platform === 'linux';
-  if (!recordAudio) return { env, recordAudio: false };
+  if (process.platform !== 'linux') {
+    throw new Error('runwave playtest requires linux for gstreamer audio capture');
+  }
 
   const sink = job.audioSink || env.RUNWAVE_AUDIO_SINK || 'runwave_sink';
   const audioEnv = {
@@ -248,7 +249,6 @@ async function prepareAudioCaptureEnv(env, job) {
 
   return {
     env: audioEnv,
-    recordAudio: true,
     audioSource: job.audioSource || `${sink}.monitor`,
   };
 }
@@ -475,370 +475,6 @@ function even(value) {
   return rounded % 2 === 0 ? rounded : rounded + 1;
 }
 
-function chooseViewportFromProbe(probe, fallback = { width: 1280, height: 720 }) {
-  const viewport = probe.viewport || fallback;
-  const canvases = Array.isArray(probe.canvases) ? probe.canvases : [];
-  const largestCanvas = canvases
-    .filter((canvas) => canvas.width > 0 && canvas.height > 0)
-    .sort((a, b) => b.width * b.height - a.width * a.height)[0];
-
-  if (largestCanvas) {
-    const coversViewport = largestCanvas.width >= viewport.width * 0.85 && largestCanvas.height >= viewport.height * 0.85;
-    if (coversViewport) {
-      return {
-        viewport: { width: even(viewport.width), height: even(viewport.height) },
-        reason: 'canvas-covers-viewport',
-        canvas: largestCanvas,
-      };
-    }
-    return {
-      viewport: {
-        width: even(clamp(largestCanvas.width + 16, 480, 1280)),
-        height: even(clamp(largestCanvas.height + 16, 360, 1000)),
-      },
-      reason: 'fit-largest-canvas',
-      canvas: largestCanvas,
-    };
-  }
-
-  const visible = probe.visibleBounds || {};
-  const neededHeight = Math.max(
-    Number(probe.scrollHeight || 0),
-    Number(visible.bottom || 0) + 16,
-    viewport.height
-  );
-  if (neededHeight > viewport.height + 24) {
-    return {
-      viewport: {
-        width: even(clamp(viewport.width, 640, 1280)),
-        height: even(clamp(neededHeight, viewport.height, 1400)),
-      },
-      reason: 'fit-page-height',
-      visibleBounds: visible,
-    };
-  }
-
-  return {
-    viewport: { width: even(viewport.width), height: even(viewport.height) },
-    reason: 'default-viewport',
-  };
-}
-
-function normalizeViewport(viewport, limits = {}) {
-  const minWidth = Number(limits.minWidth || 480);
-  const maxWidth = Number(limits.maxWidth || 1280);
-  const minHeight = Number(limits.minHeight || 360);
-  const maxHeight = Number(limits.maxHeight || 1400);
-  return {
-    width: even(clamp(Number(viewport.width || 0), minWidth, maxWidth)),
-    height: even(clamp(Number(viewport.height || 0), minHeight, maxHeight)),
-  };
-}
-
-function largestCanvasFromProbe(probe) {
-  const canvases = Array.isArray(probe.canvases) ? probe.canvases : [];
-  return canvases
-    .filter((canvas) => canvas.width > 0 && canvas.height > 0)
-    .sort((a, b) => b.width * b.height - a.width * a.height)[0] || null;
-}
-
-function viewportCandidatesFromProbe(probe, fallback = { width: 1280, height: 720 }) {
-  const baseViewport = normalizeViewport(probe.viewport || fallback);
-  const deterministic = chooseViewportFromProbe(probe, baseViewport);
-  const visible = probe.visibleBounds || {};
-  const neededHeight = Math.max(
-    Number(probe.scrollHeight || 0),
-    Number(visible.bottom || 0) + 16,
-    baseViewport.height
-  );
-  const largestCanvas = largestCanvasFromProbe(probe);
-  const candidates = [
-    {
-      id: 'default',
-      reason: 'default browser viewport',
-      viewport: baseViewport,
-    },
-    {
-      id: 'probe-choice',
-      reason: deterministic.reason,
-      viewport: normalizeViewport(deterministic.viewport),
-    },
-  ];
-
-  if (largestCanvas) {
-    candidates.push({
-      id: 'canvas-fit',
-      reason: 'largest canvas plus a small margin',
-      viewport: normalizeViewport({
-        width: largestCanvas.width + 16,
-        height: largestCanvas.height + 16,
-      }, { maxHeight: 1000 }),
-    });
-  }
-
-  if (neededHeight > baseViewport.height + 24) {
-    candidates.push({
-      id: 'page-fit',
-      reason: 'full visible page height',
-      viewport: normalizeViewport({
-        width: baseViewport.width,
-        height: neededHeight,
-      }),
-    });
-  }
-
-  if (visible.width > 0 && visible.height > 0) {
-    candidates.push({
-      id: 'content-fit',
-      reason: 'visible content bounds with reduced horizontal whitespace',
-      viewport: normalizeViewport({
-        width: visible.width + 160,
-        height: Math.max(visible.height + Math.max(visible.top, 0) + 32, baseViewport.height),
-      }),
-    });
-  }
-
-  candidates.push({
-    id: 'square-compact',
-    reason: 'compact square-ish viewport for centered games',
-    viewport: normalizeViewport({ width: 900, height: 900 }),
-  });
-
-  const seen = new Set();
-  return candidates.filter((candidate) => {
-    const key = `${candidate.viewport.width}x${candidate.viewport.height}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).slice(0, 6);
-}
-
-async function captureViewportCandidateScreenshots(job, dirs, url, env, candidates) {
-  const outputDir = path.join(dirs.workspace, 'artifacts', 'viewport-preflight');
-  mkdirp(outputDir);
-  const { chromium } = require(path.join(dirs.runwave, 'node_modules', 'playwright'));
-  const launchOptions = chromiumLaunchOptions(job, env, { headless: true });
-
-  const browser = await chromium.launch(launchOptions);
-  try {
-    const captured = [];
-    for (const candidate of candidates) {
-      const context = await browser.newContext({
-        viewport: candidate.viewport,
-        deviceScaleFactor: Number(job.deviceScaleFactor ?? 1),
-      });
-      const page = await context.newPage();
-      await page.goto(url, { waitUntil: job.waitUntil || 'load' });
-      await new Promise((resolve) => setTimeout(resolve, Number(job.waitAfterLoad ?? 700)));
-      const screenshot = path.join(outputDir, `${candidate.id}-${candidate.viewport.width}x${candidate.viewport.height}.png`);
-      await page.screenshot({ path: screenshot, fullPage: false });
-      captured.push({ ...candidate, screenshot });
-      await context.close();
-    }
-    return captured;
-  } finally {
-    await browser.close();
-  }
-}
-
-function normalizeVlmViewportChoice(raw, candidates, fallbackChoice) {
-  const data = raw && typeof raw === 'object' ? raw : {};
-  const choiceId = String(data.choice_id || data.choiceId || data.id || '').trim();
-  const byId = candidates.find((candidate) => candidate.id === choiceId);
-  if (byId) {
-    return {
-      viewport: byId.viewport,
-      reason: data.reason || byId.reason,
-      selectedCandidateId: byId.id,
-      confidence: Number(data.confidence || 0) || null,
-      source: 'vlm',
-    };
-  }
-
-  const requested = data.viewport && typeof data.viewport === 'object' ? normalizeViewport(data.viewport) : null;
-  const byViewport = requested
-    ? candidates.find((candidate) => candidate.viewport.width === requested.width && candidate.viewport.height === requested.height)
-    : null;
-  if (byViewport) {
-    return {
-      viewport: byViewport.viewport,
-      reason: data.reason || byViewport.reason,
-      selectedCandidateId: byViewport.id,
-      confidence: Number(data.confidence || 0) || null,
-      source: 'vlm',
-    };
-  }
-
-  return {
-    ...fallbackChoice,
-    selectedCandidateId: 'probe-choice',
-    source: 'fallback',
-    vlmError: choiceId ? `unknown candidate id: ${choiceId}` : 'missing candidate id',
-  };
-}
-
-function buildViewportPreflightPrompt(candidates, probe) {
-  const lines = [
-    'You are choosing the viewport for recording and playing a browser game.',
-    'Pick the single candidate whose screenshot best shows the playable game area.',
-    '',
-    'Criteria:',
-    '- No important controls, HUD, board, canvas, or instructions are clipped.',
-    '- The game should not be unnecessarily zoomed out with lots of empty page whitespace.',
-    '- Text/buttons should remain readable.',
-    '- Prefer the viewport that would help a VLM game-playing agent understand what to do next.',
-    '',
-    'Return only JSON:',
-    '{ "choice_id": "candidate id", "reason": "short reason", "confidence": 0.0 }',
-    '',
-    'Probe metadata:',
-    JSON.stringify({
-      viewport: probe.viewport,
-      canvases: probe.canvases,
-      scrollWidth: probe.scrollWidth,
-      scrollHeight: probe.scrollHeight,
-      visibleBounds: probe.visibleBounds,
-    }, null, 2),
-    '',
-    'Candidates:',
-    ...candidates.map((candidate) => `${candidate.id}: ${candidate.viewport.width}x${candidate.viewport.height} (${candidate.reason})`),
-  ];
-  return lines.join('\n');
-}
-
-async function chooseViewportWithVlm(job, dirs, url, env, probe) {
-  const candidates = await captureViewportCandidateScreenshots(
-    job,
-    dirs,
-    url,
-    env,
-    viewportCandidatesFromProbe(probe, job.probeViewport || { width: 1280, height: 720 })
-  );
-  const fallbackChoice = {
-    viewport: probe.choice.viewport,
-    reason: probe.choice.reason,
-    selectedCandidateId: 'probe-choice',
-    source: 'probe',
-  };
-  const { chatCompletion, dataUrl } = require(path.join(dirs.runwave, 'agent', 'src', 'model-client.js'));
-  const content = [{ type: 'text', text: buildViewportPreflightPrompt(candidates, probe) }];
-  for (const candidate of candidates) {
-    content.push({
-      type: 'text',
-      text: `Candidate ${candidate.id}: ${candidate.viewport.width}x${candidate.viewport.height}`,
-    });
-    content.push({
-      type: 'image_url',
-      image_url: { url: dataUrl(candidate.screenshot) },
-    });
-  }
-
-  const startedAt = Date.now();
-  const attempts = Math.max(1, Math.round(Number(job.viewportPreflightAttempts || job.viewportPreflightModelAttempts || 2)));
-  try {
-    const result = await chatCompletion({
-      messages: [{ role: 'user', content }],
-      maxTokens: Number(job.viewportPreflightMaxTokens || 700),
-      timeoutMs: Number(job.viewportPreflightTimeoutMs || 120000),
-      temperature: Number(job.viewportPreflightTemperature ?? 0),
-      attempts,
-    });
-    const choice = normalizeVlmViewportChoice(result.json, candidates, fallbackChoice);
-    return {
-      enabled: true,
-      elapsedMs: Date.now() - startedAt,
-      attempts,
-      model: result.model,
-      choice,
-      rawChoice: result.json,
-      usage: result.usage || null,
-      candidates,
-    };
-  } catch (error) {
-    return {
-      enabled: true,
-      elapsedMs: Date.now() - startedAt,
-      attempts,
-      choice: fallbackChoice,
-      error: error.message,
-      candidates,
-    };
-  }
-}
-
-async function probeViewport(job, dirs, url, env = process.env) {
-  const viewport = job.probeViewport || { width: 1280, height: 720 };
-  const { chromium } = require(path.join(dirs.runwave, 'node_modules', 'playwright'));
-  const launchOptions = chromiumLaunchOptions(job, env, { headless: true });
-
-  const browser = await chromium.launch(launchOptions);
-  try {
-    const context = await browser.newContext({
-      viewport,
-      deviceScaleFactor: Number(job.deviceScaleFactor ?? 1),
-    });
-    const page = await context.newPage();
-    await page.goto(url, { waitUntil: job.waitUntil || 'load' });
-    await new Promise((resolve) => setTimeout(resolve, Number(job.waitAfterLoad ?? 700)));
-    const probe = await page.evaluate(() => {
-      const viewport = {
-        width: window.innerWidth,
-        height: window.innerHeight,
-        devicePixelRatio: window.devicePixelRatio,
-      };
-      const canvases = Array.from(document.querySelectorAll('canvas')).map((canvas, index) => {
-        const rect = canvas.getBoundingClientRect();
-        return {
-          index,
-          width: Math.round(rect.width),
-          height: Math.round(rect.height),
-          x: Math.round(rect.x),
-          y: Math.round(rect.y),
-        };
-      });
-
-      const visibleElements = Array.from(document.body.querySelectorAll('*')).filter((element) => {
-        const style = window.getComputedStyle(element);
-        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
-        const rect = element.getBoundingClientRect();
-        return rect.width >= 4 && rect.height >= 4;
-      });
-      const bounds = visibleElements.reduce(
-        (acc, element) => {
-          const rect = element.getBoundingClientRect();
-          return {
-            left: Math.min(acc.left, rect.left),
-            top: Math.min(acc.top, rect.top),
-            right: Math.max(acc.right, rect.right),
-            bottom: Math.max(acc.bottom, rect.bottom),
-          };
-        },
-        { left: Infinity, top: Infinity, right: 0, bottom: 0 }
-      );
-      const visibleBounds = Number.isFinite(bounds.left)
-        ? {
-            left: Math.round(bounds.left),
-            top: Math.round(bounds.top),
-            right: Math.round(bounds.right),
-            bottom: Math.round(bounds.bottom),
-            width: Math.round(bounds.right - bounds.left),
-            height: Math.round(bounds.bottom - bounds.top),
-          }
-        : null;
-      return {
-        viewport,
-        canvases,
-        scrollWidth: Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0),
-        scrollHeight: Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0),
-        visibleBounds,
-      };
-    });
-    const choice = chooseViewportFromProbe(probe, viewport);
-    return { ...probe, choice };
-  } finally {
-    await browser.close();
-  }
-}
 
 async function checkoutRunwave(job, runwaveDir, env = process.env) {
   await run('git', ['clone', job.runwaveRepo || 'https://github.com/parsewave/runwave', runwaveDir], { env });
@@ -858,213 +494,6 @@ async function checkoutRunwave(job, runwaveDir, env = process.env) {
   await run('npx', ['playwright', 'install', 'chromium'], { cwd: runwaveDir, env });
 }
 
-function defaultPlan(durationMs = 120000) {
-  const totalDuration = Math.max(5000, Number(durationMs) || 120000);
-  const focusDuration = Math.min(2500, Math.max(1000, Math.round(totalDuration * 0.02)));
-  const remaining = Math.max(1000, totalDuration - focusDuration);
-  const segmentMs = 10000;
-  const patterns = [
-    [
-      { type: 'key', start: 0, end: 6200, key: 'ArrowRight' },
-      { type: 'key', start: 1200, end: 7600, key: 'ArrowUp' },
-      { type: 'key', start: 8200, end: 8450, key: 'Space' },
-    ],
-    [
-      { type: 'key', start: 0, end: 5200, key: 'ArrowLeft' },
-      { type: 'key', start: 2500, end: 9200, key: 'ArrowDown' },
-      { type: 'key', start: 5600, end: 5750, key: 'Enter' },
-    ],
-    [
-      { type: 'key', start: 0, end: 6500, key: 'KeyW' },
-      { type: 'key', start: 1000, end: 8200, key: 'KeyD' },
-      { type: 'key', start: 7800, end: 8050, key: 'Space' },
-    ],
-    [
-      { type: 'key', start: 0, end: 6000, key: 'KeyA' },
-      { type: 'key', start: 2600, end: 8600, key: 'KeyS' },
-      { type: 'key', start: 7000, end: 7250, key: 'Space' },
-    ],
-  ];
-
-  const actions = [
-    {
-      action: 'screenshot',
-      action_name: 'screen-001-open',
-      name: 'open',
-    },
-    {
-      action: 'step',
-      action_name: 'step-002-focus-start',
-      actions: [
-        { type: 'click', start: 100, x: 640, y: 360 },
-        { type: 'key', start: 250, end: 350, key: 'Space' },
-        { type: 'key', start: 500, end: 650, key: 'Enter' },
-      ],
-      duration: focusDuration,
-      captures: [focusDuration],
-      autoCaptures: false,
-    },
-  ];
-
-  let elapsed = 0;
-  let segmentIndex = 0;
-  while (elapsed < remaining) {
-    const duration = Math.min(segmentMs, remaining - elapsed);
-    const pattern = patterns[segmentIndex % patterns.length]
-      .map((action) => ({
-        ...action,
-        end: Math.min(action.end, Math.max(0, duration - 200)),
-      }))
-      .filter((action) => action.end > action.start);
-    actions.push({
-      action: 'step',
-      action_name: `step-${String(segmentIndex + 3).padStart(3, '0')}-play`,
-      actions: [
-        ...pattern,
-        ...(segmentIndex % 3 === 2 ? [{ type: 'click', start: Math.min(500, duration), x: 640, y: 360 }] : []),
-        ...(segmentIndex % 4 === 1
-          ? [{ type: 'view_move', start: 800, end: Math.min(2500, duration), dx: 180, dy: -35, steps: 12 }]
-          : []),
-      ],
-      captures: [duration],
-      autoCaptures: false,
-    });
-    elapsed += duration;
-    segmentIndex += 1;
-  }
-
-  actions.push(
-    {
-      action: 'screenshot',
-      action_name: 'screen-final',
-      name: 'final',
-    },
-  );
-  return actions;
-}
-
-function parseActionResponse(result, action) {
-  let response;
-  try {
-    response = JSON.parse(result.stdout);
-  } catch (error) {
-    throw new Error(`runwave returned non-JSON output for ${action.action_name || action.action}: ${result.stdout.slice(-2000)}`);
-  }
-  if (!response || response.ok === false) {
-    throw new Error(`runwave action failed for ${action.action_name || action.action}: ${JSON.stringify(response).slice(0, 2000)}`);
-  }
-  return response;
-}
-
-function runwaveCliArgs(base, action, job) {
-  const args = [base[1]];
-  if (job.verboseRunwave || process.env.RUNWAVE_VERBOSE === '1') args.push('-v');
-  args.push(JSON.stringify(action));
-  return args;
-}
-
-async function runRunwaveAction(base, dirs, env, job, action) {
-  const payload = {
-    ...action,
-    session_id: action.session_id || action.sessionId || job.runwaveSessionId,
-  };
-  const result = await run(base[0], runwaveCliArgs(base, payload, job), { cwd: dirs.workspace, env });
-  return parseActionResponse(result, payload);
-}
-
-function useAgentMode(job) {
-  return job.playMode === 'agent' || job.agent === true;
-}
-
-async function runAgentPlan(job, dirs, initialResponse, runAction) {
-  const agentModule = path.join(dirs.runwave, 'agent', 'src', 'agent-player.js');
-  const { runAgenticPlaytest } = require(agentModule);
-  return runAgenticPlaytest({
-    job,
-    initialResponse,
-    runAction,
-    outputDir: path.join(dirs.workspace, 'artifacts', 'agent'),
-    log,
-  });
-}
-
-async function runRunwave(job, dirs, url, runnerEnv = process.env) {
-  const runwaveBin = path.join(dirs.runwave, 'bin', 'runwave.js');
-  let env = {
-    ...runnerEnv,
-    RUNWAVE_WORKSPACE: dirs.workspace,
-    RUNWAVE_SESSION_DIR: path.join(dirs.workspace, '.runwave-sessions'),
-  };
-  job.runwaveSessionId = job.runwaveSessionId || job.sessionId || job.jobId || `${job.game || 'runwave'}-${Date.now()}`;
-  const audioCapture = await prepareAudioCaptureEnv(env, job);
-  env = audioCapture.env;
-  let xvfb = null;
-  if (audioCapture.recordAudio) {
-    const xvfbSession = await startXvfbForAudio(job, env);
-    env = xvfbSession.env;
-    xvfb = xvfbSession.process;
-    if (xvfbSession.display) log('xvfb.ready', { display: xvfbSession.display });
-  }
-  const base = ['node', runwaveBin];
-  const start = {
-    action: 'start',
-    action_name: 'start',
-    session_id: job.runwaveSessionId,
-    url,
-    record: true,
-    recordAudio: audioCapture.recordAudio,
-    audioSource: audioCapture.audioSource,
-    gstreamerPath: job.gstreamerPath,
-    headless: job.headless ?? (audioCapture.recordAudio ? false : true),
-    channel: job.channel,
-    executablePath: job.executablePath,
-    chromiumArgs: job.chromiumArgs,
-    chromiumArgsMode: job.chromiumArgsMode,
-    viewport: job.viewport || { width: 1280, height: 720 },
-    videoSize: job.videoSize || job.viewport || { width: 1280, height: 720 },
-    outputRoot: 'artifacts/state/output',
-    outDir: 'artifacts/recordings/session',
-    initialScreenshot: true,
-    gridScreenshots: job.gridScreenshots,
-    keyAliases: job.keyAliases,
-    force: true,
-    sessionWaitMs: 120000,
-  };
-
-  const runAction = (action) => runRunwaveAction(base, dirs, env, job, action);
-  let initialResponse = null;
-  let playtestResult = null;
-  try {
-    initialResponse = await runAction(start);
-    job._runwaveInitialWebgl = webglFromResponse(initialResponse);
-    assertHardwareWebgl(job, initialResponse);
-    if (useAgentMode(job)) {
-      playtestResult = await runAgentPlan(job, dirs, initialResponse, runAction);
-    } else {
-      const plan = Array.isArray(job.actionPlan) && job.actionPlan.length ? job.actionPlan : defaultPlan(job.playtestDurationMs);
-      for (const action of plan) {
-        await runAction(action);
-      }
-    }
-  } finally {
-    if (initialResponse) {
-      await runAction({ action: 'stop', action_name: 'stop', session_id: job.runwaveSessionId }).catch((error) => {
-        log('runwave.stop.error', { error: error.message });
-      });
-    }
-    if (xvfb) {
-      await stopLongProcess(xvfb, {
-        label: 'xvfb',
-        termWaitMs: Number(job.processStopWaitMs ?? DEFAULT_PROCESS_STOP_WAIT_MS),
-        killWaitMs: Number(job.processKillWaitMs ?? DEFAULT_PROCESS_KILL_WAIT_MS),
-      }).catch((error) => {
-        log('xvfb.stop.error', { error: error.message });
-      });
-    }
-  }
-  return playtestResult;
-}
-
 async function uploadWorkspace(job, dirs, env) {
   if (!job.s3Uri) return null;
   const s3Uri = job.s3Uri.replace(/\/+$/, '');
@@ -1074,6 +503,7 @@ async function uploadWorkspace(job, dirs, env) {
   });
   return s3Uri;
 }
+
 
 async function main() {
   const args = parseArgs(process.argv);
@@ -1111,84 +541,96 @@ async function main() {
   fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
 
   const gameDir = path.join(runner.gamesRoot, job.game);
+  let xvfb = null;
 
-  let gameProcess = null;
   try {
     if (!fs.existsSync(path.join(gameDir, 'start.sh'))) {
       throw new Error(`game has no start.sh: ${job.game}`);
     }
-    job.playtestInstructions = loadPlaytestInstructions(gameDir, job.game);
-    summary.playtestInstructions = {
-      path: path.join(gameDir, 'playtest.md'),
-      bytes: Buffer.byteLength(job.playtestInstructions, 'utf8'),
-    };
-    fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
-
-    log('job.start', { jobId, game: job.game, port });
+    const metadataPath = path.join(gameDir, 'metadata.json');
+    if (!fs.existsSync(metadataPath)) {
+      throw new Error(`game has no metadata.json: ${job.game}`);
+    }
+    const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+    const metaViewport = metadata && metadata.viewport;
+    if (!metaViewport || !Number.isFinite(metaViewport.width) || !Number.isFinite(metaViewport.height)
+      || metaViewport.width <= 0 || metaViewport.height <= 0) {
+      throw new Error(`game ${job.game} metadata.json missing viewport {width,height}`);
+    }
+    job.viewport = { width: Math.round(metaViewport.width), height: Math.round(metaViewport.height) };
+    job.videoSize = job.viewport;
+    job.xvfbWidth = Math.max(Number(job.xvfbWidth) || 0, job.viewport.width);
+    job.xvfbHeight = Math.max(Number(job.xvfbHeight) || 0, job.viewport.height);
+    log('job.start', { jobId, game: job.game, port, viewport: job.viewport });
     await checkoutRunwave(job, dirs.runwave, runnerEnv);
 
-    gameProcess = spawnLong('bash', ['start.sh'], {
-      cwd: gameDir,
-      env: { ...runnerEnv, PORT: String(port) },
-    });
-    const url = `http://127.0.0.1:${port}/`;
-    await waitForHttp(url, Number(job.httpTimeoutMs || 60000));
+    const audioCapture = await prepareAudioCaptureEnv(runnerEnv, job);
+    let playtestEnv = audioCapture.env;
+    const xvfbSession = await startXvfbForAudio(job, playtestEnv);
+    playtestEnv = xvfbSession.env;
+    xvfb = xvfbSession.process;
+    if (xvfbSession.display) log('xvfb.ready', { display: xvfbSession.display });
 
-    if (!job.viewport && job.autoViewport !== false) {
-      const probe = await probeViewport(job, dirs, url, runnerEnv);
-      let viewportChoice = probe.choice;
-      if (job.vlmViewportPreflight || runnerEnv.RUNWAVE_VLM_VIEWPORT_PREFLIGHT === '1') {
-        const preflight = await chooseViewportWithVlm(job, dirs, url, runnerEnv, probe);
-        summary.viewportVlmPreflight = preflight;
-        viewportChoice = preflight.choice || viewportChoice;
-        log('viewport.vlm_preflight', {
-          jobId,
-          choice: viewportChoice,
-          error: preflight.error,
-          elapsedMs: preflight.elapsedMs,
-        });
-      }
-      job.viewport = viewportChoice.viewport;
-      job.videoSize = job.videoSize || viewportChoice.viewport;
-      summary.viewportProbe = probe;
-      summary.viewportChoice = viewportChoice;
-      fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
-      log('viewport.probe', { jobId, choice: probe.choice });
-    }
+    {
+      const { runPlaytest } = require(path.join(dirs.runwave, 'playtest', 'playtest.js'));
 
-    if (job.viewportOnly || job.viewportPreflightOnly) {
-      summary.viewportOnly = true;
-      log('viewport.only.done', { jobId, viewport: job.viewport });
-    } else {
-      const playtest = await runRunwave(job, dirs, url, runnerEnv);
-      if (job._runwaveInitialWebgl) summary.webgl = job._runwaveInitialWebgl;
-      if (playtest) {
-        summary.playtest = {
-          mode: playtest.mode,
-          steps: playtest.steps,
-          elapsedMs: playtest.elapsedMs,
-          stoppedByAgent: playtest.stoppedByAgent,
-          outputDir: playtest.outputDir,
-        };
-      }
+      const startOverrides = {
+        audioSource: audioCapture.audioSource,
+        gstreamerPath: job.gstreamerPath,
+        channel: job.channel,
+        executablePath: job.executablePath,
+        chromiumArgs: job.chromiumArgs,
+        chromiumArgsMode: job.chromiumArgsMode,
+        keyAliases: job.keyAliases,
+        gridScreenshots: job.gridScreenshots,
+      };
+      if (job.videoSize) startOverrides.videoSize = job.videoSize;
+
+      const viewport = job.viewport;
+      summary.viewport = viewport;
+
+      const onInitialResponse = (response) => {
+        const webgl = webglFromResponse(response);
+        if (webgl) summary.webgl = webgl;
+        assertHardwareWebgl(job, response);
+      };
+
+      const playtestResult = await runPlaytest({
+        gameDir,
+        outDir: dirs.workspace,
+        port,
+        openRouterApiKey: runnerEnv.OPENROUTER_API_KEY,
+        playtestDurationMs: job.playtestDurationMs,
+        minPlaytestMs: job.agentMinPlaytestMs,
+        verbose: job.verboseRunwave || runnerEnv.RUNWAVE_VERBOSE === '1',
+        sessionId: job.runwaveSessionId || job.sessionId || job.jobId,
+        viewport,
+        startOverrides,
+        env: playtestEnv,
+        onInitialResponse,
+        onLog: (event, fields) => log(event, fields),
+        processStopWaitMs: Number(job.processStopWaitMs ?? runnerEnv.RUNWAVE_PROCESS_STOP_WAIT_MS ?? DEFAULT_PROCESS_STOP_WAIT_MS),
+        processKillWaitMs: Number(job.processKillWaitMs ?? runnerEnv.RUNWAVE_PROCESS_KILL_WAIT_MS ?? DEFAULT_PROCESS_KILL_WAIT_MS),
+      });
+      if (playtestResult?.playtest) summary.playtest = playtestResult.playtest;
     }
     summary.status = 'passed';
   } catch (error) {
     summary.status = 'failed';
-    if (job._runwaveInitialWebgl) summary.webgl = job._runwaveInitialWebgl;
     summary.error = error.message;
     summary.stack = error.stack;
+    if (error.summary?.webgl) summary.webgl = error.summary.webgl;
     log('job.error', { jobId, error: error.message });
   } finally {
     summary.finishedAt = new Date().toISOString();
     fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
-    if (gameProcess) {
-      summary.gameProcessCleanup = await stopLongProcess(gameProcess, {
-        label: 'game',
+    if (xvfb) {
+      summary.xvfbCleanup = await stopLongProcess(xvfb, {
+        label: 'xvfb',
         termWaitMs: Number(job.processStopWaitMs ?? runnerEnv.RUNWAVE_PROCESS_STOP_WAIT_MS ?? DEFAULT_PROCESS_STOP_WAIT_MS),
         killWaitMs: Number(job.processKillWaitMs ?? runnerEnv.RUNWAVE_PROCESS_KILL_WAIT_MS ?? DEFAULT_PROCESS_KILL_WAIT_MS),
       }).catch((error) => {
-        log('process.stop.error', { jobId, error: error.message });
+        log('xvfb.stop.error', { jobId, error: error.message });
         return { stopped: false, reason: 'error', error: error.message };
       });
     }
@@ -1217,15 +659,12 @@ if (require.main === module) {
 
 module.exports = {
   assertHardwareWebgl,
-  chooseViewportFromProbe,
   chromiumArgs,
   dockerRunArgs,
   isSwiftShaderWebgl,
   loadPlaytestInstructions,
-  normalizeVlmViewportChoice,
   shouldRunJobInContainer,
   signalLongProcess,
   stopLongProcess,
-  viewportCandidatesFromProbe,
   waitForProcessClose,
 };

@@ -1,11 +1,36 @@
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const { ensureDir, sleep } = require('./file-utils');
 
 const DEFAULT_STOP_WAIT_MS = 3000;
 const DEFAULT_START_PROBE_MS = 500;
 const DEFAULT_VIDEO_FRAMERATE = 25;
+
+function assertAudioEnvironmentPrepared(config, env = process.env) {
+  const missing = [];
+  if (!env.DISPLAY) missing.push('DISPLAY (start Xvfb or export DISPLAY)');
+  const pactlInfo = spawnSync('pactl', ['info'], { env, encoding: 'utf8' });
+  if (pactlInfo.error || pactlInfo.status !== 0) {
+    missing.push(`pulseaudio (\`pactl info\` failed: ${(pactlInfo.stderr || pactlInfo.error?.message || 'unknown').trim().slice(0, 200)})`);
+  } else {
+    const audioSource = String(config.audioSource || env.RUNWAVE_AUDIO_SOURCE || 'default');
+    if (audioSource !== 'default') {
+      const sources = spawnSync('pactl', ['list', 'short', 'sources'], { env, encoding: 'utf8' });
+      if (sources.status !== 0) {
+        missing.push(`pulseaudio source list (\`pactl list short sources\` failed: ${(sources.stderr || '').trim().slice(0, 200)})`);
+      } else {
+        const found = sources.stdout.split(/\r?\n/).some((line) => line.split(/\s+/)[1] === audioSource);
+        if (!found) missing.push(`pulseaudio source '${audioSource}' (load a null-sink or set config.audioSource)`);
+      }
+    }
+  }
+  if (missing.length) {
+    throw new Error(
+      `gstreamer audio/video capture cannot start: audio environment prep incomplete: ${missing.join('; ')}`
+    );
+  }
+}
 
 function defaultVideoSource(platform = process.platform, env = process.env) {
   const display = env.DISPLAY || ':0';
@@ -131,6 +156,7 @@ class AudioVideoRecorder {
 
   async start() {
     this.timeSync('audio_video.start.ensure_video_dir', { dir: this.videoDir }, () => ensureDir(this.videoDir));
+    this.timeSync('audio_video.start.assert_env', () => assertAudioEnvironmentPrepared(this.config, this.env));
     const command = this.config.gstreamerPath || this.env.RUNWAVE_GSTREAMER || 'gst-launch-1.0';
     const args = audioVideoArgs(this.config, this.videoPath, process.platform, this.env);
     this.proc = this.timeSync('audio_video.start.spawn_recorder', { command, args }, () =>
@@ -203,6 +229,7 @@ class AudioVideoRecorder {
 module.exports = {
   AudioRecorder: AudioVideoRecorder,
   AudioVideoRecorder,
+  assertAudioEnvironmentPrepared,
   audioVideoArgs,
   defaultVideoSource,
   parseX11VideoSource,

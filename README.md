@@ -6,6 +6,29 @@ This package is the task-neutral version of the PR145 browser runner. It only
 provides browser control and artifact capture. It does not include a VLM
 playtester, frame picker, or judge.
 
+## Requirements
+
+Runwave's recording pipeline is **gstreamer-only**. There is no silent-video
+fallback. Any run that sets `record: true` requires all of:
+
+- **Linux.** gstreamer's `ximagesrc` and `pulsesrc` elements only work on Linux.
+- **gstreamer 1.x** with `ximagesrc`, `pulsesrc`, `vp8enc`, `opusenc`,
+  `webmmux`, and `filesink` available on `PATH` as `gst-launch-1.0` (override
+  via the `RUNWAVE_GSTREAMER` env var or the `gstreamerPath` start option).
+- **An X server or Xvfb.** `DISPLAY` must be set to a display that Chromium
+  can render into and that `ximagesrc` can read.
+- **PulseAudio running.** `pactl info` must succeed. Chromium's audio must be
+  routed to a sink whose `.monitor` source is captured by `pulsesrc`. On
+  headless servers, load a null-sink (e.g. `runwave_sink`) and set
+  `PULSE_SINK` before starting Chromium; pass `audioSource: "runwave_sink.monitor"`
+  (or `RUNWAVE_AUDIO_SOURCE`) to the start action.
+
+The harness checks these prerequisites before spawning gstreamer and fails
+fast with a message naming the missing piece.
+
+Non-recording usage (screenshots, state, keyboard/mouse) has no such
+requirements and runs on macOS/Windows/Linux.
+
 ## Install
 
 From a local checkout:
@@ -18,6 +41,9 @@ npm test
 From a private GitHub repo in a task Dockerfile:
 
 ```dockerfile
+RUN apt-get update && apt-get install -y \
+    gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly gstreamer1.0-x pulseaudio xvfb
 RUN npm install -g https://github.com/parsewave/runwave.git
 RUN npx playwright install --with-deps chromium
 ```
@@ -102,11 +128,12 @@ Useful `start` options:
 - `url` or `file`: required target.
 - `session_id`: required session identifier. Reuse it for all actions targeting
   the same browser session.
-- `record`: enable Playwright WebM recording.
-- `recordAudio`: enable one browser audio/video recording. This implies video
-  recording and writes the final WebM directly. On Linux, GStreamer captures the
-  X11 viewport plus PulseAudio `default`; override sources with `videoSource`
-  and `audioSource`.
+- `record`: enable gstreamer audio+video WebM recording. Requires all the
+  prerequisites in the [Requirements](#requirements) section. Chromium is
+  launched headed with kiosk/fullscreen flags so gstreamer's `ximagesrc` can
+  capture the rendered viewport. Override capture sources with `videoSource`
+  and `audioSource`. (`recordAudio` is accepted as a legacy alias for `record`;
+  they mean the same thing — audio is always captured when recording.)
 - `headless`: defaults to `true`; set `false` to watch the browser.
 - `channel`: optional Playwright browser channel, such as `chrome` or `msedge`.
 - `executablePath`: optional explicit browser executable path.
@@ -255,11 +282,10 @@ List known sessions:
 runwave '{"action":"sessions"}'
 ```
 
-When `recordAudio` is enabled, `stop` returns `video` and `audioVideo` pointing
-at the same recorded audio/video WebM. The machine running runwave must have
-GStreamer, an X11 video capture source, and an audio capture source. For Linux
-workers, X11 display capture plus a PulseAudio monitor source such as
-`runwave_sink.monitor` is the recommended setup.
+When `record: true` is set, `stop` returns `video` and `audioVideo` pointing at
+the same recorded audio/video WebM. All recording goes through gstreamer — see
+the [Requirements](#requirements) section for the mandatory environment
+(Linux, gstreamer, X server/Xvfb, PulseAudio).
 
 ## State
 
@@ -290,8 +316,7 @@ Each turn writes:
 - `response.json`: the main CLI response.
 - `*.png`: screenshots captured during that operation.
 - `NNN-<action_name>.json`: detailed sequence log for `step` operations.
-- `video/*.webm`: final recordings. With audio enabled,
-  `video/000-runwave-with-audio.webm` is recorded directly by GStreamer.
+- `video/000-runwave-with-audio.webm`: final gstreamer audio+video recording.
 
 Active sessions are tracked as JSON files in `.runwave-sessions/` by default.
 The matching session file is removed by `stop`.

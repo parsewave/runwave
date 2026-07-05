@@ -6,18 +6,18 @@ const {
   chromiumLaunchArgs,
 } = require('../controller/src/browser-session');
 
-test('chromium launch args leave non-audio runs unchanged', () => {
-  const args = chromiumLaunchArgs({ recordAudio: false }, {});
+test('chromium launch args leave non-recording runs unchanged', () => {
+  const args = chromiumLaunchArgs({ record: false }, {});
 
   assert.equal(args.includes('--kiosk'), false);
   assert.equal(args.includes('--start-fullscreen'), false);
   assert.equal(args.some((arg) => arg.startsWith('--window-size=')), false);
 });
 
-test('chromium launch args hide browser chrome for audio/video capture', () => {
+test('chromium launch args hide browser chrome for gstreamer capture', () => {
   const args = chromiumLaunchArgs(
     {
-      recordAudio: true,
+      record: true,
       viewport: { width: 656, height: 496 },
       videoSize: { width: 656, height: 496 },
     },
