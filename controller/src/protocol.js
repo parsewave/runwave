@@ -145,8 +145,8 @@ function startSessionConfig(input, options = {}) {
       finalScreenshot: input.finalScreenshot !== false,
       fullPageScreenshots: Boolean(input.fullPageScreenshots),
       gridScreenshots: input.gridScreenshots !== false,
-      markGridRows: optionalNumber(input.markGridRows ?? input.gridRows, 8),
-      markGridCols: optionalNumber(input.markGridCols ?? input.gridCols, 8),
+      markGridRows: optionalNumber(input.markGridRows ?? input.gridRows, 20),
+      markGridCols: optionalNumber(input.markGridCols ?? input.gridCols, 20),
     },
   };
 }

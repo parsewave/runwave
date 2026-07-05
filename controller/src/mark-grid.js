@@ -1,6 +1,6 @@
 const DEFAULT_MARK_GRID = {
-  rows: 8,
-  cols: 8,
+  rows: 20,
+  cols: 20,
 };
 const DEFAULT_GRID_SAFE_SAMPLE_RATIO = 0.9;
 
@@ -31,7 +31,8 @@ function normalizeCellList(value, grid = DEFAULT_MARK_GRID, limit = 4) {
   const max = grid.rows * grid.cols;
   const cells = [];
   for (const item of raw) {
-    const id = Number(item);
+    const rowCol = cellFromRowCol(item, grid);
+    const id = rowCol === null ? Number(item) : rowCol;
     if (!Number.isFinite(id)) continue;
     const rounded = Math.round(id);
     if (rounded < 0 || rounded >= max) continue;
@@ -41,8 +42,19 @@ function normalizeCellList(value, grid = DEFAULT_MARK_GRID, limit = 4) {
   return cells;
 }
 
+function cellFromRowCol(value, grid = DEFAULT_MARK_GRID) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const { row, col } = value;
+  if (typeof row !== 'number' || typeof col !== 'number') return null;
+  if (!Number.isInteger(row) || !Number.isInteger(col)) return null;
+  if (row < 0 || row >= grid.rows || col < 0 || col >= grid.cols) return null;
+  return row * grid.cols + col;
+}
+
 function cellsFromObject(object, grid = DEFAULT_MARK_GRID, limit = 4) {
   if (!object || typeof object !== 'object') return [];
+  const directCell = cellFromRowCol(object, grid);
+  if (directCell !== null) return [directCell];
   return normalizeCellList(
     object.cells ?? object.grid_cells ?? object.gridCells ?? object.grid_ids ?? object.gridIds ?? object.cell ?? object.grid_id,
     grid,
@@ -122,6 +134,7 @@ module.exports = {
   markGridFromConfig,
   viewportFromConfig,
   normalizeCellList,
+  cellFromRowCol,
   cellsFromObject,
   cellBounds,
   randomPointInCells,
