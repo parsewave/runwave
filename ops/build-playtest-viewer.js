@@ -55,6 +55,17 @@ function readJson(file) {
   }
 }
 
+function pickVideo(videos) {
+  const normalized = videos.map((file) => ({
+    file,
+    rel: file.split(path.sep).join('/'),
+  }));
+  return normalized.find(({ rel: file }) => file.endsWith('/recordings/session/video/000-runwave-with-audio.webm'))?.file
+    || normalized.find(({ rel: file }) => file.includes('/recordings/session/video/') && file.endsWith('.webm'))?.file
+    || normalized.find(({ rel: file }) => !file.includes('/recordings/session/audio/') && file.endsWith('.webm'))?.file
+    || videos[0];
+}
+
 function collectRuns(artifacts, outFile, options = {}) {
   const summaries = walk(artifacts, (file) => path.basename(file) === 'summary.json');
   return summaries.map((summaryPath) => {
@@ -63,6 +74,7 @@ function collectRuns(artifacts, outFile, options = {}) {
     const summary = readJson(summaryPath);
     const game = relative[0] || summary.game || 'unknown';
     const videos = walk(attemptDir, (file) => file.endsWith('.webm')).sort();
+    const video = pickVideo(videos);
     const screenshots = walk(attemptDir, (file) => file.endsWith('.png')).sort();
     return {
       game,
@@ -71,7 +83,7 @@ function collectRuns(artifacts, outFile, options = {}) {
       startedAt: summary.startedAt || '',
       finishedAt: summary.finishedAt || '',
       uploadedTo: summary.uploadedTo || '',
-      video: videos[0] ? rel(outFile, videos[0]) : '',
+      video: video ? rel(outFile, video) : '',
       poster: screenshots[0] ? rel(outFile, screenshots[0]) : '',
       screenshots: screenshots.map((file) => rel(outFile, file)),
       summary: rel(outFile, summaryPath),
@@ -83,25 +95,26 @@ function collectRuns(artifacts, outFile, options = {}) {
 
 function render(runs, artifacts) {
   const cards = runs.map((run, index) => `
-    <article class="card hidden" data-index="${index}" data-game="${escapeHtml(run.game)}" data-status="${escapeHtml(run.status)}">
+    <article class="card" data-index="${index}" data-game="${escapeHtml(run.game)}" data-status="${escapeHtml(run.status)}" data-volume="on">
       <header>
         <div>
           <h2>${escapeHtml(run.game)}</h2>
           <p>${escapeHtml(run.attempt)} · ${escapeHtml(run.status)}</p>
         </div>
-        <a href="${escapeHtml(run.summary)}">summary</a>
+        <div class="card-actions">
+          <button type="button" class="volume active" data-action="volume" aria-pressed="true">Volume On</button>
+          <a href="${escapeHtml(run.summary)}">summary</a>
+        </div>
       </header>
       <div class="media">
-        ${run.video ? `<video controls muted playsinline preload="none" data-src="${escapeHtml(run.video)}" ${run.poster ? `poster="${escapeHtml(run.poster)}"` : ''}></video>` : '<div class="missing">No video found</div>'}
+        ${run.video ? `<video playsinline preload="metadata" src="${escapeHtml(run.video)}" ${run.poster ? `poster="${escapeHtml(run.poster)}"` : ''}></video>` : '<div class="missing">No video found</div>'}
       </div>
-      <div class="strip">
-        ${run.screenshots.slice(0, 8).map((shot) => `<a href="${escapeHtml(shot)}"><img src="${escapeHtml(shot)}" loading="lazy" alt=""></a>`).join('')}
+      <div class="transport">
+        <button type="button" data-action="play">Play</button>
+        <button type="button" data-action="pause">Pause</button>
+        <input class="seek" type="range" min="0" max="1000" value="0" step="1" data-action="seek" aria-label="Seek ${escapeHtml(run.game)}" disabled>
+        <span class="time" aria-live="off">0:00 / 0:00</span>
       </div>
-      <footer>
-        <button type="button" data-play="${index}">Play</button>
-        <button type="button" data-pause="${index}">Pause</button>
-        <span>${escapeHtml(run.finishedAt || run.startedAt)}</span>
-      </footer>
     </article>
   `).join('\n');
 
@@ -118,28 +131,35 @@ function render(runs, artifacts) {
     h1 { margin: 0; font-size: 18px; font-weight: 650; }
     .meta { color: #bbb; font-size: 13px; }
     .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-    input { width: min(360px, 42vw); padding: 8px 10px; border: 1px solid #444; border-radius: 6px; background: #0d0d0d; color: #f4f4f4; }
+    input[type="search"] { width: min(360px, 42vw); padding: 8px 10px; border: 1px solid #444; border-radius: 6px; background: #0d0d0d; color: #f4f4f4; }
+    input.seek { flex: 1 1 120px; min-width: 80px; max-width: none; padding: 0; accent-color: #79a7ff; }
     button, a { color: #f4f4f4; }
     button { padding: 7px 10px; border: 1px solid #555; border-radius: 6px; background: #242424; cursor: pointer; }
-    button.primary { border-color: #79a7ff; background: #1f4f97; }
+    button.active { border-color: #79a7ff; background: #1f4f97; }
     button:disabled { cursor: not-allowed; opacity: 0.5; }
-    main { display: grid; grid-template-columns: repeat(2, minmax(360px, 1fr)); gap: 14px; max-width: 1480px; margin: 0 auto; padding: 14px; }
+    main { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 10px; padding: 10px; }
     .card { border: 1px solid #333; border-radius: 8px; background: #181818; overflow: hidden; }
-    .card header, .card footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; }
-    h2 { margin: 0; font-size: 15px; font-weight: 650; }
+    .card header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 9px; }
+    .card-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+    .card-actions a { font-size: 12px; }
+    h2 { margin: 0; font-size: 13px; font-weight: 650; line-height: 1.2; }
     p { margin: 3px 0 0; color: #aaa; font-size: 12px; }
-    .media { aspect-ratio: 1 / 1; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .media { aspect-ratio: 16 / 9; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
     video { display: block; width: 100%; height: 100%; background: #000; object-fit: contain; }
     .missing { display: grid; place-items: center; width: 100%; height: 100%; background: #050505; color: #aaa; }
-    .strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; padding: 2px; background: #0b0b0b; }
-    .strip a { align-items: center; aspect-ratio: 1 / 1; background: #050505; display: flex; justify-content: center; overflow: hidden; }
-    .strip img { display: block; max-height: 100%; max-width: 100%; object-fit: contain; }
-    footer span { color: #aaa; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .transport { display: flex; align-items: center; gap: 8px; padding: 8px 9px; }
+    .transport .time { color: #aaa; flex: 0 0 auto; font-size: 11px; min-width: 80px; text-align: right; white-space: nowrap; }
     .hidden { display: none; }
-    @media (max-width: 640px) {
+    @media (max-width: 1180px) {
+      main { grid-template-columns: repeat(3, minmax(220px, 1fr)); }
+    }
+    @media (max-width: 860px) {
+      main { grid-template-columns: repeat(2, minmax(220px, 1fr)); }
+    }
+    @media (max-width: 560px) {
       header.page { align-items: stretch; flex-direction: column; }
       main { grid-template-columns: 1fr; padding: 8px; }
-      input { width: 100%; box-sizing: border-box; }
+      input[type="search"] { width: 100%; box-sizing: border-box; }
     }
   </style>
 </head>
@@ -151,9 +171,7 @@ function render(runs, artifacts) {
     </div>
     <div class="controls">
       <input id="filter" type="search" placeholder="Filter games">
-      <button id="prevPage" type="button">Previous 4</button>
-      <button id="nextPage" class="primary" type="button">Next 4</button>
-      <button id="pauseAll" type="button">Pause Page</button>
+      <button id="pauseAll" type="button">Pause All</button>
       <div id="pageStatus" class="meta" role="status" aria-live="polite"></div>
     </div>
   </header>
@@ -163,36 +181,54 @@ function render(runs, artifacts) {
     const cards = [...document.querySelectorAll('.card')];
     const videos = [...document.querySelectorAll('video')];
     const filter = document.querySelector('#filter');
-    const prevPage = document.querySelector('#prevPage');
-    const nextPage = document.querySelector('#nextPage');
     const pauseAll = document.querySelector('#pauseAll');
     const pageStatus = document.querySelector('#pageStatus');
-    let page = 0;
+    let seekingVideo = null;
 
     const matchingCards = () => {
       const q = filter.value.trim().toLowerCase();
       return cards.filter((card) => !q || card.dataset.game.toLowerCase().includes(q));
     };
 
-    const ensureVideoSource = (video) => {
-      if (!video || video.src || !video.dataset.src) return;
-      video.src = video.dataset.src;
-      video.load();
+    const applyCardVolume = (card) => {
+      const video = card?.querySelector('video');
+      const button = card?.querySelector('[data-action="volume"]');
+      const on = card?.dataset.volume !== 'off';
+      if (video) {
+        video.muted = !on;
+        video.volume = on ? 1 : 0;
+      }
+      if (button) {
+        button.textContent = on ? 'Volume On' : 'Volume Off';
+        button.setAttribute('aria-pressed', String(on));
+        button.classList.toggle('active', on);
+      }
     };
 
-    const unloadVideo = (video) => {
+    const formatTime = (seconds) => {
+      if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+      const total = Math.floor(seconds);
+      const minutes = Math.floor(total / 60);
+      const remainder = String(total % 60).padStart(2, '0');
+      return \`\${minutes}:\${remainder}\`;
+    };
+
+    const updateSeekState = (video) => {
       if (!video) return;
-      video.pause();
-      if (video.src) {
-        video.removeAttribute('src');
-        video.load();
+      const card = video.closest('.card');
+      const seek = card?.querySelector('.seek');
+      const time = card?.querySelector('.time');
+      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      if (seek && seekingVideo !== video) {
+        seek.disabled = duration <= 0;
+        seek.value = duration > 0 ? String(Math.round((video.currentTime / duration) * 1000)) : '0';
       }
+      if (time) time.textContent = \`\${formatTime(video.currentTime)} / \${formatTime(duration)}\`;
     };
 
     const playVideo = async (video) => {
       if (!video) return false;
-      ensureVideoSource(video);
-      video.muted = true;
+      applyCardVolume(video.closest('.card'));
       video.playsInline = true;
       try {
         await video.play();
@@ -202,58 +238,66 @@ function render(runs, artifacts) {
       }
     };
 
-    const renderPage = async ({ autoplay = true } = {}) => {
+    const renderGrid = () => {
       const matches = matchingCards();
-      const pageCount = Math.max(1, Math.ceil(matches.length / PAGE_SIZE));
-      page = Math.min(Math.max(page, 0), pageCount - 1);
-      const visible = new Set(matches.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE));
+      const visible = new Set(matches);
 
       for (const card of cards) {
         const show = visible.has(card);
         card.classList.toggle('hidden', !show);
-        const video = card.querySelector('video');
-        if (!show) unloadVideo(video);
-        else ensureVideoSource(video);
+        if (!show) card.querySelector('video')?.pause();
       }
 
-      prevPage.disabled = matches.length <= PAGE_SIZE;
-      nextPage.disabled = matches.length <= PAGE_SIZE;
       pageStatus.textContent = matches.length
-        ? \`Page \${page + 1} of \${pageCount} · showing \${visible.size} of \${matches.length}\`
+        ? \`Showing \${matches.length} of \${cards.length} · 4 columns on wide screens\`
         : 'No matching games';
-
-      if (autoplay) await Promise.all([...visible].map((card) => playVideo(card.querySelector('video'))));
     };
 
     filter.addEventListener('input', () => {
-      page = 0;
-      renderPage();
-    });
-    prevPage.addEventListener('click', () => {
-      const pageCount = Math.max(1, Math.ceil(matchingCards().length / PAGE_SIZE));
-      page = (page - 1 + pageCount) % pageCount;
-      renderPage();
-      prevPage.blur();
-    });
-    nextPage.addEventListener('click', () => {
-      const pageCount = Math.max(1, Math.ceil(matchingCards().length / PAGE_SIZE));
-      page = (page + 1) % pageCount;
-      renderPage();
-      nextPage.blur();
+      renderGrid();
     });
     pauseAll.addEventListener('click', () => {
-      for (const card of matchingCards().slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE)) {
-        card.querySelector('video')?.pause();
-      }
+      for (const video of videos) video.pause();
       pauseAll.blur();
     });
     document.addEventListener('click', (event) => {
-      const play = event.target.closest('[data-play]');
-      const pause = event.target.closest('[data-pause]');
-      if (play) playVideo(videos[Number(play.dataset.play)]);
-      if (pause) videos[Number(pause.dataset.pause)]?.pause();
+      const button = event.target.closest('[data-action]');
+      if (!button || button.dataset.action === 'seek') return;
+      const card = button.closest('.card');
+      const video = card?.querySelector('video');
+      if (button.dataset.action === 'play') playVideo(video);
+      if (button.dataset.action === 'pause') video?.pause();
+      if (button.dataset.action === 'volume') {
+        card.dataset.volume = card.dataset.volume === 'off' ? 'on' : 'off';
+        applyCardVolume(card);
+      }
     });
-    renderPage();
+    document.addEventListener('input', (event) => {
+      const seek = event.target.closest('.seek');
+      if (!seek) return;
+      const video = seek.closest('.card')?.querySelector('video');
+      if (!video) return;
+      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      if (duration > 0) video.currentTime = (Number(seek.value) / 1000) * duration;
+      updateSeekState(video);
+    });
+    document.addEventListener('pointerdown', (event) => {
+      const seek = event.target.closest('.seek');
+      if (seek) seekingVideo = seek.closest('.card')?.querySelector('video') || null;
+    });
+    document.addEventListener('pointerup', () => {
+      if (seekingVideo) updateSeekState(seekingVideo);
+      seekingVideo = null;
+    });
+    for (const video of videos) {
+      applyCardVolume(video.closest('.card'));
+      video.addEventListener('loadedmetadata', () => updateSeekState(video));
+      video.addEventListener('durationchange', () => updateSeekState(video));
+      video.addEventListener('timeupdate', () => updateSeekState(video));
+      video.addEventListener('seeked', () => updateSeekState(video));
+      video.addEventListener('play', () => applyCardVolume(video.closest('.card')));
+    }
+    renderGrid();
   </script>
 </body>
 </html>

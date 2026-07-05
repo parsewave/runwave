@@ -7,6 +7,31 @@ const { drawGridOnScreenshot } = require('./grid-overlay');
 const { targetUrl } = require('./protocol');
 const { readPageState } = require('./state-reader');
 
+const DEFAULT_CHROMIUM_ARGS = ['--no-sandbox', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'];
+
+function parseArgList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  const text = String(value).trim();
+  if (!text) return [];
+  if (text.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+    } catch {
+      // Fall through to whitespace parsing.
+    }
+  }
+  return text.split(/\s+/).filter(Boolean);
+}
+
+function chromiumArgs(config = {}, env = process.env) {
+  const configured = parseArgList(config.chromiumArgs ?? env.RUNWAVE_CHROMIUM_ARGS);
+  const mode = String(config.chromiumArgsMode || env.RUNWAVE_CHROMIUM_ARGS_MODE || 'append').toLowerCase();
+  if (mode === 'replace') return configured;
+  return [...DEFAULT_CHROMIUM_ARGS, ...configured];
+}
+
 class BrowserSession {
   constructor(config, paths, profiler = null) {
     this.config = config;
@@ -48,7 +73,7 @@ class BrowserSession {
 
     const launchOptions = {
       headless: this.config.headless !== false,
-      args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'],
+      args: chromiumArgs(this.config),
     };
     if (this.config.channel) launchOptions.channel = String(this.config.channel);
     if (this.config.executablePath) launchOptions.executablePath = String(this.config.executablePath);
@@ -278,4 +303,5 @@ class BrowserSession {
 
 module.exports = {
   BrowserSession,
+  chromiumArgs,
 };

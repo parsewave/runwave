@@ -7,12 +7,30 @@ const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const { defaultSshKey } = require('./lib/ssh-key');
 
+const DEFAULT_HARDWARE_WEBGL_GAMES = new Set(['aether-outpost-patrol']);
+const HARDWARE_WEBGL_CHROMIUM_ARGS = [
+  '--no-sandbox',
+  '--ignore-gpu-blocklist',
+  '--enable-gpu',
+  '--use-gl=egl',
+  '--autoplay-policy=no-user-gesture-required',
+];
+
+function parseList(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function parseArgs(argv) {
   const args = {
     gamesDir: path.resolve(process.cwd(), 'cruft/games'),
     gamesS3Uri: 's3://pw-cruft/games',
     sshKey: defaultSshKey(),
     sshUser: 'root',
+    gpuInventory: '',
+    gpuConcurrencyPerServer: null,
     runwaveRepo: 'https://github.com/parsewave/runwave',
     runwaveRef: 'main',
     attemptsPerGame: 1,
@@ -26,12 +44,15 @@ function parseArgs(argv) {
     viewportPreflightAttempts: null,
     playMode: 'scripted',
     skipPlaywrightInstall: false,
+    hardwareWebglGames: new Set(DEFAULT_HARDWARE_WEBGL_GAMES),
+    hardwareWebglChromiumArgs: [...HARDWARE_WEBGL_CHROMIUM_ARGS],
     runId: `run-${new Date().toISOString().replace(/[:.]/g, '-')}`,
   };
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = () => argv[++i];
     if (arg === '--inventory') args.inventory = next();
+    else if (arg === '--gpu-inventory') args.gpuInventory = next();
     else if (arg === '--s3-uri') args.s3Uri = next();
     else if (arg === '--games-s3-uri') args.gamesS3Uri = next();
     else if (arg === '--games-dir') args.gamesDir = path.resolve(next());
@@ -43,6 +64,7 @@ function parseArgs(argv) {
     else if (arg === '--attempts-per-game') args.attemptsPerGame = Number(next());
     else if (arg === '--total-attempts') args.totalAttempts = Number(next());
     else if (arg === '--concurrency-per-server') args.concurrencyPerServer = Number(next());
+    else if (arg === '--gpu-concurrency-per-server') args.gpuConcurrencyPerServer = Number(next());
     else if (arg === '--require-concurrency') args.requiredConcurrency = Number(next());
     else if (arg === '--base-port') args.basePort = Number(next());
     else if (arg === '--playtest-duration-ms') args.playtestDurationMs = Number(next());
@@ -52,6 +74,8 @@ function parseArgs(argv) {
     else if (arg === '--play-mode') args.playMode = next();
     else if (arg === '--agent') args.playMode = 'agent';
     else if (arg === '--skip-playwright-install') args.skipPlaywrightInstall = true;
+    else if (arg === '--hardware-webgl-games') args.hardwareWebglGames = new Set(parseList(next()));
+    else if (arg === '--no-default-hardware-webgl-games') args.hardwareWebglGames = new Set();
     else if (arg === '--run-id') args.runId = next();
     else if (arg === '--include-nonbrowser') args.includeNonbrowser = true;
     else if (arg === '--local-games') args.gamesS3Uri = '';

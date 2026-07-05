@@ -209,13 +209,11 @@ test('agent playtest loop calls model and executes returned sequence', async () 
   assert.equal(fs.existsSync(path.join(dir, 'agent', 'agent-summary.json')), true);
 });
 
-test('agent loop records invalid JSON as a failed action and continues from a fresh screenshot', async () => {
+test('agent loop records invalid JSON as a failed action and retries with the same screenshot', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-json-failed-action-test-'));
   const screenshot = path.join(dir, 'screen.png');
-  const freshScreenshot = path.join(dir, 'fresh-screen.png');
   const afterScreenshot = path.join(dir, 'after-screen.png');
   fs.writeFileSync(screenshot, 'initial screenshot bytes');
-  fs.writeFileSync(freshScreenshot, 'fresh screenshot bytes');
   fs.writeFileSync(afterScreenshot, 'after screenshot bytes');
 
   const modelScreenshots = [];
@@ -255,25 +253,162 @@ test('agent loop records invalid JSON as a failed action and continues from a fr
     },
     runAction: async (action) => {
       harnessActions.push(action);
-      if (action.action === 'screenshot') {
-        return { ok: true, action: 'screenshot', screenshot: freshScreenshot, state: { screen: 'fresh' } };
-      }
       return { ok: true, action: 'step', captures: [{ path: afterScreenshot }], endState: { screen: 'after' } };
     },
   });
 
   assert.equal(result.steps, 2);
   assert.equal(result.modelErrorCount, 1);
-  assert.equal(harnessActions[0].action, 'screenshot');
-  assert.equal(harnessActions[0].action_name, 'agent-step-001-failed-action');
-  assert.equal(harnessActions[1].action, 'step');
+  assert.equal(harnessActions.length, 1);
+  assert.equal(harnessActions[0].action, 'step');
   assert.equal(result.history[0].failedAction, true);
   assert.equal(result.history[0].actions[0].type, 'failed_action');
   assert.equal(result.history[0].result.ok, false);
   assert.match(result.history[0].result.error, /malformed JSON/);
-  assert.equal(result.history[0].result.screenshot, freshScreenshot);
+  assert.equal(result.history[0].result.screenshot, screenshot);
+  assert.equal(result.history[0].result.screenshotChanged, false);
+  assert.deepEqual(result.history[0].result.state, { url: 'http://example.test', screen: 'initial' });
   assert.equal(result.history[1].actions[0].key, 'Enter');
-  assert.notEqual(modelScreenshots[0], modelScreenshots[1]);
+  assert.equal(modelScreenshots[0], modelScreenshots[1]);
+});
+
+test('agent loop records schema-invalid model sequences as failed actions without changing browser state', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-schema-failed-action-test-'));
+  const screenshot = path.join(dir, 'screen.png');
+  const afterScreenshot = path.join(dir, 'after-screen.png');
+  fs.writeFileSync(screenshot, 'initial screenshot bytes');
+  fs.writeFileSync(afterScreenshot, 'after screenshot bytes');
+
+  const modelScreenshots = [];
+  let calls = 0;
+  const harnessActions = [];
+  const result = await runAgenticPlaytest({
+    job: {
+      playtestDurationMs: 9000,
+      agentMinPlaytestMs: 0,
+      viewport: { width: 640, height: 360 },
+      agentMaxModelFallbacks: 2,
+    },
+    initialResponse: {
+      screenshot,
+      state: { screen: 'unchanged' },
+    },
+    outputDir: path.join(dir, 'agent'),
+    modelClient: async ({ messages }) => {
+      calls += 1;
+      const image = messages[0].content.find((item) => item.type === 'image_url');
+      modelScreenshots.push(image.image_url.url);
+      if (calls === 1) {
+        return {
+          model: 'fake-model',
+          text: '{"summary":"bad","actions":[],"the board.":"stray prose"}',
+          usage: { total_tokens: 1 },
+          json: {
+            summary: 'bad',
+            actions: [],
+            'the board.': 'stray prose',
+          },
+        };
+      }
+      return {
+        model: 'fake-model',
+        text: '{"summary":"valid","actions":[{"type":"key","start":0,"end":500,"key":"Enter"}],"should_stop":true}',
+        usage: { total_tokens: 1 },
+        json: {
+          summary: 'valid',
+          actions: [{ type: 'key', start: 0, end: 500, key: 'Enter' }],
+          should_stop: true,
+        },
+      };
+    },
+    runAction: async (action) => {
+      harnessActions.push(action);
+      return { ok: true, action: 'step', captures: [{ path: afterScreenshot }], endState: { screen: 'after' } };
+    },
+  });
+
+  assert.equal(result.steps, 2);
+  assert.equal(result.modelErrorCount, 1);
+  assert.equal(harnessActions.length, 1);
+  assert.equal(harnessActions[0].action, 'step');
+  assert.equal(result.history[0].failedAction, true);
+  assert.equal(result.history[0].result.ok, false);
+  assert.match(result.history[0].result.error, /unknown field "the board\."/);
+  assert.equal(result.history[0].result.screenshot, screenshot);
+  assert.equal(result.history[0].result.screenshotChanged, false);
+  assert.deepEqual(result.history[0].result.state, { screen: 'unchanged' });
+  assert.equal(result.history[1].actions[0].key, 'Enter');
+  assert.equal(modelScreenshots[0], modelScreenshots[1]);
+});
+
+test('agent loop records action execution failures and retries with the same screenshot', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-execution-failed-action-test-'));
+  const screenshot = path.join(dir, 'screen.png');
+  const afterScreenshot = path.join(dir, 'after-screen.png');
+  fs.writeFileSync(screenshot, 'initial screenshot bytes');
+  fs.writeFileSync(afterScreenshot, 'after screenshot bytes');
+
+  const modelScreenshots = [];
+  let calls = 0;
+  const harnessActions = [];
+  const logEvents = [];
+  const result = await runAgenticPlaytest({
+    job: {
+      playtestDurationMs: 9000,
+      agentMinPlaytestMs: 0,
+      viewport: { width: 640, height: 360 },
+    },
+    initialResponse: {
+      screenshot,
+      state: { screen: 'unchanged' },
+    },
+    outputDir: path.join(dir, 'agent'),
+    log: (event, payload) => logEvents.push({ event, payload }),
+    modelClient: async ({ messages }) => {
+      calls += 1;
+      const image = messages[0].content.find((item) => item.type === 'image_url');
+      modelScreenshots.push(image.image_url.url);
+      return {
+        model: 'fake-model',
+        text: '{"summary":"try key","actions":[{"type":"key","start":0,"end":200,"key":"KeyF5"}],"should_stop":false}',
+        usage: { total_tokens: 1 },
+        json: calls === 1
+          ? {
+              summary: 'try key',
+              actions: [{ type: 'key', start: 0, end: 200, key: 'KeyF5' }],
+              should_stop: false,
+            }
+          : {
+              summary: 'valid retry',
+              actions: [{ type: 'key', start: 0, end: 500, key: 'Enter' }],
+              should_stop: true,
+            },
+      };
+    },
+    runAction: async (action) => {
+      harnessActions.push(action);
+      if (harnessActions.length === 1) {
+        throw new Error('runwave action failed for agent-step-001: keyboard.down: Unknown key: "KeyF5"');
+      }
+      return { ok: true, action: 'step', captures: [{ path: afterScreenshot }], endState: { screen: 'after' } };
+    },
+  });
+
+  assert.equal(result.steps, 2);
+  assert.equal(harnessActions.length, 2);
+  assert.equal(harnessActions[0].actions[0].key, 'KeyF5');
+  assert.equal(result.history[0].failedAction, true);
+  assert.equal(result.history[0].actions[0].key, 'KeyF5');
+  assert.equal(result.history[0].result.ok, false);
+  assert.match(result.history[0].result.error, /Unknown key/);
+  assert.equal(result.history[0].result.screenshot, screenshot);
+  assert.equal(result.history[0].result.screenshotChanged, false);
+  assert.equal(result.history[0].result.captureCount, 0);
+  assert.deepEqual(result.history[0].result.state, { screen: 'unchanged' });
+  assert.equal(result.history[1].actions[0].key, 'Enter');
+  assert.equal(modelScreenshots[0], modelScreenshots[1]);
+  assert.equal(logEvents.some((entry) => entry.event === 'agent.sequence_execution_error'), true);
+  assert.equal(logEvents.some((entry) => entry.event === 'agent.failed_action'), true);
 });
 
 test('parses fenced nested JSON responses from vision models', () => {
