@@ -77,12 +77,12 @@ test('normalizes grid-cell model actions into concrete pointer events', () => {
   assert.ok(clicks.every((click) => !Object.hasOwn(click, 'clickMode')));
   assert.equal(clicks[0].cells[0], 9);
   assert.equal(clicks[0].end, 150);
-  assert.ok(clicks[0].x >= 100 && clicks[0].x <= 199);
-  assert.ok(clicks[0].y >= 100 && clicks[0].y <= 199);
+  assert.ok(clicks[0].x >= 450 && clicks[0].x <= 500);
+  assert.ok(clicks[0].y >= 0 && clicks[0].y <= 50);
   assert.deepEqual(clicks.slice(1).map((click) => click.start), [200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100]);
   assert.deepEqual(clicks.slice(1).map((click) => click.end), [250, 350, 450, 550, 650, 750, 850, 950, 1050, 1150]);
-  assert.ok(clicks.slice(1).every((click) => click.x >= 200 && click.x <= 400));
-  assert.ok(clicks.slice(1).every((click) => click.y >= 200 && click.y <= 300));
+  assert.ok(clicks.slice(1).every((click) => click.x >= 100 && click.x <= 200));
+  assert.ok(clicks.slice(1).every((click) => click.y >= 50 && click.y <= 100));
   assert.deepEqual(drag.from.cells, [34]);
   assert.deepEqual(drag.to.cells, [35]);
   assert.equal(drag.end, 350);
@@ -130,9 +130,9 @@ test('normalizes harness grid-cell steps into concrete pointer events', () => {
     {
       actions: [
         { type: 'click', start: 100, cells: [0] },
-        { type: 'multi_click', start: 200, cells: [63], count: 3 },
-        { type: 'drag', start: 300, from_cells: [8], to_cells: [15] },
-        { type: 'cursor_move', start: 400, cells: [7] },
+        { type: 'multi_click', start: 200, cells: [255], count: 3 },
+        { type: 'drag', start: 300, from_cells: [16], to_cells: [31] },
+        { type: 'cursor_move', start: 400, cells: [15] },
       ],
     },
     { viewport: { width: 800, height: 800 } },
@@ -143,13 +143,13 @@ test('normalizes harness grid-cell steps into concrete pointer events', () => {
   assert.equal(step.clicks.length, 4);
   assert.deepEqual(step.clicks.slice(1).map((click) => click.start), [200, 300, 400]);
   assert.deepEqual(step.clicks.slice(1).map((click) => click.end), [250, 350, 450]);
-  assert.ok(step.clicks[0].x >= 0 && step.clicks[0].x <= 99);
-  assert.ok(step.clicks[0].y >= 0 && step.clicks[0].y <= 99);
-  assert.ok(step.clicks.slice(1).every((click) => click.x >= 700 && click.x <= 799));
-  assert.ok(step.clicks.slice(1).every((click) => click.y >= 700 && click.y <= 799));
-  assert.deepEqual(step.drags[0].from.cells, [8]);
-  assert.deepEqual(step.drags[0].to.cells, [15]);
-  assert.deepEqual(step.cursorMoves[0].to.cells, [7]);
+  assert.ok(step.clicks[0].x >= 0 && step.clicks[0].x <= 50);
+  assert.ok(step.clicks[0].y >= 0 && step.clicks[0].y <= 50);
+  assert.ok(step.clicks.slice(1).every((click) => click.x >= 750 && click.x <= 799));
+  assert.ok(step.clicks.slice(1).every((click) => click.y >= 750 && click.y <= 799));
+  assert.deepEqual(step.drags[0].from.cells, [16]);
+  assert.deepEqual(step.drags[0].to.cells, [31]);
+  assert.deepEqual(step.cursorMoves[0].to.cells, [15]);
 });
 
 test('infers harness duration from action timing fields only', () => {
@@ -619,7 +619,7 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.match(prompt, /"type":"drag"/);
   assert.match(prompt, /Single Player/);
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
-  assert.match(prompt, /light 8x8 red mark grid/);
+  assert.match(prompt, /light 16x16 red mark grid/);
   assert.match(prompt, /"type":"multi_click"/);
   assert.match(prompt, /JSON output contract/);
   assert.match(prompt, /Top-level keys must be exactly/);

@@ -117,8 +117,8 @@ function drawCoordinateGridOnScreenshot(file) {
 
 function drawMarkGridOnScreenshot(file, config = {}) {
   const png = PNG.sync.read(fs.readFileSync(file));
-  const rows = Math.max(1, Math.round(Number(config.markGridRows ?? config.gridRows ?? 8)));
-  const cols = Math.max(1, Math.round(Number(config.markGridCols ?? config.gridCols ?? 8)));
+  const rows = Math.max(1, Math.round(Number(config.markGridRows ?? config.gridRows ?? 16)));
+  const cols = Math.max(1, Math.round(Number(config.markGridCols ?? config.gridCols ?? 16)));
   const cellWidth = png.width / cols;
   const cellHeight = png.height / rows;
   const lineColor = [255, 36, 36, 0.48];
