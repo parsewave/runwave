@@ -37,6 +37,10 @@ function mkdirp(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
 function safeName(value) {
   return String(value || '')
     .toLowerCase()
@@ -100,7 +104,14 @@ async function prepareAudioCaptureEnv(env, job) {
 
   await run('pulseaudio', ['--start', '--exit-idle-time=-1'], { env: audioEnv });
   const modules = await run('pactl', ['list', 'short', 'modules'], { env: audioEnv });
-  if (!modules.stdout.includes(`sink_name=${sink}`)) {
+  for (const line of modules.stdout.split(/\r?\n/)) {
+    const fields = line.trim().split(/\s+/);
+    if (fields[1] === 'module-suspend-on-idle') {
+      await run('pactl', ['unload-module', fields[0]], { env: audioEnv });
+    }
+  }
+  const activeModules = await run('pactl', ['list', 'short', 'modules'], { env: audioEnv });
+  if (!activeModules.stdout.includes(`sink_name=${sink}`)) {
     await run('pactl', [
       'load-module',
       'module-null-sink',
@@ -115,6 +126,29 @@ async function prepareAudioCaptureEnv(env, job) {
     recordAudio: true,
     audioInputFormat: job.audioInputFormat || 'pulse',
     audioSource: job.audioSource || `${sink}.monitor`,
+  };
+}
+
+async function startXvfbForAudio(job, env) {
+  if (job.audioXvfb === false) return { env, process: null, display: env.DISPLAY || null };
+  const display = job.xvfbDisplay || env.RUNWAVE_XVFB_DISPLAY || `:${100 + (Number(job.port || 0) % 500)}`;
+  const screen = job.xvfbScreen || env.RUNWAVE_XVFB_SCREEN || '1280x720x24';
+  const xvfb = spawnLong('Xvfb', [display, '-screen', '0', screen, '-nolisten', 'tcp'], {
+    env,
+  });
+  const waitMs = Number(job.xvfbStartWaitMs ?? env.RUNWAVE_XVFB_START_WAIT_MS ?? 500);
+  if (waitMs > 0) await sleep(waitMs);
+  if (processHasClosed(xvfb)) {
+    throw new Error(`Xvfb exited during startup for display ${display}`);
+  }
+  return {
+    env: {
+      ...env,
+      DISPLAY: display,
+      NO_AT_BRIDGE: env.NO_AT_BRIDGE || '1',
+    },
+    process: xvfb,
+    display,
   };
 }
 
@@ -758,6 +792,13 @@ async function runRunwave(job, dirs, url, runnerEnv = process.env) {
   };
   const audioCapture = await prepareAudioCaptureEnv(env, job);
   env = audioCapture.env;
+  let xvfb = null;
+  if (audioCapture.recordAudio) {
+    const xvfbSession = await startXvfbForAudio(job, env);
+    env = xvfbSession.env;
+    xvfb = xvfbSession.process;
+    if (xvfbSession.display) log('xvfb.ready', { display: xvfbSession.display });
+  }
   const base = ['node', runwaveBin];
   const start = {
     action: 'start',
@@ -767,7 +808,7 @@ async function runRunwave(job, dirs, url, runnerEnv = process.env) {
     recordAudio: audioCapture.recordAudio,
     audioInputFormat: audioCapture.audioInputFormat,
     audioSource: audioCapture.audioSource,
-    headless: true,
+    headless: audioCapture.recordAudio ? false : true,
     channel: job.channel,
     executablePath: job.executablePath,
     viewport: job.viewport || { width: 1280, height: 720 },
@@ -797,6 +838,15 @@ async function runRunwave(job, dirs, url, runnerEnv = process.env) {
     await runAction({ action: 'stop', action_name: 'stop' }).catch((error) => {
       log('runwave.stop.error', { error: error.message });
     });
+    if (xvfb) {
+      await stopLongProcess(xvfb, {
+        label: 'xvfb',
+        termWaitMs: Number(job.processStopWaitMs ?? DEFAULT_PROCESS_STOP_WAIT_MS),
+        killWaitMs: Number(job.processKillWaitMs ?? DEFAULT_PROCESS_KILL_WAIT_MS),
+      }).catch((error) => {
+        log('xvfb.stop.error', { error: error.message });
+      });
+    }
   }
   return playtestResult;
 }

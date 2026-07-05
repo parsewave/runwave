@@ -55,6 +55,17 @@ function readJson(file) {
   }
 }
 
+function pickVideo(videos) {
+  const normalized = videos.map((file) => ({
+    file,
+    rel: file.split(path.sep).join('/'),
+  }));
+  return normalized.find(({ rel: file }) => file.endsWith('/recordings/session/video/000-runwave-with-audio.webm'))?.file
+    || normalized.find(({ rel: file }) => file.includes('/recordings/session/video/') && file.endsWith('.webm'))?.file
+    || normalized.find(({ rel: file }) => !file.includes('/recordings/session/audio/') && file.endsWith('.webm'))?.file
+    || videos[0];
+}
+
 function collectRuns(artifacts, outFile, options = {}) {
   const summaries = walk(artifacts, (file) => path.basename(file) === 'summary.json');
   return summaries.map((summaryPath) => {
@@ -63,6 +74,7 @@ function collectRuns(artifacts, outFile, options = {}) {
     const summary = readJson(summaryPath);
     const game = relative[0] || summary.game || 'unknown';
     const videos = walk(attemptDir, (file) => file.endsWith('.webm')).sort();
+    const video = pickVideo(videos);
     const screenshots = walk(attemptDir, (file) => file.endsWith('.png')).sort();
     return {
       game,
@@ -71,7 +83,7 @@ function collectRuns(artifacts, outFile, options = {}) {
       startedAt: summary.startedAt || '',
       finishedAt: summary.finishedAt || '',
       uploadedTo: summary.uploadedTo || '',
-      video: videos[0] ? rel(outFile, videos[0]) : '',
+      video: video ? rel(outFile, video) : '',
       poster: screenshots[0] ? rel(outFile, screenshots[0]) : '',
       screenshots: screenshots.map((file) => rel(outFile, file)),
       summary: rel(outFile, summaryPath),
@@ -154,6 +166,7 @@ function render(runs, artifacts) {
       <button id="prevPage" type="button">Previous 4</button>
       <button id="nextPage" class="primary" type="button">Next 4</button>
       <button id="pauseAll" type="button">Pause Page</button>
+      <button id="soundToggle" type="button">Sound On</button>
       <div id="pageStatus" class="meta" role="status" aria-live="polite"></div>
     </div>
   </header>
@@ -166,17 +179,36 @@ function render(runs, artifacts) {
     const prevPage = document.querySelector('#prevPage');
     const nextPage = document.querySelector('#nextPage');
     const pauseAll = document.querySelector('#pauseAll');
+    const soundToggle = document.querySelector('#soundToggle');
     const pageStatus = document.querySelector('#pageStatus');
     let page = 0;
+    let soundEnabled = false;
 
     const matchingCards = () => {
       const q = filter.value.trim().toLowerCase();
       return cards.filter((card) => !q || card.dataset.game.toLowerCase().includes(q));
     };
 
+    const visibleCards = () => {
+      const matches = matchingCards();
+      return matches.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
+    };
+
+    const applySoundState = (video) => {
+      if (!video) return;
+      video.muted = !soundEnabled;
+      video.volume = soundEnabled ? 1 : 0;
+    };
+
+    const updateSoundToggle = () => {
+      soundToggle.textContent = soundEnabled ? 'Sound Off' : 'Sound On';
+      soundToggle.classList.toggle('primary', soundEnabled);
+    };
+
     const ensureVideoSource = (video) => {
       if (!video || video.src || !video.dataset.src) return;
       video.src = video.dataset.src;
+      applySoundState(video);
       video.load();
     };
 
@@ -192,7 +224,7 @@ function render(runs, artifacts) {
     const playVideo = async (video) => {
       if (!video) return false;
       ensureVideoSource(video);
-      video.muted = true;
+      applySoundState(video);
       video.playsInline = true;
       try {
         await video.play();
@@ -213,7 +245,10 @@ function render(runs, artifacts) {
         card.classList.toggle('hidden', !show);
         const video = card.querySelector('video');
         if (!show) unloadVideo(video);
-        else ensureVideoSource(video);
+        else {
+          ensureVideoSource(video);
+          applySoundState(video);
+        }
       }
 
       prevPage.disabled = matches.length <= PAGE_SIZE;
@@ -247,12 +282,20 @@ function render(runs, artifacts) {
       }
       pauseAll.blur();
     });
+    soundToggle.addEventListener('click', async () => {
+      soundEnabled = !soundEnabled;
+      updateSoundToggle();
+      for (const video of videos) applySoundState(video);
+      if (soundEnabled) await Promise.all(visibleCards().map((card) => playVideo(card.querySelector('video'))));
+      soundToggle.blur();
+    });
     document.addEventListener('click', (event) => {
       const play = event.target.closest('[data-play]');
       const pause = event.target.closest('[data-pause]');
       if (play) playVideo(videos[Number(play.dataset.play)]);
       if (pause) videos[Number(pause.dataset.pause)]?.pause();
     });
+    updateSoundToggle();
     renderPage();
   </script>
 </body>
