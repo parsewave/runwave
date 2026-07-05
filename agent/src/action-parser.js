@@ -3,6 +3,7 @@
 const {
   actionEnd,
   assertAllowedFields,
+  asActionArray,
   normalizeActions,
 } = require('../../controller/src/action-normalizer');
 
@@ -29,7 +30,8 @@ function normalizeSequence(raw, options = {}) {
   const data = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   assertAllowedFields(data, AGENT_SEQUENCE_FIELDS, 'sequence');
 
-  const actions = normalizeActions(data.actions, maxDurationMs, {
+  const rawActions = asActionArray(data.actions);
+  const actions = normalizeActions(rawActions, maxDurationMs, {
     strict: false,
     viewport,
     config: {},
@@ -41,6 +43,9 @@ function normalizeSequence(raw, options = {}) {
     splitKeyChords: true,
     cursorCellsOnTarget: false,
   });
+  if (rawActions.length && !actions.length) {
+    throw new Error('all model actions were invalid after normalization');
+  }
 
   return {
     durationMs: inferDurationMs(actions, DEFAULT_DURATION_MS),

@@ -125,6 +125,21 @@ test('drops model actions with invalid short-action timing', () => {
   assert.equal(sequence.durationMs, 5000);
 });
 
+test('rejects model sequences when every requested action is dropped', () => {
+  assert.throws(
+    () => normalizeSequence(
+      {
+        actions: [
+          { type: 'click', start: 0, end: 500, x: 10, y: 10 },
+          { type: 'drag', start: 0, end: 2501, from: { x: 0, y: 0 }, to: { x: 10, y: 10 } },
+        ],
+      },
+      { viewport: { width: 800, height: 800 } }
+    ),
+    /all model actions were invalid after normalization/
+  );
+});
+
 test('clips agent actions to the shortened remaining step duration', () => {
   const actions = actionsWithinDuration(
     [
@@ -435,6 +450,74 @@ test('agent loop records schema-invalid model sequences as failed actions withou
   assert.equal(result.history[0].failedAction, true);
   assert.equal(result.history[0].result.ok, false);
   assert.match(result.history[0].result.error, /unknown field "the board\."/);
+  assert.equal(result.history[0].result.screenshot, screenshot);
+  assert.equal(result.history[0].result.screenshotChanged, false);
+  assert.deepEqual(result.history[0].result.state, { screen: 'unchanged' });
+  assert.equal(result.history[1].actions[0].key, 'Enter');
+  assert.equal(modelScreenshots[0], modelScreenshots[1]);
+});
+
+test('agent loop retries when model actions all normalize away', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-empty-normalized-action-test-'));
+  const screenshot = path.join(dir, 'screen.png');
+  const afterScreenshot = path.join(dir, 'after-screen.png');
+  fs.writeFileSync(screenshot, 'initial screenshot bytes');
+  fs.writeFileSync(afterScreenshot, 'after screenshot bytes');
+
+  const modelScreenshots = [];
+  let calls = 0;
+  const controllerActions = [];
+  const result = await runAgenticPlaytest({
+    job: {
+      playtestDurationMs: 9000,
+      agentMinPlaytestMs: 0,
+      viewport: { width: 640, height: 360 },
+      agentMaxModelFallbacks: 2,
+    },
+    initialResponse: {
+      screenshot,
+      state: { screen: 'unchanged' },
+    },
+    outputDir: path.join(dir, 'agent'),
+    modelClient: async ({ messages }) => {
+      calls += 1;
+      const image = messages[0].content.find((item) => item.type === 'image_url');
+      modelScreenshots.push(image.image_url.url);
+      if (calls === 1) {
+        return {
+          model: 'fake-model',
+          text: '{"summary":"bad timing","actions":[{"type":"click","start":0,"end":500,"x":10,"y":10}]}',
+          usage: { total_tokens: 1 },
+          json: {
+            summary: 'bad timing',
+            actions: [{ type: 'click', start: 0, end: 500, x: 10, y: 10 }],
+          },
+        };
+      }
+      return {
+        model: 'fake-model',
+        text: '{"summary":"valid","actions":[{"type":"key","start":0,"end":500,"key":"Enter"}],"should_stop":true}',
+        usage: { total_tokens: 1 },
+        json: {
+          summary: 'valid',
+          actions: [{ type: 'key', start: 0, end: 500, key: 'Enter' }],
+          should_stop: true,
+        },
+      };
+    },
+    runAction: async (action) => {
+      controllerActions.push(action);
+      return { ok: true, action: 'step', captures: [{ path: afterScreenshot }], endState: { screen: 'after' } };
+    },
+  });
+
+  assert.equal(result.steps, 2);
+  assert.equal(result.modelErrorCount, 1);
+  assert.equal(controllerActions.length, 1);
+  assert.equal(controllerActions[0].action, 'step');
+  assert.equal(result.history[0].failedAction, true);
+  assert.equal(result.history[0].actions[0].type, 'failed_action');
+  assert.match(result.history[0].result.error, /all model actions were invalid after normalization/);
   assert.equal(result.history[0].result.screenshot, screenshot);
   assert.equal(result.history[0].result.screenshotChanged, false);
   assert.deepEqual(result.history[0].result.state, { screen: 'unchanged' });
