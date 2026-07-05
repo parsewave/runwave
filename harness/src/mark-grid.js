@@ -1,6 +1,6 @@
 const DEFAULT_MARK_GRID = {
-  rows: 16,
-  cols: 16,
+  rows: 24,
+  cols: 24,
 };
 
 function markGridFromConfig(config = {}) {
