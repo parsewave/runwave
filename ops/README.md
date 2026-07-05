@@ -5,7 +5,8 @@ running many browser-game playtests across Hetzner servers.
 
 ## Shape
 
-- Fleet: 8 x `ccx43` by default.
+- Fleet: 8 workers by default. Use hardware-WebGL-verified workers for full
+  batches that include WebGL-sensitive games such as `aether-outpost-patrol`.
 - Capacity: 24 concurrent playtests at the default `3` jobs per server, sized
   for 20 simultaneous playtests plus headroom.
 - Games: synced from `s3://pw-cruft/games` to every server at
@@ -19,24 +20,27 @@ running many browser-game playtests across Hetzner servers.
   provisioning, set `RUNWAVE_SSH_KEY_NAME` if the Hetzner key name cannot be
   inferred from the matching local public key.
 
-The runner can drive the browser controller with either the default scripted
-exploration plan or an agentic OpenRouter planner. The controller still only
-controls the browser; the agent planner lives separately under `agent/`.
+Real fleet runs should use the agentic OpenRouter planner with `--agent` or
+`--play-mode agent`. The scripted exploration path is kept only for local smoke
+tests and controller debugging. The controller still only controls the browser;
+the agent planner lives separately under `agent/`.
 
 ## Provision
 
-Create the maximum-safety fleet:
+Create the fleet. For production batches with WebGL-sensitive games, set
+`SERVER_TYPE` to a worker type that has already been verified to expose a
+non-SwiftShader Chromium WebGL renderer:
 
 ```sh
 export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
 # Optional if the Hetzner key name cannot be inferred from RUNWAVE_SSH_KEY.pub:
 # export RUNWAVE_SSH_KEY_NAME="<hetzner-ssh-key-name>"
-SERVER_TYPE=ccx43 SERVER_COUNT=8 LOCATION=hel1 ops/provision-hetzner.sh
+SERVER_TYPE=<verified-worker-type> SERVER_COUNT=8 LOCATION=hel1 ops/provision-hetzner.sh
 ```
 
 Defaults:
 
-- `SERVER_TYPE=ccx43`
+- `SERVER_TYPE=ccx43` in the script, unless overridden
 - `SERVER_COUNT=8`
 - `LOCATION=hel1`
 - `RUNWAVE_SSH_KEY_NAME` / `SSH_KEY_NAME`, or inferred from
@@ -66,8 +70,8 @@ one GStreamer process to record the cropped X display plus `runwave_sink.monitor
 into `video/000-runwave-with-audio.webm`. This keeps audio from concurrent games
 on the same worker out of each other's recordings and avoids post-mux sync
 offsets.
-Set `recordAudio: false` in a job JSON to fall back to Playwright's video-only
-recording.
+Recorded fleet jobs use this GStreamer path; there is no Playwright video-only
+fallback for production playtests.
 
 The default game source is `s3://pw-cruft/games`. Override it with:
 

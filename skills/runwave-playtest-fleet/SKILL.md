@@ -5,7 +5,11 @@ description: Run 20 or more simultaneous browser-game playtests with runwave usi
 
 # Runwave Playtest Fleet
 
-Use this skill to run a many-game browser playtest batch end to end: discover games from S3, run one isolated runwave job per game, upload artifacts to S3, download artifacts into `cruft/playtests`, and build a video viewer.
+Use this skill to run an agentic many-game browser playtest batch end to end:
+discover games from S3, run one isolated OpenRouter-planned runwave job per
+game, upload artifacts to S3, download artifacts into `cruft/playtests`, and
+build a video viewer. Scripted mode is only for local smoke tests and controller
+debugging, not for real fleet results.
 
 ## Defaults
 
@@ -48,12 +52,15 @@ Required for SSH access to workers:
 - Hetzner SSH key name via `RUNWAVE_SSH_KEY_NAME` / `SSH_KEY_NAME`, or inferred
   from the matching local public key
 
-Often required by the playtester or runwave-adjacent agent layer, depending on
-the selected planner/model:
+Required by the current agentic playtester:
+
+- `OPENROUTER_API_KEY`
+
+Sometimes required by runwave-adjacent tooling, depending on the selected
+planner/model or private repo access:
 
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
-- `OPENROUTER_API_KEY`
 - `PARSEWAVE_API_TOKEN`
 - `GITHUB_ACCESS_TOKEN` or `GH_TOKEN`, if private runwave refs/repos are used
 
@@ -189,6 +196,7 @@ done < <(find cruft/playtests/_games-cache -mindepth 2 -maxdepth 2 -name package
   "port": 9300,
   "runwaveRepo": "https://github.com/parsewave/runwave",
   "runwaveRef": "main",
+  "playMode": "agent",
   "playtestDurationMs": 120000,
   "s3Uri": "s3://pw-cruft/playtests/<run-id>/<game>/attempt-001",
   "viewport": { "width": 960, "height": 540 },

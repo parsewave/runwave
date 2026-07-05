@@ -1,10 +1,11 @@
 # Runwave
 
-Runwave is a reusable Playwright CLI for browser games and canvas apps.
+Runwave is a reusable Playwright CLI and agentic playtester for browser games
+and canvas apps.
 
 This package is the task-neutral version of the PR145 browser runner. It only
-provides browser control and artifact capture. It does not include a VLM
-playtester, frame picker, or judge.
+provides browser control, artifact capture, and an optional OpenRouter-backed
+playtester. It does not include a frame picker or judge.
 
 ## Requirements
 
