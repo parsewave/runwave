@@ -8,6 +8,14 @@ const test = require('node:test');
 const packageRoot = path.resolve(__dirname, '..');
 const cli = path.join(packageRoot, 'bin', 'runwave.js');
 
+function recordingPrerequisitesMissing() {
+  if (process.platform !== 'linux') return 'not linux';
+  if (!process.env.DISPLAY) return 'DISPLAY not set';
+  if (spawnSync('which', ['gst-launch-1.0'], { encoding: 'utf8' }).status !== 0) return 'gst-launch-1.0 not on PATH';
+  if (spawnSync('pactl', ['info'], { encoding: 'utf8' }).status !== 0) return 'pactl info failed (pulseaudio not running)';
+  return null;
+}
+
 async function chromiumLaunchConfig(t) {
   let chromium;
   try {
@@ -45,6 +53,11 @@ function runwaveLaunchOptions(launchConfig) {
 }
 
 test('CLI opens a page, clicks, captures state, and finalizes recording', async (t) => {
+  const missing = recordingPrerequisitesMissing();
+  if (missing) {
+    t.skip(`recording prerequisites missing: ${missing}`);
+    return;
+  }
   const launchConfig = await chromiumLaunchConfig(t);
   if (!launchConfig) return;
 

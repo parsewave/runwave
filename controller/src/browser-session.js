@@ -26,9 +26,13 @@ function videoSize(config = {}) {
   };
 }
 
+function isRecording(config = {}) {
+  return Boolean(config.record || config.recordAudio);
+}
+
 function chromiumLaunchArgs(config = {}, env = process.env) {
   const args = chromiumArgs(config, env);
-  if (!config.recordAudio) return args;
+  if (!isRecording(config)) return args;
   const size = videoSize(config);
   return [
     ...args,
@@ -108,12 +112,9 @@ class BrowserSession {
 
   async start() {
     this.timeSync('browser.start.ensure_run_dir', { dir: this.paths.runDir }, () => ensureDir(this.paths.runDir));
-    const recordPlaywrightVideo = Boolean(this.config.record && !this.config.recordAudio);
-    const recordFfmpegVideo = Boolean(this.config.recordAudio);
-    if (recordPlaywrightVideo || recordFfmpegVideo) {
+    const record = isRecording(this.config);
+    if (record) {
       this.videoDir = this.timeSync('browser.start.ensure_video_dir', () => ensureDir(path.join(this.paths.runDir, 'video')));
-    }
-    if (this.config.recordAudio) {
       this.audioRecorder = new AudioVideoRecorder(
         this.config,
         this.paths.runDir,
@@ -135,22 +136,14 @@ class BrowserSession {
     }, () => chromium.launch(launchOptions));
     this.context = await this.time('browser.start.new_context', {
       viewport: this.config.viewport || { width: 1024, height: 620 },
-      record: recordPlaywrightVideo,
+      record,
     }, () =>
       this.browser.newContext({
         viewport: this.config.viewport || { width: 1024, height: 620 },
         deviceScaleFactor: Number(this.config.deviceScaleFactor ?? 1),
-        ...(recordPlaywrightVideo
-          ? {
-              recordVideo: {
-                dir: this.videoDir,
-                size: this.config.videoSize || this.config.viewport || { width: 1024, height: 620 },
-              },
-            }
-          : {}),
       })
     );
-    if (this.config.recordAudio) {
+    if (record) {
       await this.time('browser.start.capture_viewport_stabilizer', () =>
         this.context.addInitScript(browserViewportStabilizerScript)
       );
@@ -335,16 +328,14 @@ class BrowserSession {
   }
 
   async close() {
-    const video = this.timeSync('browser.close.get_video_handle', () => (this.page ? this.page.video() : null));
     let audioVideoPath = null;
     if (this.audioRecorder) {
       audioVideoPath = await this.time('browser.close.audio_video_stop', () => this.audioRecorder.stop());
     }
     if (this.context) await this.time('browser.close.context_close', () => this.context.close());
-    const videoPath = video ? await this.time('browser.close.video_path', () => video.path()) : null;
     if (this.browser) await this.time('browser.close.browser_close', () => this.browser.close());
     return {
-      video: audioVideoPath || videoPath,
+      video: audioVideoPath,
       audioVideo: audioVideoPath || undefined,
     };
   }

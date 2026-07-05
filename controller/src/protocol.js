@@ -117,8 +117,7 @@ function optionalNumber(value, fallback) {
 
 function startSessionConfig(input, options = {}) {
   const viewport = normalizeSize(input.viewport, { width: 1024, height: 620 });
-  const recordAudio = Boolean(input.recordAudio);
-  const recordVideo = Boolean(input.record || recordAudio);
+  const record = Boolean(input.record || input.recordAudio);
   return {
     launchUrl: targetUrl(input, options),
     browser: {
@@ -131,9 +130,8 @@ function startSessionConfig(input, options = {}) {
     context: {
       viewport,
       deviceScaleFactor: optionalNumber(input.deviceScaleFactor, 1),
-      recordVideo,
-      recordAudio,
-      videoSize: recordVideo ? normalizeSize(input.videoSize || input.viewport, viewport) : null,
+      record,
+      videoSize: record ? normalizeSize(input.videoSize || input.viewport, viewport) : null,
     },
     navigation: {
       waitUntil: String(input.waitUntil || 'load'),

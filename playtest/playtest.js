@@ -327,7 +327,6 @@ async function runPlaytest(options) {
       session_id: runwaveSessionId,
       url,
       record: true,
-      recordAudio: true,
       headless: false,
       viewport,
       videoSize: startOverrides.videoSize || viewport,
