@@ -19,8 +19,8 @@ running many browser-game playtests across Hetzner servers.
   provisioning, set `RUNWAVE_SSH_KEY_NAME` if the Hetzner key name cannot be
   inferred from the matching local public key.
 
-The runner can drive the browser harness with either the default scripted
-exploration plan or an agentic OpenRouter planner. The harness still only
+The runner can drive the browser controller with either the default scripted
+exploration plan or an agentic OpenRouter planner. The controller still only
 controls the browser; the agent planner lives separately under `agent/`.
 
 ## Provision
@@ -129,7 +129,7 @@ one retry before falling back to the deterministic viewport probe.
 
 ## Agent Mode
 
-Agent mode uses the browser harness as the hands and the `agent/` package as the
+Agent mode uses the browser controller as the hands and the `agent/` package as the
 model-calling planner. The planner currently uses OpenRouter, reading
 `OPENROUTER_API_KEY` from the environment or `~/.c.yaml`. Override the model with
 `RUNWAVE_AGENT_MODEL` or `OPENROUTER_MODEL`.
@@ -159,7 +159,7 @@ On machines with Chrome already installed and Playwright downloads blocked, set
 
 For a server-side one-game agent run, use
 `ops/examples/job-agent-mario.server.json`. It runs agent mode for a 3-minute
-safety window and enables verbose harness timing logs.
+safety window and enables verbose controller timing logs.
 
 ## Viewer
 

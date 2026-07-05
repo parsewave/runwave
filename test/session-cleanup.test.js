@@ -4,9 +4,9 @@ const os = require('os');
 const path = require('path');
 const test = require('node:test');
 
-const { createProfiler } = require('../harness/src/profiler');
-const { existingSessionStart, stopExistingSessionForForce } = require('../harness/src/cli');
-const { startSessionConfig } = require('../harness/src/protocol');
+const { createProfiler } = require('../controller/src/profiler');
+const { existingSessionStart, stopExistingSessionForForce } = require('../controller/src/cli');
+const { startSessionConfig } = require('../controller/src/protocol');
 
 function writeSession(dir, session) {
   const file = path.join(dir, 'session.json');

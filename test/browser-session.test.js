@@ -4,7 +4,7 @@ const test = require('node:test');
 const {
   browserViewportStabilizerScript,
   chromiumLaunchArgs,
-} = require('../harness/src/browser-session');
+} = require('../controller/src/browser-session');
 
 test('chromium launch args leave non-audio runs unchanged', () => {
   const args = chromiumLaunchArgs({ recordAudio: false }, {});

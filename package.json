@@ -4,7 +4,7 @@
   "description": "Runwave browser automation and artifact capture for game benchmark playtesting.",
   "private": true,
   "type": "commonjs",
-  "main": "harness/src/cli.js",
+  "main": "controller/src/cli.js",
   "bin": {
     "runwave": "bin/runwave.js"
   },
@@ -15,7 +15,7 @@
   },
   "files": [
     "bin",
-    "harness",
+    "controller",
     "agent",
     "README.md"
   ],
