@@ -9,7 +9,6 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
-    ffmpeg \
     git \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \

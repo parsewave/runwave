@@ -30,20 +30,14 @@ function chromiumLaunchArgs(config = {}, env = process.env) {
   const args = chromiumArgs(config, env);
   if (!config.recordAudio) return args;
   const size = videoSize(config);
-  const hideBrowserChrome = config.audioVideoBrowserChrome !== true &&
-    env.RUNWAVE_AUDIO_VIDEO_BROWSER_CHROME !== '1';
   return [
     ...args,
     '--window-position=0,0',
     `--window-size=${size.width},${size.height}`,
-    ...(hideBrowserChrome ? ['--kiosk', '--start-fullscreen', '--disable-infobars'] : []),
+    '--kiosk',
+    '--start-fullscreen',
+    '--disable-infobars',
   ];
-}
-
-function shouldStabilizeBrowserViewport(config = {}, env = process.env) {
-  if (!config.recordAudio) return false;
-  return config.audioVideoStabilizeViewport !== false &&
-    env.RUNWAVE_AUDIO_VIDEO_STABILIZE_VIEWPORT !== '0';
 }
 
 function browserViewportStabilizerScript() {
@@ -156,7 +150,7 @@ class BrowserSession {
           : {}),
       })
     );
-    if (shouldStabilizeBrowserViewport(this.config)) {
+    if (this.config.recordAudio) {
       await this.time('browser.start.capture_viewport_stabilizer', () =>
         this.context.addInitScript(browserViewportStabilizerScript)
       );
@@ -361,5 +355,4 @@ module.exports = {
   browserViewportStabilizerScript,
   chromiumArgs,
   chromiumLaunchArgs,
-  shouldStabilizeBrowserViewport,
 };

@@ -103,10 +103,10 @@ Useful `start` options:
 - `session_id`: required session identifier. Reuse it for all actions targeting
   the same browser session.
 - `record`: enable Playwright WebM recording.
-- `recordAudio`: enable one ffmpeg audio/video recording. This implies video
-  recording and writes the final WebM directly. On Linux the default inputs are
-  X11 display capture and PulseAudio `default`; override with
-  `videoInputFormat`, `videoSource`, `audioInputFormat`, and `audioSource`.
+- `recordAudio`: enable one browser audio/video recording. This implies video
+  recording and writes the final WebM directly. On Linux, GStreamer captures the
+  X11 viewport plus PulseAudio `default`; override sources with `videoSource`
+  and `audioSource`.
 - `headless`: defaults to `true`; set `false` to watch the browser.
 - `channel`: optional Playwright browser channel, such as `chrome` or `msedge`.
 - `executablePath`: optional explicit browser executable path.
@@ -256,8 +256,8 @@ runwave '{"action":"sessions"}'
 ```
 
 When `recordAudio` is enabled, `stop` returns `video` and `audioVideo` pointing
-at the same ffmpeg-recorded audio/video WebM. The machine running runwave must
-have `ffmpeg`, a video capture source, and an audio capture source. For Linux
+at the same recorded audio/video WebM. The machine running runwave must have
+GStreamer, an X11 video capture source, and an audio capture source. For Linux
 workers, X11 display capture plus a PulseAudio monitor source such as
 `runwave_sink.monitor` is the recommended setup.
 
@@ -291,7 +291,7 @@ Each turn writes:
 - `*.png`: screenshots captured during that operation.
 - `NNN-<action_name>.json`: detailed sequence log for `step` operations.
 - `video/*.webm`: final recordings. With audio enabled,
-  `video/000-runwave-with-audio.webm` is recorded directly by ffmpeg.
+  `video/000-runwave-with-audio.webm` is recorded directly by GStreamer.
 
 Active sessions are tracked as JSON files in `.runwave-sessions/` by default.
 The matching session file is removed by `stop`.

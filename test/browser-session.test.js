@@ -4,7 +4,6 @@ const test = require('node:test');
 const {
   browserViewportStabilizerScript,
   chromiumLaunchArgs,
-  shouldStabilizeBrowserViewport,
 } = require('../harness/src/browser-session');
 
 test('chromium launch args leave non-audio runs unchanged', () => {
@@ -30,28 +29,6 @@ test('chromium launch args hide browser chrome for audio/video capture', () => {
   assert.ok(args.includes('--kiosk'));
   assert.ok(args.includes('--start-fullscreen'));
   assert.ok(args.includes('--disable-infobars'));
-});
-
-test('chromium launch args can keep browser chrome for debugging', () => {
-  const args = chromiumLaunchArgs(
-    {
-      recordAudio: true,
-      viewport: { width: 656, height: 496 },
-      audioVideoBrowserChrome: true,
-    },
-    {}
-  );
-
-  assert.ok(args.includes('--window-size=656,496'));
-  assert.equal(args.includes('--kiosk'), false);
-  assert.equal(args.includes('--start-fullscreen'), false);
-});
-
-test('audio/video capture stabilizes browser viewport by default', () => {
-  assert.equal(shouldStabilizeBrowserViewport({ recordAudio: true }, {}), true);
-  assert.equal(shouldStabilizeBrowserViewport({ recordAudio: false }, {}), false);
-  assert.equal(shouldStabilizeBrowserViewport({ recordAudio: true, audioVideoStabilizeViewport: false }, {}), false);
-  assert.equal(shouldStabilizeBrowserViewport({ recordAudio: true }, { RUNWAVE_AUDIO_VIDEO_STABILIZE_VIEWPORT: '0' }), false);
 });
 
 test('browser viewport stabilizer hides overflow and prevents scrolling keys', () => {

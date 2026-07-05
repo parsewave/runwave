@@ -17,8 +17,8 @@ Use this skill to run a many-game browser playtest batch end to end: discover ga
 - Fleet size target: `8` hardware-WebGL-verified workers, `3` jobs per server,
   `24` concurrent slots
 - Every Linux playtest job runs inside a dedicated Docker container by default
-  so each game, Chromium instance, Xvfb session, PulseAudio null sink, ffmpeg
-  recorder, and upload process has isolated runtime state.
+  so each game, Chromium instance, Xvfb session, PulseAudio null sink,
+  GStreamer recorder, and upload process has isolated runtime state.
 - Runwave repo: `https://github.com/parsewave/runwave`
 - SSH key: `RUNWAVE_SSH_KEY` / `SSH_KEY`, or an auto-detected local
   `~/.ssh/id_ed25519` / `~/.ssh/id_rsa`

@@ -87,7 +87,7 @@ function dockerEnvNames(env = process.env) {
     /^RUNWAVE_AGENT_/,
     /^RUNWAVE_AUDIO_/,
     /^RUNWAVE_CHROMIUM_ARGS(_MODE)?$/,
-    /^RUNWAVE_FFMPEG$/,
+    /^RUNWAVE_GSTREAMER$/,
     /^RUNWAVE_SKIP_PLAYWRIGHT_INSTALL$/,
     /^RUNWAVE_VERBOSE$/,
     /^RUNWAVE_VIDEO_/,
@@ -249,7 +249,6 @@ async function prepareAudioCaptureEnv(env, job) {
   return {
     env: audioEnv,
     recordAudio: true,
-    audioInputFormat: job.audioInputFormat || 'pulse',
     audioSource: job.audioSource || `${sink}.monitor`,
   };
 }
@@ -261,11 +260,11 @@ async function startXvfbForAudio(job, env) {
   const captureWidth = positiveInteger(captureSize.width, 1280);
   const captureHeight = positiveInteger(captureSize.height, 720);
   const captureX = nonNegativeInteger(
-    job.audioVideoCaptureX ?? job.audioVideoCaptureOffsetX ?? env.RUNWAVE_AUDIO_VIDEO_CAPTURE_X ?? env.RUNWAVE_VIDEO_X,
+    job.audioVideoCaptureX ?? env.RUNWAVE_AUDIO_VIDEO_CAPTURE_X ?? env.RUNWAVE_VIDEO_X,
     0
   );
   const captureY = nonNegativeInteger(
-    job.audioVideoCaptureY ?? job.audioVideoCaptureYOffset ?? env.RUNWAVE_AUDIO_VIDEO_CAPTURE_Y ?? env.RUNWAVE_VIDEO_Y,
+    job.audioVideoCaptureY ?? env.RUNWAVE_AUDIO_VIDEO_CAPTURE_Y ?? env.RUNWAVE_VIDEO_Y,
     DEFAULT_AUDIO_VIDEO_CAPTURE_Y
   );
   const screenWidth = positiveInteger(job.xvfbWidth ?? env.RUNWAVE_XVFB_WIDTH, captureWidth + captureX);
@@ -1014,8 +1013,6 @@ async function runRunwave(job, dirs, url, runnerEnv = process.env) {
     url,
     record: true,
     recordAudio: audioCapture.recordAudio,
-    audioVideoRecorder: job.audioVideoRecorder,
-    audioInputFormat: audioCapture.audioInputFormat,
     audioSource: audioCapture.audioSource,
     gstreamerPath: job.gstreamerPath,
     headless: job.headless ?? (audioCapture.recordAudio ? false : true),

@@ -14,7 +14,7 @@ else
 fi
 
 apt-get update
-apt-get install -y ca-certificates curl docker.io ffmpeg gnupg git jq pulseaudio pulseaudio-utils python3 python3-pip rsync unzip xvfb
+apt-get install -y ca-certificates curl docker.io gnupg git jq pulseaudio pulseaudio-utils python3 python3-pip rsync unzip xvfb
 
 if [ "${need_node_install}" -eq 1 ]; then
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
