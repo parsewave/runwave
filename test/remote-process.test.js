@@ -2,9 +2,12 @@
 
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
-const { signalLongProcess, stopLongProcess } = require('../ops/remote/run-playtest');
+const { loadPlaytestInstructions, signalLongProcess, stopLongProcess } = require('../ops/remote/run-playtest');
 
 function fakeChild(pid = 12345) {
   const child = new EventEmitter();
@@ -85,4 +88,26 @@ test('remote process cleanup escalates to SIGKILL after SIGTERM timeout', async 
     signal: 'SIGKILL',
     escalated: true,
   });
+});
+
+test('loads exact lowercase playtest.md instructions for a game', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-playtest-md-'));
+  fs.writeFileSync(path.join(dir, 'playtest.md'), '# Playtest Controls\n\n- Start: Enter.\n');
+
+  assert.equal(loadPlaytestInstructions(dir, 'example-game'), '# Playtest Controls\n\n- Start: Enter.\n');
+});
+
+test('rejects missing or mis-cased playtest.md instructions', () => {
+  const missingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-playtest-md-missing-'));
+  assert.throws(
+    () => loadPlaytestInstructions(missingDir, 'missing-game'),
+    /game has no playtest\.md: missing-game/
+  );
+
+  const casedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-playtest-md-cased-'));
+  fs.writeFileSync(path.join(casedDir, 'PLAYTEST.md'), '# Playtest Controls\n');
+  assert.throws(
+    () => loadPlaytestInstructions(casedDir, 'cased-game'),
+    /game has no playtest\.md: cased-game/
+  );
 });

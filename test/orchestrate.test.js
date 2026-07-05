@@ -74,6 +74,46 @@ test('fleet jobs can enable VLM viewport preflight', () => {
   assert.equal(job.viewportPreflightAttempts, 2);
 });
 
+test('known SwiftShader-sensitive games require hardware WebGL and GPU launch args', () => {
+  const args = parseArgs([
+    'node',
+    'ops/orchestrate-playtests.js',
+    '--gpu-inventory',
+    'gpu-inventory.json',
+    '--s3-uri',
+    's3://example/runwave',
+    '--games',
+    'aether-outpost-patrol',
+    '--agent',
+  ]);
+
+  const [job] = buildJobs(args, ['aether-outpost-patrol']);
+
+  assert.equal(job.requiresHardwareWebgl, true);
+  assert.equal(job.chromiumArgsMode, 'replace');
+  assert.equal(job.headless, true);
+  assert.equal(job.audioXvfb, false);
+  assert.ok(job.chromiumArgs.includes('--use-gl=egl'));
+});
+
+test('hardware WebGL game defaults can be disabled', () => {
+  const args = parseArgs([
+    'node',
+    'ops/orchestrate-playtests.js',
+    '--inventory',
+    'inventory.json',
+    '--s3-uri',
+    's3://example/runwave',
+    '--games',
+    'aether-outpost-patrol',
+    '--no-default-hardware-webgl-games',
+  ]);
+
+  const [job] = buildJobs(args, ['aether-outpost-patrol']);
+
+  assert.equal(job.requiresHardwareWebgl, undefined);
+});
+
 test('orchestrator can take ssh key from environment', () => {
   const previousRunwaveKey = process.env.RUNWAVE_SSH_KEY;
   const previousSshKey = process.env.SSH_KEY;

@@ -551,6 +551,29 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.doesNotMatch(prompt, /"multi_clicks":/);
 });
 
+test('playtester prompt includes game-specific playtest instructions', () => {
+  const prompt = buildPlaytesterPrompt({
+    job: {
+      playtestInstructions: [
+        '# Playtest Controls',
+        '',
+        '- Start: Enter.',
+        '- Move: WASD.',
+      ].join('\n'),
+    },
+    elapsedMs: 10000,
+    maxMs: 120000,
+    viewport: { width: 1280, height: 720 },
+    state: {},
+    history: [],
+  });
+
+  assert.match(prompt, /Game-specific playtest\.md:/);
+  assert.match(prompt, /- Start: Enter\./);
+  assert.match(prompt, /- Move: WASD\./);
+  assert.match(prompt, /Use these game-specific controls/);
+});
+
 test('playtester prompt warns when recent sequences repeat a control cycle up to 5 steps', () => {
   const cycle = ['ArrowRight', 'ArrowUp', 'ArrowLeft', 'ArrowDown'];
   const prompt = buildPlaytesterPrompt({

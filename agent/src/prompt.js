@@ -134,6 +134,18 @@ function repeatedHistoryWarning(history) {
   return '';
 }
 
+function playtestInstructionsSection(job) {
+  const instructions = String(job.playtestInstructions || '').trim();
+  if (!instructions) return [];
+  return [
+    'Game-specific playtest.md:',
+    instructions.slice(0, 8000),
+    '',
+    'Use these game-specific controls when they apply. If they conflict with visible in-game instructions, follow the visible current screen.',
+    '',
+  ];
+}
+
 function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history }) {
   const secondsLeft = Math.max(0, Math.round((maxMs - elapsedMs) / 1000));
   const controls = job.agentControls || [
@@ -165,6 +177,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     `Viewport: ${viewport.width}x${viewport.height}. The screenshot has an 8x8 red mark grid labeled 0 through 63, row-major from top-left to bottom-right.`,
     `Available common controls: ${controls.join(', ')}. You may use literal Playwright keys.`,
     '',
+    ...playtestInstructionsSection(job),
     'Sequence guidance:',
     '- Prefer grid-cell targeting over raw x/y coordinates. For pointer actions, choose up to 4 relevant grid cell IDs using "cells": [id].',
     '- Put every input in the "actions" array. Each action must have a "type": "key", "click", "multi_click", "drag", "cursor_move", or "view_move".',

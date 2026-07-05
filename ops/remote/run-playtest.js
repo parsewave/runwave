@@ -56,6 +56,17 @@ function runnerPaths(env = process.env) {
   };
 }
 
+function loadPlaytestInstructions(gameDir, game) {
+  const entries = fs.readdirSync(gameDir, { withFileTypes: true });
+  const playtestEntry = entries.find((entry) => entry.isFile() && entry.name === 'playtest.md');
+  if (!playtestEntry) {
+    throw new Error(`game has no playtest.md: ${game}`);
+  }
+
+  const playtestPath = path.join(gameDir, 'playtest.md');
+  return fs.readFileSync(playtestPath, 'utf8');
+}
+
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     log('command.start', { command, args, cwd: options.cwd });
@@ -961,12 +972,19 @@ async function main() {
   fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
 
   const gameDir = path.join(runner.gamesRoot, job.game);
-  if (!fs.existsSync(path.join(gameDir, 'start.sh'))) {
-    throw new Error(`game has no start.sh: ${job.game}`);
-  }
 
   let gameProcess = null;
   try {
+    if (!fs.existsSync(path.join(gameDir, 'start.sh'))) {
+      throw new Error(`game has no start.sh: ${job.game}`);
+    }
+    job.playtestInstructions = loadPlaytestInstructions(gameDir, job.game);
+    summary.playtestInstructions = {
+      path: path.join(gameDir, 'playtest.md'),
+      bytes: Buffer.byteLength(job.playtestInstructions, 'utf8'),
+    };
+    fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
+
     log('job.start', { jobId, game: job.game, port });
     await checkoutRunwave(job, dirs.runwave, runnerEnv);
 
@@ -1059,7 +1077,11 @@ if (require.main === module) {
 }
 
 module.exports = {
+  assertHardwareWebgl,
   chooseViewportFromProbe,
+  chromiumArgs,
+  isSwiftShaderWebgl,
+  loadPlaytestInstructions,
   normalizeVlmViewportChoice,
   signalLongProcess,
   stopLongProcess,

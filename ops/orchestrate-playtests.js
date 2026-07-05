@@ -97,6 +97,8 @@ function usage() {
     '  --games-s3-uri s3://bucket/prefix',
     '  --local-games',
     '  --ssh-key PATH',
+    '  --gpu-inventory PATH',
+    '  --gpu-concurrency-per-server N',
     '  --runwave-ref REF',
     '  --concurrency-per-server N',
     '  --require-concurrency N',
@@ -107,6 +109,8 @@ function usage() {
     '  --viewport-preflight-attempts N',
     '  --play-mode scripted|agent',
     '  --agent',
+    '  --hardware-webgl-games game-a,game-b',
+    '  --no-default-hardware-webgl-games',
     '  --skip-playwright-install',
     '  --dry-run',
   ].join('\n');
@@ -274,6 +278,13 @@ function buildJobs(args, games) {
       playtestDurationMs: args.playtestDurationMs,
       s3Uri: `${args.s3Uri.replace(/\/+$/, '')}/${args.runId}/${game}/attempt-${String(attempt).padStart(3, '0')}`,
     };
+    if (args.hardwareWebglGames && args.hardwareWebglGames.has(game)) {
+      job.requiresHardwareWebgl = true;
+      job.chromiumArgs = [...args.hardwareWebglChromiumArgs];
+      job.chromiumArgsMode = 'replace';
+      job.headless = true;
+      job.audioXvfb = false;
+    }
     if (args.playMode === 'agent') job.agentMinPlaytestMs = agentMinPlaytestMs(args);
     if (args.vlmViewportPreflight) job.vlmViewportPreflight = true;
     if (Number.isFinite(args.viewportPreflightAttempts)) {
@@ -383,18 +394,35 @@ async function runQueue(args, servers, jobs) {
 
 async function main() {
   const args = parseArgs(process.argv);
-  if (!args.inventory || !args.s3Uri) {
+  if ((!args.inventory && !args.gpuInventory) || !args.s3Uri) {
     console.error(usage());
     process.exit(2);
   }
-  const servers = loadInventory(args.inventory);
+  const servers = args.inventory ? loadInventory(args.inventory) : [];
+  const gpuServers = args.gpuInventory ? loadInventory(args.gpuInventory) : [];
   const { games, skipped } = discoverGames(args);
   if (skipped.length) {
     for (const item of skipped) console.error(`Skipping ${item.name}: ${item.reason}`);
   }
   if (games.length === 0) throw new Error('no browser games discovered');
   const jobs = buildJobs(args, games);
-  const capacity = fleetCapacity(args, servers);
+  const hardwareJobs = jobs.filter((job) => job.requiresHardwareWebgl);
+  const standardJobs = jobs.filter((job) => !job.requiresHardwareWebgl);
+  if (standardJobs.length > 0 && servers.length === 0) {
+    throw new Error('standard jobs require --inventory');
+  }
+  if (hardwareJobs.length > 0 && gpuServers.length === 0) {
+    throw new Error(
+      `hardware WebGL jobs (${hardwareJobs.map((job) => job.game).join(', ')}) require --gpu-inventory`
+    );
+  }
+  const gpuArgs = {
+    ...args,
+    concurrencyPerServer: Number.isFinite(args.gpuConcurrencyPerServer)
+      ? args.gpuConcurrencyPerServer
+      : args.concurrencyPerServer,
+  };
+  const capacity = fleetCapacity(args, servers) + fleetCapacity(gpuArgs, gpuServers);
   if (jobs.length >= args.requiredConcurrency && capacity < args.requiredConcurrency) {
     throw new Error(
       `fleet capacity ${capacity} is below required concurrency ${args.requiredConcurrency}; ` +
@@ -402,27 +430,46 @@ async function main() {
     );
   }
   console.log(`Run id: ${args.runId}`);
-  console.log(`Servers: ${servers.map((server) => `${server.name}=${server.ip}`).join(', ')}`);
+  if (servers.length) console.log(`Servers: ${servers.map((server) => `${server.name}=${server.ip}`).join(', ')}`);
+  if (gpuServers.length) console.log(`GPU servers: ${gpuServers.map((server) => `${server.name}=${server.ip}`).join(', ')}`);
   if (args.gamesS3Uri) console.log(`Game source: ${args.gamesS3Uri}`);
   else console.log(`Game source: ${args.gamesDir}`);
   console.log(`Games: ${games.join(', ')}`);
   console.log(
     `Jobs: ${jobs.length}; concurrency per server: ${args.concurrencyPerServer}; ` +
-    `fleet capacity: ${capacity}; playtest duration: ${args.playtestDurationMs}ms`
+    `gpu concurrency per server: ${gpuArgs.concurrencyPerServer}; fleet capacity: ${capacity}; ` +
+    `playtest duration: ${args.playtestDurationMs}ms`
   );
+  if (hardwareJobs.length) {
+    console.log(`Hardware WebGL jobs: ${hardwareJobs.map((job) => job.game).join(', ')}`);
+  }
   if (args.dryRun) {
     let serverIndex = 0;
     const ports = new Map(servers.map((server) => [server.name, args.basePort]));
-    for (const job of jobs) {
+    for (const job of standardJobs) {
       const server = servers[serverIndex % servers.length];
       const port = ports.get(server.name);
       ports.set(server.name, port + 1);
       serverIndex += 1;
-      console.log(`${job.jobId} -> ${server.name}:${port} -> ${job.s3Uri}`);
+      console.log(`${job.jobId} -> standard:${server.name}:${port} -> ${job.s3Uri}`);
+    }
+    let gpuServerIndex = 0;
+    const gpuPorts = new Map(gpuServers.map((server) => [server.name, args.basePort]));
+    for (const job of hardwareJobs) {
+      const server = gpuServers[gpuServerIndex % gpuServers.length];
+      const port = gpuPorts.get(server.name);
+      gpuPorts.set(server.name, port + 1);
+      gpuServerIndex += 1;
+      console.log(`${job.jobId} -> gpu:${server.name}:${port} -> ${job.s3Uri}`);
     }
     return;
   }
-  const { results, failures } = await runQueue(args, servers, jobs);
+  const queues = [];
+  if (standardJobs.length) queues.push(runQueue(args, servers, standardJobs));
+  if (hardwareJobs.length) queues.push(runQueue(gpuArgs, gpuServers, hardwareJobs));
+  const queueResults = await Promise.all(queues);
+  const results = queueResults.flatMap((result) => result.results);
+  const failures = queueResults.flatMap((result) => result.failures);
   console.log(`Completed ${results.length}/${jobs.length} jobs`);
   if (failures.length) {
     console.error(`${failures.length} jobs failed`);
