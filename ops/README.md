@@ -61,11 +61,12 @@ Bootstrap installs Docker and builds the `runwave-playtest-runner:latest` image.
 The host runner re-execs each job in its own container, mounting the game cache,
 job workspace root, job JSON, runner script, and `/etc/runwave-runner.env`.
 Inside that container, the runner creates a PulseAudio null sink named
-`runwave_sink`, launches Chromium with that sink as the default output, records
-`runwave_sink.monitor`, and muxes that audio into
+`runwave_sink`, launches Chromium with that sink as the default output, and uses
+one ffmpeg process to record the X display plus `runwave_sink.monitor` into
 `video/000-runwave-with-audio.webm`. This keeps audio from concurrent games on
-the same worker out of each other's recordings. Set `recordAudio: false` in a
-job JSON to fall back to Playwright's video-only recording.
+the same worker out of each other's recordings and avoids post-mux sync offsets.
+Set `recordAudio: false` in a job JSON to fall back to Playwright's video-only
+recording.
 
 The default game source is `s3://pw-cruft/games`. Override it with:
 

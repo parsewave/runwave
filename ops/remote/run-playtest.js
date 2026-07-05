@@ -245,7 +245,10 @@ async function prepareAudioCaptureEnv(env, job) {
 async function startXvfbForAudio(job, env) {
   if (job.audioXvfb === false) return { env, process: null, display: env.DISPLAY || null };
   const display = job.xvfbDisplay || env.RUNWAVE_XVFB_DISPLAY || `:${100 + (Number(job.port || 0) % 500)}`;
-  const screen = job.xvfbScreen || env.RUNWAVE_XVFB_SCREEN || '1280x720x24';
+  const captureSize = job.videoSize || job.viewport || { width: 1280, height: 720 };
+  const screenWidth = Number.isFinite(Number(captureSize.width)) && Number(captureSize.width) > 0 ? Math.round(Number(captureSize.width)) : 1280;
+  const screenHeight = Number.isFinite(Number(captureSize.height)) && Number(captureSize.height) > 0 ? Math.round(Number(captureSize.height)) : 720;
+  const screen = job.xvfbScreen || env.RUNWAVE_XVFB_SCREEN || `${screenWidth}x${screenHeight}x24`;
   const xvfb = spawnLong('Xvfb', [display, '-screen', '0', screen, '-nolisten', 'tcp'], {
     env,
   });

@@ -103,9 +103,10 @@ Useful `start` options:
 - `session_id`: required session identifier. Reuse it for all actions targeting
   the same browser session.
 - `record`: enable Playwright WebM recording.
-- `recordAudio`: enable ffmpeg audio capture and mux it into the final WebM.
-  This implies video recording. On Linux the default input is PulseAudio
-  `default`; override with `audioInputFormat` and `audioSource`.
+- `recordAudio`: enable one ffmpeg audio/video recording. This implies video
+  recording and writes the final WebM directly. On Linux the default inputs are
+  X11 display capture and PulseAudio `default`; override with
+  `videoInputFormat`, `videoSource`, `audioInputFormat`, and `audioSource`.
 - `headless`: defaults to `true`; set `false` to watch the browser.
 - `channel`: optional Playwright browser channel, such as `chrome` or `msedge`.
 - `executablePath`: optional explicit browser executable path.
@@ -254,12 +255,11 @@ List known sessions:
 runwave '{"action":"sessions"}'
 ```
 
-When `recordAudio` is enabled, `stop` returns `video` pointing at the muxed
-audio/video WebM. It also includes `rawVideo` for the original Playwright
-video-only WebM, `audio` for the captured audio file, and `audioVideo` for the
-muxed file. The machine running runwave must have `ffmpeg` and an audio capture
-source. For Linux workers, a PulseAudio monitor source such as
-`runwave_sink.monitor` is the recommended source.
+When `recordAudio` is enabled, `stop` returns `video` and `audioVideo` pointing
+at the same ffmpeg-recorded audio/video WebM. The machine running runwave must
+have `ffmpeg`, a video capture source, and an audio capture source. For Linux
+workers, X11 display capture plus a PulseAudio monitor source such as
+`runwave_sink.monitor` is the recommended setup.
 
 ## State
 
@@ -291,8 +291,7 @@ Each turn writes:
 - `*.png`: screenshots captured during that operation.
 - `NNN-<action_name>.json`: detailed sequence log for `step` operations.
 - `video/*.webm`: final recordings. With audio enabled,
-  `video/000-runwave-with-audio.webm` is the combined recording.
-- `audio/*.webm`: raw captured audio when `recordAudio` is enabled.
+  `video/000-runwave-with-audio.webm` is recorded directly by ffmpeg.
 
 Active sessions are tracked as JSON files in `.runwave-sessions/` by default.
 The matching session file is removed by `stop`.

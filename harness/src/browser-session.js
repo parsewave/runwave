@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
-const { AudioRecorder } = require('./audio-recorder');
+const { AudioVideoRecorder } = require('./audio-recorder');
 const { ensureDir, safeName, sleep, timestamp } = require('./file-utils');
 const { drawGridOnScreenshot } = require('./grid-overlay');
 const { parseArgList, targetUrl } = require('./protocol');
@@ -16,8 +16,25 @@ function chromiumArgs(config = {}, env = process.env) {
   return [...DEFAULT_CHROMIUM_ARGS, ...configured];
 }
 
-function monotonicMs() {
-  return Number(process.hrtime.bigint()) / 1e6;
+function videoSize(config = {}) {
+  const size = config.videoSize || config.viewport || {};
+  const width = Number(size.width);
+  const height = Number(size.height);
+  return {
+    width: Number.isFinite(width) && width > 0 ? Math.round(width) : 1024,
+    height: Number.isFinite(height) && height > 0 ? Math.round(height) : 620,
+  };
+}
+
+function chromiumLaunchArgs(config = {}, env = process.env) {
+  const args = chromiumArgs(config, env);
+  if (!config.recordAudio) return args;
+  const size = videoSize(config);
+  return [
+    ...args,
+    '--window-position=0,0',
+    `--window-size=${size.width},${size.height}`,
+  ];
 }
 
 class BrowserSession {
@@ -31,8 +48,7 @@ class BrowserSession {
     this.launchUrl = targetUrl(config);
     this.stateExpression = config.stateExpression || null;
     this.videoDir = null;
-    this.videoStartedAtMs = null;
-    this.audioDir = null;
+    this.audioDir = undefined;
     this.audioRecorder = null;
     this.mousePosition = { x: 0, y: 0 };
   }
@@ -51,18 +67,22 @@ class BrowserSession {
 
   async start() {
     this.timeSync('browser.start.ensure_run_dir', { dir: this.paths.runDir }, () => ensureDir(this.paths.runDir));
-    const recordVideo = Boolean(this.config.record || this.config.recordAudio);
-    if (recordVideo) {
+    const recordPlaywrightVideo = Boolean(this.config.record && !this.config.recordAudio);
+    const recordFfmpegVideo = Boolean(this.config.recordAudio);
+    if (recordPlaywrightVideo || recordFfmpegVideo) {
       this.videoDir = this.timeSync('browser.start.ensure_video_dir', () => ensureDir(path.join(this.paths.runDir, 'video')));
     }
     if (this.config.recordAudio) {
-      this.audioRecorder = new AudioRecorder(this.config, this.paths.runDir, this.profiler ? this.profiler.child('audio-recorder') : null);
-      this.audioDir = this.audioRecorder.audioDir;
+      this.audioRecorder = new AudioVideoRecorder(
+        this.config,
+        this.paths.runDir,
+        this.profiler ? this.profiler.child('audio-video-recorder') : null
+      );
     }
 
     const launchOptions = {
       headless: this.config.headless !== false,
-      args: chromiumArgs(this.config),
+      args: chromiumLaunchArgs(this.config),
     };
     if (this.config.channel) launchOptions.channel = String(this.config.channel);
     if (this.config.executablePath) launchOptions.executablePath = String(this.config.executablePath);
@@ -74,12 +94,12 @@ class BrowserSession {
     }, () => chromium.launch(launchOptions));
     this.context = await this.time('browser.start.new_context', {
       viewport: this.config.viewport || { width: 1024, height: 620 },
-      record: recordVideo,
+      record: recordPlaywrightVideo,
     }, () =>
       this.browser.newContext({
         viewport: this.config.viewport || { width: 1024, height: 620 },
         deviceScaleFactor: Number(this.config.deviceScaleFactor ?? 1),
-        ...(recordVideo
+        ...(recordPlaywrightVideo
           ? {
               recordVideo: {
                 dir: this.videoDir,
@@ -89,12 +109,10 @@ class BrowserSession {
           : {}),
       })
     );
-    if (this.audioRecorder) {
-      await this.time('browser.start.audio_recorder_start', () => this.audioRecorder.start());
-    }
     this.page = await this.time('browser.start.new_page', () => this.context.newPage());
-    if (recordVideo) this.videoStartedAtMs = monotonicMs();
-    if (this.audioRecorder) this.audioRecorder.setVideoStartedAt(this.videoStartedAtMs);
+    if (this.audioRecorder) {
+      await this.time('browser.start.audio_video_recorder_start', () => this.audioRecorder.start());
+    }
     this.timeSync('browser.start.attach_console_logger', () => this.page.on('console', (msg) => {
       fs.appendFileSync(path.join(this.paths.runDir, 'browser-console.log'), `${msg.type()} ${msg.text()}\n`);
     }));
@@ -272,23 +290,16 @@ class BrowserSession {
 
   async close() {
     const video = this.timeSync('browser.close.get_video_handle', () => (this.page ? this.page.video() : null));
-    if (this.context) await this.time('browser.close.context_close', () => this.context.close());
-    const videoPath = video ? await this.time('browser.close.video_path', () => video.path()) : null;
-    let audioPath = null;
     let audioVideoPath = null;
     if (this.audioRecorder) {
-      audioPath = await this.time('browser.close.audio_stop', () => this.audioRecorder.stop());
+      audioVideoPath = await this.time('browser.close.audio_video_stop', () => this.audioRecorder.stop());
     }
+    if (this.context) await this.time('browser.close.context_close', () => this.context.close());
+    const videoPath = video ? await this.time('browser.close.video_path', () => video.path()) : null;
     if (this.browser) await this.time('browser.close.browser_close', () => this.browser.close());
-    if (this.audioRecorder) {
-      audioVideoPath = await this.time('browser.close.audio_mux', () => this.audioRecorder.mux(videoPath, audioPath));
-    }
     return {
       video: audioVideoPath || videoPath,
-      rawVideo: audioVideoPath ? videoPath : undefined,
-      audio: audioPath,
       audioVideo: audioVideoPath || undefined,
-      audioVideoOffsetMs: this.audioRecorder ? this.audioRecorder.audioOffsetMs : undefined,
     };
   }
 }
@@ -296,4 +307,5 @@ class BrowserSession {
 module.exports = {
   BrowserSession,
   chromiumArgs,
+  chromiumLaunchArgs,
 };
