@@ -170,6 +170,23 @@ function parseActionResponse(result, action) {
   return response;
 }
 
+function validateRecordingArtifact(stopResponse) {
+  const video = stopResponse && (stopResponse.audioVideo || stopResponse.video);
+  if (!video || typeof video !== 'string') {
+    throw new Error('runwave stop did not return an audio/video recording path');
+  }
+  let stat;
+  try {
+    stat = fs.statSync(video);
+  } catch (error) {
+    throw new Error(`runwave recording is missing: ${video}`);
+  }
+  if (!stat.isFile() || stat.size <= 0) {
+    throw new Error(`runwave recording is empty or invalid: ${video}`);
+  }
+  return { path: video, bytes: stat.size };
+}
+
 function buildAgentJob({ playtestDurationMs, minPlaytestMs, viewport, playtestInstructions, start = {} }) {
   return {
     playtestDurationMs,
@@ -259,6 +276,7 @@ async function runPlaytest(options) {
 
   let gameProcess = null;
   let harnessStarted = false;
+  let failure = null;
 
   const runHarnessAction = async (action) => {
     const payload = { ...action, session_id: action.session_id || runwaveSessionId };
@@ -328,16 +346,21 @@ async function runPlaytest(options) {
     summary.viewport = viewport;
     summary.status = 'passed';
   } catch (error) {
+    failure = error;
     summary.status = 'failed';
     summary.error = error.message;
     summary.stack = error.stack;
     log('playtest.error', { error: error.message });
-    throw Object.assign(error, { summary });
   } finally {
     if (harnessStarted) {
       try {
-        await runHarnessAction({ action: 'stop', action_name: 'stop', session_id: runwaveSessionId });
+        const stopResponse = await runHarnessAction({ action: 'stop', action_name: 'stop', session_id: runwaveSessionId });
+        summary.recording = validateRecordingArtifact(stopResponse);
       } catch (error) {
+        if (!failure) failure = error;
+        summary.status = 'failed';
+        summary.error = summary.error || error.message;
+        summary.recordingError = error.message;
         log('harness.stop.error', { error: error.message });
       }
     }
@@ -356,10 +379,12 @@ async function runPlaytest(options) {
     log('playtest.end', { status: summary.status });
   }
 
+  if (failure) throw Object.assign(failure, { summary });
   return summary;
 }
 
 module.exports = {
   buildAgentJob,
   runPlaytest,
+  validateRecordingArtifact,
 };

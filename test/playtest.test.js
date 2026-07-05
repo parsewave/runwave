@@ -1,9 +1,12 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
-const { buildAgentJob } = require('../playtest/playtest');
+const { buildAgentJob, validateRecordingArtifact } = require('../playtest/playtest');
 
 test('playtest agent job inherits mark grid dimensions from the start action', () => {
   const job = buildAgentJob({
@@ -26,3 +29,21 @@ test('playtest agent job inherits mark grid dimensions from the start action', (
   assert.equal(job.markGridCols, 24);
 });
 
+test('playtest recording validation requires a non-empty WebM artifact', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-recording-validation-'));
+  const video = path.join(dir, 'play.webm');
+  fs.writeFileSync(video, 'webm bytes');
+
+  assert.deepEqual(validateRecordingArtifact({ audioVideo: video }), {
+    path: video,
+    bytes: 10,
+  });
+  assert.throws(
+    () => validateRecordingArtifact({ video: path.join(dir, 'missing.webm') }),
+    /recording is missing/
+  );
+  assert.throws(
+    () => validateRecordingArtifact({}),
+    /did not return an audio\/video recording path/
+  );
+});

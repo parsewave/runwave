@@ -662,15 +662,24 @@ async function main() {
         return { stopped: false, reason: 'error', error: error.message };
       });
     }
-    if (job.s3Uri) summary.uploadedTo = job.s3Uri.replace(/\/+$/, '');
+    if (job.s3Uri) {
+      summary.uploadTarget = job.s3Uri.replace(/\/+$/, '');
+      summary.uploadStatus = 'pending';
+    }
     fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
     const uploadedTo = await uploadWorkspace(job, dirs, runnerEnv).catch((error) => {
       log('upload.error', { jobId, error: error.message });
+      summary.uploadStatus = 'failed';
       summary.uploadError = error.message;
       fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
       return null;
     });
-    if (uploadedTo) summary.uploadedTo = uploadedTo;
+    if (uploadedTo) {
+      summary.uploadedTo = uploadedTo;
+      summary.uploadStatus = 'uploaded';
+    } else if (job.s3Uri && summary.uploadStatus !== 'failed') {
+      summary.uploadStatus = 'skipped';
+    }
     fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
     log('job.end', { jobId, status: summary.status, uploadedTo });
   }
