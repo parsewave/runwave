@@ -1,5 +1,5 @@
 node_modules/
-.action-harness-session.json
+.action-controller-session.json
 .tmp/
 coverage/
 recordings/

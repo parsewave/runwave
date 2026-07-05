@@ -228,7 +228,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     step += 1;
     if (sequence.failedAction) {
       const actionName = `agent-step-${String(step).padStart(3, '0')}-failed-action`;
-      const harnessStep = {
+      const controllerStep = {
         action: 'none',
         action_name: actionName,
         name: 'failed-action',
@@ -239,7 +239,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
         elapsedMs,
         screenshot,
         sequence,
-        harnessStep,
+        controllerStep,
         model,
         modelElapsedMs,
         rawText,
@@ -270,7 +270,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       continue;
     }
 
-    const harnessStep = {
+    const controllerStep = {
       action: 'step',
       action_name: `agent-step-${String(step).padStart(3, '0')}`,
       duration,
@@ -285,7 +285,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       elapsedMs,
       screenshot,
       sequence,
-      harnessStep,
+      controllerStep,
       model,
       modelElapsedMs,
       rawText,
@@ -306,7 +306,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
 
     let stepResponse;
     try {
-      stepResponse = await runAction(harnessStep);
+      stepResponse = await runAction(controllerStep);
     } catch (error) {
       const message = String(error && (error.message || error) || 'runwave action failed').slice(0, 500);
       log('agent.sequence_execution_error', {

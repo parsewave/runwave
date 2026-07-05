@@ -4,7 +4,7 @@ const {
   actionEnd,
   assertAllowedFields,
   normalizeActions,
-} = require('../../harness/src/action-normalizer');
+} = require('../../controller/src/action-normalizer');
 
 const DEFAULT_DURATION_MS = 500;
 const MIN_DURATION_MS = 500;

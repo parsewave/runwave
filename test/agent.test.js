@@ -10,9 +10,9 @@ const { normalizeSequence } = require('../agent/src/action-parser');
 const { failedActionAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
 const { chatCompletion, parseJsonResponse } = require('../agent/src/model-client');
 const { buildPlaytesterPrompt, compactHistory } = require('../agent/src/prompt');
-const { normalizeStep } = require('../harness/src/step-normalizer');
+const { normalizeStep } = require('../controller/src/step-normalizer');
 
-test('normalizes model sequences into harness steps', () => {
+test('normalizes model sequences into controller steps', () => {
   const sequence = normalizeSequence(
     {
       actions: [
@@ -125,7 +125,7 @@ test('drops model actions with invalid short-action timing', () => {
   assert.equal(sequence.durationMs, 5000);
 });
 
-test('normalizes harness grid-cell steps into concrete pointer events', () => {
+test('normalizes controller grid-cell steps into concrete pointer events', () => {
   const step = normalizeStep(
     {
       actions: [
@@ -152,7 +152,7 @@ test('normalizes harness grid-cell steps into concrete pointer events', () => {
   assert.deepEqual(step.cursorMoves[0].to.cells, [7]);
 });
 
-test('infers harness duration from action timing fields only', () => {
+test('infers controller duration from action timing fields only', () => {
   const step = normalizeStep(
     {
       actions: [
@@ -171,7 +171,7 @@ test('infers harness duration from action timing fields only', () => {
   assert.equal(step.cursorMoves.length, 1);
 });
 
-test('infers harness duration from key ends and multi-click intervals', () => {
+test('infers controller duration from key ends and multi-click intervals', () => {
   const keyStep = normalizeStep(
     { actions: [{ type: 'key', start: 0, end: 700, key: 'Space' }] },
     {},
@@ -189,7 +189,7 @@ test('infers harness duration from key ends and multi-click intervals', () => {
   assert.deepEqual(multiClickStep.clicks.map((click) => click.end), [250, 400, 550, 700]);
 });
 
-test('rejects harness short actions with impossible end timings', () => {
+test('rejects controller short actions with impossible end timings', () => {
   assert.throws(
     () => normalizeStep({ actions: [{ type: 'click', start: 0, end: 500, x: 1, y: 1 }] }, { viewport: { width: 800, height: 800 } }, 1),
     /click action duration exceeds 100ms/
@@ -204,7 +204,7 @@ test('rejects harness short actions with impossible end timings', () => {
   );
 });
 
-test('rejects harness step fields outside the canonical schema', () => {
+test('rejects controller step fields outside the canonical schema', () => {
   const explicit = normalizeStep({ duration: 1000, actions: [], captures: [1000], autoCaptures: false }, {}, 1);
   const verbose = normalizeStep({ duration: 1000, actions: [], captures: [1000], __runwaveVerbose: true }, {}, 2);
   assert.equal(explicit.duration, 1000);
@@ -236,7 +236,7 @@ test('agent playtest loop calls model and executes returned sequence', async () 
   );
   fs.writeFileSync(afterScreenshot, 'different screenshot bytes');
 
-  const harnessSteps = [];
+  const controllerSteps = [];
   const result = await runAgenticPlaytest({
     job: {
       playtestDurationMs: 7000,
@@ -262,19 +262,19 @@ test('agent playtest loop calls model and executes returned sequence', async () 
       },
     }),
     runAction: async (step) => {
-      harnessSteps.push(step);
+      controllerSteps.push(step);
       return { ok: true, captures: [{ path: afterScreenshot }], endState: { ok: true } };
     },
   });
 
   assert.equal(result.steps, 1);
-  assert.equal(harnessSteps.length, 1);
-  assert.equal(harnessSteps[0].action, 'step');
-  assert.equal(harnessSteps[0].duration, 500);
-  assert.deepEqual(harnessSteps[0].captures, [500]);
-  assert.equal(harnessSteps[0].actions.find((action) => action.type === 'key').key, 'Enter');
-  assert.equal(harnessSteps[0].actions.find((action) => action.type === 'drag').mode, 'mouse');
-  assert.equal(harnessSteps[0].actions.find((action) => action.type === 'drag').end, 100);
+  assert.equal(controllerSteps.length, 1);
+  assert.equal(controllerSteps[0].action, 'step');
+  assert.equal(controllerSteps[0].duration, 500);
+  assert.deepEqual(controllerSteps[0].captures, [500]);
+  assert.equal(controllerSteps[0].actions.find((action) => action.type === 'key').key, 'Enter');
+  assert.equal(controllerSteps[0].actions.find((action) => action.type === 'drag').mode, 'mouse');
+  assert.equal(controllerSteps[0].actions.find((action) => action.type === 'drag').end, 100);
   assert.equal(result.history[0].result.ok, true);
   assert.equal(result.history[0].result.screenshot, afterScreenshot);
   assert.equal(result.history[0].result.screenshotChanged, true);
@@ -300,7 +300,7 @@ test('agent loop records invalid JSON as a failed action and retries with the sa
 
   const modelScreenshots = [];
   let calls = 0;
-  const harnessActions = [];
+  const controllerActions = [];
   const result = await runAgenticPlaytest({
     job: {
       playtestDurationMs: 9000,
@@ -334,15 +334,15 @@ test('agent loop records invalid JSON as a failed action and retries with the sa
       };
     },
     runAction: async (action) => {
-      harnessActions.push(action);
+      controllerActions.push(action);
       return { ok: true, action: 'step', captures: [{ path: afterScreenshot }], endState: { screen: 'after' } };
     },
   });
 
   assert.equal(result.steps, 2);
   assert.equal(result.modelErrorCount, 1);
-  assert.equal(harnessActions.length, 1);
-  assert.equal(harnessActions[0].action, 'step');
+  assert.equal(controllerActions.length, 1);
+  assert.equal(controllerActions[0].action, 'step');
   assert.equal(result.history[0].failedAction, true);
   assert.equal(result.history[0].actions[0].type, 'failed_action');
   assert.equal(result.history[0].result.ok, false);
@@ -363,7 +363,7 @@ test('agent loop records schema-invalid model sequences as failed actions withou
 
   const modelScreenshots = [];
   let calls = 0;
-  const harnessActions = [];
+  const controllerActions = [];
   const result = await runAgenticPlaytest({
     job: {
       playtestDurationMs: 9000,
@@ -404,15 +404,15 @@ test('agent loop records schema-invalid model sequences as failed actions withou
       };
     },
     runAction: async (action) => {
-      harnessActions.push(action);
+      controllerActions.push(action);
       return { ok: true, action: 'step', captures: [{ path: afterScreenshot }], endState: { screen: 'after' } };
     },
   });
 
   assert.equal(result.steps, 2);
   assert.equal(result.modelErrorCount, 1);
-  assert.equal(harnessActions.length, 1);
-  assert.equal(harnessActions[0].action, 'step');
+  assert.equal(controllerActions.length, 1);
+  assert.equal(controllerActions[0].action, 'step');
   assert.equal(result.history[0].failedAction, true);
   assert.equal(result.history[0].result.ok, false);
   assert.match(result.history[0].result.error, /unknown field "the board\."/);
@@ -432,7 +432,7 @@ test('agent loop records action execution failures and retries with the same scr
 
   const modelScreenshots = [];
   let calls = 0;
-  const harnessActions = [];
+  const controllerActions = [];
   const logEvents = [];
   const result = await runAgenticPlaytest({
     job: {
@@ -468,8 +468,8 @@ test('agent loop records action execution failures and retries with the same scr
       };
     },
     runAction: async (action) => {
-      harnessActions.push(action);
-      if (harnessActions.length === 1) {
+      controllerActions.push(action);
+      if (controllerActions.length === 1) {
         throw new Error('runwave action failed for agent-step-001: keyboard.down: Unknown key: "KeyF5"');
       }
       return { ok: true, action: 'step', captures: [{ path: afterScreenshot }], endState: { screen: 'after' } };
@@ -477,8 +477,8 @@ test('agent loop records action execution failures and retries with the same scr
   });
 
   assert.equal(result.steps, 2);
-  assert.equal(harnessActions.length, 2);
-  assert.equal(harnessActions[0].actions[0].key, 'KeyF5');
+  assert.equal(controllerActions.length, 2);
+  assert.equal(controllerActions[0].actions[0].key, 'KeyF5');
   assert.equal(result.history[0].failedAction, true);
   assert.equal(result.history[0].actions[0].key, 'KeyF5');
   assert.equal(result.history[0].result.ok, false);

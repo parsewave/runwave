@@ -4,8 +4,8 @@ const os = require('os');
 const path = require('path');
 const test = require('node:test');
 
-const { cliArgs } = require('../harness/src/cli');
-const { createProfiler } = require('../harness/src/profiler');
+const { cliArgs } = require('../controller/src/cli');
+const { createProfiler } = require('../controller/src/profiler');
 
 test('CLI strips verbose flags before JSON input is parsed', () => {
   const originalArgv = process.argv;

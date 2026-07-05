@@ -5,7 +5,7 @@ const {
   audioVideoArgs,
   defaultVideoSource,
   parseX11VideoSource,
-} = require('../harness/src/audio-recorder');
+} = require('../controller/src/audio-recorder');
 
 test('default linux video source uses display and capture origin', () => {
   assert.equal(defaultVideoSource('linux', { DISPLAY: ':501' }), ':501+0,0');
