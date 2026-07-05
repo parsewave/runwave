@@ -12,6 +12,7 @@ const {
   loadPlaytestInstructions,
   shouldRunJobInContainer,
   signalLongProcess,
+  startOverridesFromJob,
   stopLongProcess,
 } = require('../ops/remote/run-playtest');
 
@@ -116,6 +117,24 @@ test('rejects missing or mis-cased playtest.md instructions', () => {
     () => loadPlaytestInstructions(casedDir, 'cased-game'),
     /game has no playtest\.md: cased-game/
   );
+});
+
+test('remote playtest start overrides carry mark grid dimensions', () => {
+  const overrides = startOverridesFromJob(
+    {
+      markGridRows: 16,
+      markGridCols: 24,
+      gridScreenshots: true,
+      videoSize: { width: 1280, height: 720 },
+    },
+    { audioSource: 'pulse.monitor' }
+  );
+
+  assert.equal(overrides.markGridRows, 16);
+  assert.equal(overrides.markGridCols, 24);
+  assert.equal(overrides.gridScreenshots, true);
+  assert.equal(overrides.audioSource, 'pulse.monitor');
+  assert.deepEqual(overrides.videoSize, { width: 1280, height: 720 });
 });
 
 test('linux playtest jobs run in a container by default unless disabled or already inside one', () => {

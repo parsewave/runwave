@@ -181,6 +181,23 @@ function loadPlaytestInstructions(gameDir, game) {
   return fs.readFileSync(playtestPath, 'utf8');
 }
 
+function startOverridesFromJob(job = {}, audioCapture = {}) {
+  const overrides = {
+    audioSource: audioCapture.audioSource,
+    gstreamerPath: job.gstreamerPath,
+    channel: job.channel,
+    executablePath: job.executablePath,
+    chromiumArgs: job.chromiumArgs,
+    chromiumArgsMode: job.chromiumArgsMode,
+    keyAliases: job.keyAliases,
+    gridScreenshots: job.gridScreenshots,
+    markGridRows: job.markGridRows,
+    markGridCols: job.markGridCols,
+  };
+  if (job.videoSize) overrides.videoSize = job.videoSize;
+  return overrides;
+}
+
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     log('command.start', { command, args, cwd: options.cwd });
@@ -574,17 +591,7 @@ async function main() {
     {
       const { runPlaytest } = require(path.join(dirs.runwave, 'playtest', 'playtest.js'));
 
-      const startOverrides = {
-        audioSource: audioCapture.audioSource,
-        gstreamerPath: job.gstreamerPath,
-        channel: job.channel,
-        executablePath: job.executablePath,
-        chromiumArgs: job.chromiumArgs,
-        chromiumArgsMode: job.chromiumArgsMode,
-        keyAliases: job.keyAliases,
-        gridScreenshots: job.gridScreenshots,
-      };
-      if (job.videoSize) startOverrides.videoSize = job.videoSize;
+      const startOverrides = startOverridesFromJob(job, audioCapture);
 
       const viewport = job.viewport;
       summary.viewport = viewport;
@@ -665,6 +672,7 @@ module.exports = {
   loadPlaytestInstructions,
   shouldRunJobInContainer,
   signalLongProcess,
+  startOverridesFromJob,
   stopLongProcess,
   waitForProcessClose,
 };

@@ -170,6 +170,18 @@ function parseActionResponse(result, action) {
   return response;
 }
 
+function buildAgentJob({ playtestDurationMs, minPlaytestMs, viewport, playtestInstructions, start = {} }) {
+  return {
+    playtestDurationMs,
+    agentMinPlaytestMs: minPlaytestMs ?? Math.max(0, playtestDurationMs - 10000),
+    viewport,
+    videoSize: viewport,
+    playtestInstructions,
+    markGridRows: start.markGridRows,
+    markGridCols: start.markGridCols,
+  };
+}
+
 function harnessArgs(runwaveBin, action, verbose) {
   const args = [runwaveBin];
   if (verbose) args.push('-v');
@@ -290,13 +302,13 @@ async function runPlaytest(options) {
       await onInitialResponse(initialResponse);
     }
 
-    const job = {
+    const job = buildAgentJob({
       playtestDurationMs,
-      agentMinPlaytestMs: minPlaytestMs ?? Math.max(0, playtestDurationMs - 10000),
       viewport,
-      videoSize: viewport,
       playtestInstructions,
-    };
+      start,
+      minPlaytestMs,
+    });
 
     const playtest = await runAgenticPlaytest({
       job,
@@ -348,5 +360,6 @@ async function runPlaytest(options) {
 }
 
 module.exports = {
+  buildAgentJob,
   runPlaytest,
 };

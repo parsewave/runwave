@@ -38,6 +38,8 @@ function parseArgs(argv) {
     basePort: 8900,
     playtestDurationMs: 120000,
     agentMinPlaytestMs: null,
+    markGridRows: null,
+    markGridCols: null,
     vlmViewportPreflight: false,
     viewportPreflightAttempts: null,
     playMode: 'scripted',
@@ -65,6 +67,8 @@ function parseArgs(argv) {
     else if (arg === '--base-port') args.basePort = Number(next());
     else if (arg === '--playtest-duration-ms') args.playtestDurationMs = Number(next());
     else if (arg === '--agent-min-playtest-ms') args.agentMinPlaytestMs = Number(next());
+    else if (arg === '--mark-grid-rows') args.markGridRows = Number(next());
+    else if (arg === '--mark-grid-cols') args.markGridCols = Number(next());
     else if (arg === '--vlm-viewport-preflight') args.vlmViewportPreflight = true;
     else if (arg === '--viewport-preflight-attempts') args.viewportPreflightAttempts = Number(next());
     else if (arg === '--play-mode') args.playMode = next();
@@ -99,6 +103,8 @@ function usage() {
     '  --base-port N',
     '  --playtest-duration-ms N',
     '  --agent-min-playtest-ms N',
+    '  --mark-grid-rows N',
+    '  --mark-grid-cols N',
     '  --vlm-viewport-preflight',
     '  --viewport-preflight-attempts N',
     '  --play-mode scripted|agent',
@@ -280,6 +286,8 @@ function buildJobs(args, games) {
       job.audioXvfb = false;
     }
     if (args.playMode === 'agent') job.agentMinPlaytestMs = agentMinPlaytestMs(args);
+    if (Number.isFinite(args.markGridRows)) job.markGridRows = Math.max(1, Math.round(args.markGridRows));
+    if (Number.isFinite(args.markGridCols)) job.markGridCols = Math.max(1, Math.round(args.markGridCols));
     if (args.vlmViewportPreflight) job.vlmViewportPreflight = true;
     if (Number.isFinite(args.viewportPreflightAttempts)) {
       job.viewportPreflightAttempts = Math.max(1, Math.round(args.viewportPreflightAttempts));
