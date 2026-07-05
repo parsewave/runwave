@@ -226,6 +226,8 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '- Common resume/confirm keys are Space, Enter, Escape, and P. Use them when the screen suggests a paused/menu state and clicks are not working.',
     '- If the state JSON reports a canvas, treat that canvas rectangle as the active game area unless the screenshot clearly shows otherwise.',
     '- If you die, reset, or return to a map/title screen, re-enter gameplay and change strategy instead of repeating the same failed action.',
+    '- If the same thing has failed about 3-5 times with no visible progress, say that in previous_sequence_outcome and try a different target, route, control, or strategy.',
+    '- If an action or strategy visibly worked, learn the pattern and try a similar follow-up, but do not blindly repeat the exact same input unless the game clearly needs repetition.',
     '- Avoid idle waiting. Each step should do something visible or useful for the gameplay video.',
     '- In previous_sequence_outcome, summarize what visibly happened after the most recent prior sequence. If a prior control moved the player, camera, board, score, menu, or level state, say that clearly. On the first sequence, use an empty string.',
     '',

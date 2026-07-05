@@ -744,6 +744,8 @@ test('playtester prompt warns when recent sequences repeat', () => {
   assert.match(prompt, /"start":0/);
   assert.match(prompt, /"end":500/);
   assert.match(prompt, /RunWave adds a short default/);
+  assert.match(prompt, /failed about 3-5 times/);
+  assert.match(prompt, /learn the pattern/);
   assert.doesNotMatch(prompt, /"commands":/);
   assert.doesNotMatch(prompt, /duration_ms/);
   assert.doesNotMatch(prompt, /"clicks":/);
