@@ -7,7 +7,7 @@ const path = require('path');
 const test = require('node:test');
 
 const { normalizeSequence } = require('../agent/src/action-parser');
-const { failedActionAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
+const { actionsWithinDuration, failedActionAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
 const { chatCompletion, parseJsonResponse } = require('../agent/src/model-client');
 const { buildPlaytesterPrompt, compactHistory, sequenceSchemaGuide } = require('../agent/src/prompt');
 const { normalizeStep } = require('../controller/src/step-normalizer');
@@ -123,6 +123,25 @@ test('drops model actions with invalid short-action timing', () => {
 
   assert.deepEqual(sequence.actions.map((action) => action.type), ['key']);
   assert.equal(sequence.durationMs, 5000);
+});
+
+test('clips agent actions to the shortened remaining step duration', () => {
+  const actions = actionsWithinDuration(
+    [
+      { type: 'key', start: 0, end: 800, key: 'ArrowRight' },
+      { type: 'drag', start: 100, end: 600, from: { x: 1, y: 1 }, to: { x: 2, y: 2 } },
+      { type: 'click', start: 490, end: 540, x: 10, y: 10 },
+      { type: 'click', start: 500, end: 550, x: 20, y: 20 },
+      { type: 'click', start: 900, end: 950, x: 30, y: 30 },
+    ],
+    500
+  );
+
+  assert.deepEqual(actions, [
+    { type: 'key', start: 0, end: 500, key: 'ArrowRight' },
+    { type: 'drag', start: 100, end: 500, from: { x: 1, y: 1 }, to: { x: 2, y: 2 } },
+    { type: 'click', start: 490, end: 500, x: 10, y: 10 },
+  ]);
 });
 
 test('normalizes controller grid-cell steps into concrete pointer events', () => {

@@ -161,6 +161,19 @@ function sequenceBuckets(actions) {
   };
 }
 
+function actionsWithinDuration(actions, duration) {
+  const limit = Number(duration);
+  if (!Number.isFinite(limit) || limit < 0) return [];
+
+  return actions
+    .filter((action) => Number(action.start) < limit)
+    .map((action) => {
+      if (!Object.prototype.hasOwnProperty.call(action, 'end') || Number(action.end) <= limit) return action;
+      return { ...action, end: limit };
+    })
+    .filter((action) => !Object.prototype.hasOwnProperty.call(action, 'end') || Number(action.end) > Number(action.start));
+}
+
 async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, modelClient = chatCompletion, log = () => {} }) {
   const maxMs = Number(job.playtestDurationMs ?? 120000);
   const minMs = Number(job.agentMinPlaytestMs ?? Math.min(30000, maxMs));
@@ -274,17 +287,17 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       action: 'step',
       action_name: `agent-step-${String(step).padStart(3, '0')}`,
       duration,
-      actions: sequence.actions,
+      actions: actionsWithinDuration(sequence.actions, duration),
       captures: [duration],
       autoCaptures: false,
     };
-    const buckets = sequenceBuckets(sequence.actions);
+    const buckets = sequenceBuckets(controllerStep.actions);
 
     recorder.sequence({
       step,
       elapsedMs,
       screenshot,
-      sequence,
+      sequence: { ...sequence, actions: controllerStep.actions },
       controllerStep,
       model,
       modelElapsedMs,
@@ -296,8 +309,8 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       duration,
       model,
       modelElapsedMs,
-      actionCount: sequence.actions.length,
-      keyActionCount: actionsByType(sequence.actions, 'key').length,
+      actionCount: controllerStep.actions.length,
+      keyActionCount: actionsByType(controllerStep.actions, 'key').length,
       clickCount: buckets.clicks.length,
       dragCount: buckets.drags.length,
       cursorMoveCount: buckets.cursorMoves.length,
@@ -323,7 +336,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
         step,
         summary: sequence.summary || 'Failed action: the action sequence could not be executed.',
         rationale: `Record the action execution failure, keep the current screenshot and state unchanged, and ask for a new action sequence. Error: ${message}`,
-        actions: sequence.actions,
+        actions: controllerStep.actions,
         clicks: buckets.clicks,
         drags: buckets.drags,
         cursorMoves: buckets.cursorMoves,
@@ -340,7 +353,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       step,
       summary: sequence.summary,
       rationale: sequence.rationale,
-      actions: sequence.actions,
+      actions: controllerStep.actions,
       clicks: buckets.clicks,
       drags: buckets.drags,
       cursorMoves: buckets.cursorMoves,
@@ -376,6 +389,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
 
 module.exports = {
   decideNextSequence,
+  actionsWithinDuration,
   failedActionAfterInvalidJson,
   isRecoverableModelSequenceError,
   latestScreenshot,
