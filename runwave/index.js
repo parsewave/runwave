@@ -199,8 +199,8 @@ function buildAgentJob({ playtestDurationMs, minPlaytestMs, viewport, playtestIn
   };
 }
 
-function controllerArgs(runwaveBin, action, verbose) {
-  const args = [runwaveBin];
+function controllerArgs(controllerBin, action, verbose) {
+  const args = [controllerBin];
   if (verbose) args.push('-v');
   args.push(JSON.stringify(action));
   return args;
@@ -244,7 +244,7 @@ async function runPlaytest(options) {
   const playtestInstructions = loadPlaytestInstructions(playtestMd);
 
   const runwaveRoot = path.resolve(__dirname, '..');
-  const runwaveBin = path.join(runwaveRoot, 'bin', 'runwave.js');
+  const controllerBin = path.join(runwaveRoot, 'runwave', 'controller.js');
   const agentPlayerPath = path.join(runwaveRoot, 'agent', 'src', 'agent-player.js');
   const { runAgenticPlaytest } = require(agentPlayerPath);
 
@@ -280,7 +280,7 @@ async function runPlaytest(options) {
 
   const runControllerAction = async (action) => {
     const payload = { ...action, session_id: action.session_id || runwaveSessionId };
-    const result = await run('node', controllerArgs(runwaveBin, payload, verbose), { cwd: absoluteOutDir, env }, log);
+    const result = await run('node', controllerArgs(controllerBin, payload, verbose), { cwd: absoluteOutDir, env }, log);
     return parseActionResponse(result, payload);
   };
 

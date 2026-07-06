@@ -596,7 +596,7 @@ async function main() {
     if (xvfbSession.display) log('xvfb.ready', { display: xvfbSession.display });
 
     {
-      const { runPlaytest } = require(path.join(dirs.runwave, 'playtest', 'playtest.js'));
+      const { runPlaytest } = require(path.join(dirs.runwave, 'runwave'));
 
       const startOverrides = startOverridesFromJob(job, audioCapture);
 

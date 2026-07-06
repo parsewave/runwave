@@ -2,17 +2,18 @@
 'use strict';
 
 const path = require('path');
-const { runPlaytest } = require('../playtest/playtest');
+const { runPlaytest } = require('./index');
 
 function usage() {
   return [
     'Usage:',
-    '  runwave-playtest --game-dir <path> --out-dir <path> --port <n> [options]',
+    '  runwave --game-dir <path> --out-dir <path> --port <n> --viewport <width>x<height> [options]',
     '',
     'Required:',
     '  --game-dir <path>            directory containing start.sh and playtest.md',
     '  --out-dir <path>             directory for artifacts (video, screenshots, agent history, summary.json)',
     '  --port <n>                   port passed to start.sh via PORT= and used as http://127.0.0.1:<port>/',
+    '  --viewport <width>x<height>  browser viewport and video size, e.g. 1280x720',
     '',
     'Environment:',
     '  OPENROUTER_API_KEY           required; forwarded to the agent',
@@ -27,6 +28,12 @@ function usage() {
   ].join('\n');
 }
 
+function parseViewport(value) {
+  const match = /^(\d+)x(\d+)$/i.exec(String(value || '').trim());
+  if (!match) throw new Error(`invalid viewport: ${value}`);
+  return { width: Number(match[1]), height: Number(match[2]) };
+}
+
 function parseArgs(argv) {
   const out = { verbose: false };
   for (let i = 2; i < argv.length; i += 1) {
@@ -37,6 +44,7 @@ function parseArgs(argv) {
     if (arg === '--game-dir') { out.gameDir = next(); continue; }
     if (arg === '--out-dir') { out.outDir = next(); continue; }
     if (arg === '--port') { out.port = Number(next()); continue; }
+    if (arg === '--viewport') { out.viewport = parseViewport(next()); continue; }
     if (arg === '--playtest-duration-ms') { out.playtestDurationMs = Number(next()); continue; }
     if (arg === '--min-playtest-ms') { out.minPlaytestMs = Number(next()); continue; }
     if (arg === '--model') { out.model = next(); continue; }
@@ -55,6 +63,7 @@ async function main() {
   if (!args.gameDir) missing.push('--game-dir');
   if (!args.outDir) missing.push('--out-dir');
   if (!args.port) missing.push('--port');
+  if (!args.viewport) missing.push('--viewport');
   const openRouterApiKey = process.env.OPENROUTER_API_KEY;
   if (!openRouterApiKey) missing.push('OPENROUTER_API_KEY');
   if (missing.length) {
@@ -66,6 +75,7 @@ async function main() {
     gameDir: path.resolve(args.gameDir),
     outDir: path.resolve(args.outDir),
     port: args.port,
+    viewport: args.viewport,
     openRouterApiKey,
     playtestDurationMs: args.playtestDurationMs,
     minPlaytestMs: args.minPlaytestMs,

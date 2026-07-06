@@ -1,7 +1,6 @@
 # Runwave
 
-Runwave is a reusable Playwright CLI and agentic playtester for browser games
-and canvas apps.
+Runwave is an agentic playtester for browser games and canvas apps.
 
 This package is the task-neutral version of the PR145 browser runner. It only
 provides browser control, artifact capture, and an optional OpenRouter-backed
@@ -50,20 +49,26 @@ RUN npm install -g https://github.com/parsewave/runwave.git
 RUN npx playwright install --with-deps chromium
 ```
 
-The installed CLI is:
+The public CLI runs an end-to-end playtest:
 
 ```sh
-runwave '<json>'
+runwave --game-dir ./game --out-dir ./artifacts --port 3000 --viewport 1280x720
 ```
 
-Use verbose mode to create profiling logs:
+The package also includes a low-level controller CLI for direct browser actions:
 
 ```sh
-runwave -v '{"action":"start","action_name":"run-start","file":"game/index.html"}'
-runwave -v '{"action":"state","action_name":"turn-001-state"}'
+runwave-controller '<json>'
 ```
 
-Verbose mode writes newline-delimited JSON timing events to
+Use controller verbose mode to create profiling logs:
+
+```sh
+runwave-controller -v '{"action":"start","action_name":"run-start","file":"game/index.html"}'
+runwave-controller -v '{"action":"state","action_name":"turn-001-state"}'
+```
+
+Controller verbose mode writes newline-delimited JSON timing events to
 `<sessionDir>/runwave-verbose.ndjson` and includes that path as `verboseLog` in
 verbose operation responses. The log records CLI, daemon, browser, output writing,
 state, screenshot, navigation, step timeline, input-event, capture, and cleanup
@@ -97,7 +102,7 @@ state/output/<action_name>/
 Start from a local file:
 
 ```sh
-runwave '{
+runwave-controller '{
   "action": "start",
   "action_name": "run-start",
   "session_id": "playtest-001",
@@ -116,7 +121,7 @@ runwave '{
 Start from a URL:
 
 ```sh
-runwave '{
+runwave-controller '{
   "action": "start",
   "action_name": "run-start",
   "session_id": "playtest-001",
@@ -152,19 +157,19 @@ Useful `start` options:
 Inspect state:
 
 ```sh
-runwave '{"action":"state","action_name":"turn-001-state","session_id":"playtest-001"}'
+runwave-controller '{"action":"state","action_name":"turn-001-state","session_id":"playtest-001"}'
 ```
 
 Capture a screenshot:
 
 ```sh
-runwave '{"action":"screenshot","action_name":"turn-001-screen","session_id":"playtest-001","name":"screen"}'
+runwave-controller '{"action":"screenshot","action_name":"turn-001-screen","session_id":"playtest-001","name":"screen"}'
 ```
 
 Execute timed keyboard controls:
 
 ```sh
-runwave '{
+runwave-controller '{
   "action": "step",
   "action_name": "turn-002-jump-right",
   "session_id": "playtest-001",
@@ -183,7 +188,7 @@ the latest action `end`, or from `start` for instant actions.
 Click:
 
 ```sh
-runwave '{
+runwave-controller '{
   "action": "step",
   "action_name": "turn-003-click-start",
   "session_id": "playtest-001",
@@ -201,7 +206,7 @@ instead of exact pixels.
 Single overlay grid click:
 
 ```sh
-runwave '{
+runwave-controller '{
   "action": "step",
   "action_name": "turn-003-click-start-cell",
   "session_id": "playtest-001",
@@ -214,7 +219,7 @@ runwave '{
 Multi-click sends quick clicks at random points inside the selected cells:
 
 ```sh
-runwave '{
+runwave-controller '{
   "action": "step",
   "action_name": "turn-003-multi-click",
   "session_id": "playtest-001",
@@ -227,7 +232,7 @@ runwave '{
 Drag:
 
 ```sh
-runwave '{
+runwave-controller '{
   "action": "step",
   "action_name": "turn-004-drag",
   "session_id": "playtest-001",
@@ -254,7 +259,7 @@ Move the cursor without clicking:
 Move the mouse without clicking for camera control:
 
 ```sh
-runwave '{
+runwave-controller '{
   "action": "step",
   "action_name": "turn-005-look-around",
   "session_id": "playtest-001",
@@ -270,19 +275,19 @@ negative `dx` moves left, positive `dy` moves down, and negative `dy` moves up.
 Navigate or reset:
 
 ```sh
-runwave '{"action":"reset","action_name":"reset-001","session_id":"playtest-001"}'
+runwave-controller '{"action":"reset","action_name":"reset-001","session_id":"playtest-001"}'
 ```
 
 Stop and finalize the recording:
 
 ```sh
-runwave '{"action":"stop","action_name":"run-stop","session_id":"playtest-001"}'
+runwave-controller '{"action":"stop","action_name":"run-stop","session_id":"playtest-001"}'
 ```
 
 List known sessions:
 
 ```sh
-runwave '{"action":"sessions"}'
+runwave-controller '{"action":"sessions"}'
 ```
 
 When `record: true` is set, `stop` returns `video` and `audioVideo` pointing at

@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 const test = require('node:test');
 
-const { cliArgs } = require('../controller/src/cli');
+const { cliArgs } = require('../controller/src/api');
 const { createProfiler } = require('../controller/src/profiler');
 
 test('CLI strips verbose flags before JSON input is parsed', () => {

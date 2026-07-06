@@ -1,7 +1,6 @@
-"""Python wrapper around the runwave-playtest Node CLI.
+"""Python wrapper around the runwave Node CLI.
 
-Shells out to ``runwave-playtest`` (see ``bin/runwave-playtest.js`` in the
-runwave repo). All the same requirements apply: recording needs a Linux host
+Shells out to ``runwave`` from the runwave repo. All the same requirements apply: recording needs a Linux host
 with gstreamer, an X server or Xvfb, and PulseAudio. See the runwave README
 for details.
 """
@@ -21,7 +20,7 @@ LogHandler = Callable[[dict], None]
 
 
 class PlaytestError(RuntimeError):
-    """Raised when the runwave-playtest CLI exits non-zero or misbehaves."""
+    """Raised when the runwave CLI exits non-zero or misbehaves."""
 
     def __init__(
         self,
@@ -46,11 +45,11 @@ class PlaytestResult:
 def _resolve_cli(cli_path: Optional[PathLike]) -> str:
     if cli_path:
         return str(cli_path)
-    found = shutil.which("runwave-playtest")
+    found = shutil.which("runwave")
     if found:
         return found
     raise FileNotFoundError(
-        "runwave-playtest CLI not found on PATH. Install runwave "
+        "runwave CLI not found on PATH. Install runwave "
         "(`npm install -g <runwave-repo>`) or pass cli_path=... explicitly."
     )
 
@@ -61,6 +60,7 @@ def run_playtest(
     out_dir: PathLike,
     port: int,
     openrouter_api_key: Optional[str] = None,
+    viewport: Optional[Mapping[str, int]] = None,
     playtest_duration_ms: Optional[int] = None,
     min_playtest_ms: Optional[int] = None,
     model: Optional[str] = None,
@@ -69,7 +69,7 @@ def run_playtest(
     env: Optional[Mapping[str, str]] = None,
     on_log: Optional[LogHandler] = None,
 ) -> PlaytestResult:
-    """Run a runwave playtest by invoking the runwave-playtest Node CLI.
+    """Run a runwave playtest by invoking the runwave Node CLI.
 
     Parameters
     ----------
@@ -84,6 +84,8 @@ def run_playtest(
     openrouter_api_key:
         OpenRouter API key. If omitted, ``OPENROUTER_API_KEY`` must already be
         in the environment (or in ``env``).
+    viewport:
+        Browser viewport and video size as ``{"width": 1280, "height": 720}``.
     playtest_duration_ms:
         Max playtest wall time. Defaults to 150000 (2m30s) if omitted.
     min_playtest_ms:
@@ -93,7 +95,7 @@ def run_playtest(
     verbose:
         Forwards ``--verbose`` to the CLI (runwave harness ndjson timing log).
     cli_path:
-        Explicit path to ``runwave-playtest``. Otherwise looked up on ``PATH``.
+        Explicit path to ``runwave``. Otherwise looked up on ``PATH``.
     env:
         Extra environment variables to merge into the CLI's environment.
     on_log:
@@ -126,6 +128,8 @@ def run_playtest(
         "--out-dir", str(out_dir_path),
         "--port", str(port),
     ]
+    if viewport is not None:
+        args += ["--viewport", f"{viewport['width']}x{viewport['height']}"]
     if playtest_duration_ms is not None:
         args += ["--playtest-duration-ms", str(playtest_duration_ms)]
     if min_playtest_ms is not None:
@@ -146,27 +150,27 @@ def run_playtest(
             "it in the environment / env=... mapping."
         )
 
-    process = subprocess.Popen(
+    with subprocess.Popen(
         args,
         env=resolved_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
-    )
-    assert process.stdout is not None
+    ) as process:
+        assert process.stdout is not None
 
-    for line in process.stdout:
-        stripped = line.rstrip("\n")
-        if on_log is not None:
-            try:
-                on_log(json.loads(stripped))
-            except json.JSONDecodeError:
-                on_log({"raw": stripped})
-        else:
-            print(stripped, flush=True)
+        for line in process.stdout:
+            stripped = line.rstrip("\n")
+            if on_log is not None:
+                try:
+                    on_log(json.loads(stripped))
+                except json.JSONDecodeError:
+                    on_log({"raw": stripped})
+            else:
+                print(stripped, flush=True)
 
-    exit_code = process.wait()
+        exit_code = process.wait()
     summary_path = out_dir_path / "summary.json"
     summary: Optional[dict[str, Any]] = None
     if summary_path.exists():
@@ -174,14 +178,14 @@ def run_playtest(
             summary = json.load(fh)
 
     if exit_code != 0:
-        message = f"runwave-playtest exited {exit_code}"
+        message = f"runwave exited {exit_code}"
         if summary and summary.get("error"):
             message += f": {summary['error']}"
         raise PlaytestError(message, exit_code=exit_code, summary=summary)
 
     if summary is None:
         raise PlaytestError(
-            "runwave-playtest exited 0 but did not write summary.json",
+            "runwave exited 0 but did not write summary.json",
             exit_code=exit_code,
             summary=None,
         )

@@ -3,10 +3,10 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "runwave"
+name = "runwavepy"
 version = "0.1.0"
-description = "Python wrapper around the runwave-playtest Node CLI"
+description = "Python wrapper around the runwave Node CLI"
 requires-python = ">=3.9"
 
 [tool.setuptools]
-packages = ["runwave"]
+packages = ["runwavepy"]

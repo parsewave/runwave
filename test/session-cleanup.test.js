@@ -5,7 +5,7 @@ const path = require('path');
 const test = require('node:test');
 
 const { createProfiler } = require('../controller/src/profiler');
-const { existingSessionStart, stopExistingSessionForForce } = require('../controller/src/cli');
+const { existingSessionStart, stopExistingSessionForForce } = require('../controller/src/api');
 const { startSessionConfig } = require('../controller/src/protocol');
 
 function writeSession(dir, session) {

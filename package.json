@@ -1,24 +1,24 @@
 {
   "name": "runwave",
   "version": "0.1.0",
-  "description": "Runwave browser automation and artifact capture for game benchmark playtesting.",
+  "description": "Runwave browser-game playtesting and artifact capture.",
   "private": true,
   "type": "commonjs",
-  "main": "controller/src/cli.js",
+  "main": "runwave/index.js",
   "bin": {
-    "runwave": "bin/runwave.js",
-    "runwave-playtest": "bin/runwave-playtest.js"
+    "runwave": "runwave/cli.js",
+    "runwave-controller": "runwave/controller.js"
   },
   "scripts": {
-    "cli": "node bin/runwave.js",
+    "cli": "node runwave/cli.js",
+    "controller": "node runwave/controller.js",
     "smoke": "node --test test/smoke.test.js",
     "test": "node --test test/*.test.js"
   },
   "files": [
-    "bin",
+    "runwave",
     "controller",
     "agent",
-    "playtest",
     "README.md"
   ],
   "engines": {
