@@ -182,6 +182,27 @@ function loadPlaytestInstructions(gameDir, game) {
   return fs.readFileSync(playtestPath, 'utf8');
 }
 
+function loadRunwavePlaytest(runwaveDir) {
+  const candidates = [
+    path.join(runwaveDir, 'runwave'),
+    path.join(runwaveDir, 'runwave', 'index.js'),
+    path.join(runwaveDir, 'playtest', 'playtest.js'),
+  ];
+  const attempted = [];
+  for (const candidate of candidates) {
+    attempted.push(candidate);
+    try {
+      const mod = require(candidate);
+      if (typeof mod.runPlaytest === 'function') return mod.runPlaytest;
+    } catch (error) {
+      if (error.code !== 'MODULE_NOT_FOUND' || !String(error.message).includes(candidate)) {
+        throw error;
+      }
+    }
+  }
+  throw new Error(`runwave checkout does not export runPlaytest; tried ${attempted.join(', ')}`);
+}
+
 function startOverridesFromJob(job = {}, audioCapture = {}) {
   const overrides = {
     audioSource: audioCapture.audioSource,
@@ -596,7 +617,7 @@ async function main() {
     if (xvfbSession.display) log('xvfb.ready', { display: xvfbSession.display });
 
     {
-      const { runPlaytest } = require(path.join(dirs.runwave, 'runwave'));
+      const runPlaytest = loadRunwavePlaytest(dirs.runwave);
 
       const startOverrides = startOverridesFromJob(job, audioCapture);
 
@@ -682,6 +703,7 @@ if (require.main === module) {
 module.exports = {
   chromiumArgs,
   dockerRunArgs,
+  loadRunwavePlaytest,
   loadPlaytestInstructions,
   shouldRunJobInContainer,
   signalLongProcess,

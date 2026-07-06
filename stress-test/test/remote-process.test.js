@@ -9,6 +9,7 @@ const test = require('node:test');
 
 const {
   dockerRunArgs,
+  loadRunwavePlaytest,
   loadPlaytestInstructions,
   shouldRunJobInContainer,
   signalLongProcess,
@@ -251,4 +252,28 @@ test('docker runner mounts absolute local runwave repos into the container', () 
   );
 
   assert.ok(args.includes(`${repoRoot}:${repoRoot}:ro`));
+});
+
+test('remote runner loads runPlaytest from current package layout', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-module-current-'));
+  const packageDir = path.join(root, 'runwave');
+  fs.mkdirSync(packageDir);
+  fs.writeFileSync(
+    path.join(packageDir, 'index.js'),
+    'module.exports = { runPlaytest: () => "current" };\n'
+  );
+
+  assert.equal(loadRunwavePlaytest(root)(), 'current');
+});
+
+test('remote runner loads runPlaytest from GitHub main package layout', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-module-main-'));
+  const packageDir = path.join(root, 'playtest');
+  fs.mkdirSync(packageDir);
+  fs.writeFileSync(
+    path.join(packageDir, 'playtest.js'),
+    'module.exports = { runPlaytest: () => "main" };\n'
+  );
+
+  assert.equal(loadRunwavePlaytest(root)(), 'main');
 });

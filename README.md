@@ -1,10 +1,10 @@
 # Runwave
 
-Runwave is an agentic playtester for browser games and canvas apps.
+Runwave is an agentic harness which allows a VLM to play video games
 
-This package is the task-neutral version of the PR145 browser runner. It only
-provides browser control, artifact capture, and an optional OpenRouter-backed
-playtester. It does not include a frame picker or judge.
+![](/assets/architecture.png)
+
+It includes remote stress testing code (`./stress-test`) as a first class component to prevent regression and enable quick development cycles. It can scale horizontally to play hundreds of games at once.
 
 ## Requirements
 
