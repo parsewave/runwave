@@ -1,24 +1,31 @@
 {
   "name": "runwave",
   "version": "0.1.0",
-  "description": "Runwave browser automation and artifact capture for game benchmark playtesting.",
+  "description": "Runwave browser-game playtesting and artifact capture.",
   "private": true,
   "type": "commonjs",
-  "main": "controller/src/cli.js",
+  "main": "runwave/index.js",
   "bin": {
-    "runwave": "bin/runwave.js",
-    "runwave-playtest": "bin/runwave-playtest.js"
+    "runwave": "runwave/cli.js",
+    "runwave-controller": "runwave/controller.js"
   },
   "scripts": {
-    "cli": "node bin/runwave.js",
-    "smoke": "node --test test/smoke.test.js",
-    "test": "node --test test/*.test.js"
+    "cli": "node runwave/cli.js",
+    "controller": "node runwave/controller.js",
+    "smoke": "npm run test:smoke",
+    "test": "node --test runwave/protocol/test/*.test.js runwave/agent/test/*.test.js runwave/controller/test/*.test.js stress-test/test/*.test.js runwave/test/*.test.js",
+    "test:agent": "node --test runwave/agent/test/*.test.js",
+    "test:all": "npm test && npm run test:py",
+    "test:controller": "node --test runwave/controller/test/*.test.js",
+    "test:protocol": "node --test runwave/protocol/test/*.test.js",
+    "test:integration": "npm run test:runwave",
+    "test:runwave": "node --test runwave/test/*.test.js",
+    "test:stress-test": "node --test stress-test/test/*.test.js",
+    "test:smoke": "node --test runwave/test/smoke.test.js",
+    "test:py": "PYTHONWARNINGS=error python3 -m unittest discover -s runwavepy/tests -t runwavepy"
   },
   "files": [
-    "bin",
-    "controller",
-    "agent",
-    "playtest",
+    "runwave",
     "README.md"
   ],
   "engines": {
