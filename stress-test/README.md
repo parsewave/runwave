@@ -141,13 +141,13 @@ docker build -f stress-test/remote/playtest-runner.Dockerfile \
   -t runwave-playtest-runner:latest \
   stress-test/remote
 
-aws s3 sync s3://pw-cruft/games/mario-html5/ \
-  cruft/playtests/_games-cache/mario-html5/ \
+aws s3 sync s3://pw-cruft/games/radius-raid/ \
+  cruft/playtests/_games-cache/radius-raid/ \
   --delete --only-show-errors
 
 RUNWAVE_GAMES_ROOT="$PWD/cruft/playtests/_games-cache" \
 RUNWAVE_JOBS_ROOT="$PWD/cruft/playtests/local-agent-smoke/jobs" \
-node stress-test/remote/run-playtest.js --job stress-test/examples/job-agent-mario.local.json
+node stress-test/remote/run-playtest.js --job stress-test/examples/job-agent-radius-raid.local.json
 ```
 
 Linux local smoke runs use the same Docker wrapper by default. Set
@@ -158,8 +158,9 @@ On machines with Chrome already installed and Playwright downloads blocked, set
 `skipPlaywrightInstall: true` and `channel: "chrome"` in the job JSON.
 
 For a server-side one-game agent run, use
-`stress-test/examples/job-agent-mario.server.json`. It runs agent mode for a 3-minute
-safety window and enables verbose controller timing logs.
+`stress-test/examples/job-agent-radius-raid.server.json`. It runs Radius Raid in
+agent mode for a 3-minute safety window and enables verbose controller timing
+logs.
 
 ## Viewer
 

@@ -466,7 +466,8 @@ const DEFAULT_CHROMIUM_ARGS = [
   '--no-sandbox',
   '--ignore-gpu-blocklist',
   '--enable-gpu',
-  '--use-gl=egl',
+  '--use-gl=angle',
+  '--use-angle=swiftshader',
   '--enable-unsafe-swiftshader',
   '--autoplay-policy=no-user-gesture-required',
 ];

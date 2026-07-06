@@ -1,7 +1,7 @@
 {
-  "jobId": "local-agent-mario",
+  "jobId": "local-agent-radius-raid",
   "runId": "local-agent-smoke",
-  "game": "mario-html5",
+  "game": "radius-raid",
   "attempt": 1,
   "port": 9311,
   "runwaveRepo": "https://github.com/parsewave/runwave",

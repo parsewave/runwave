@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const { buildJobs, parseArgs } = require('../orchestrate-playtests');
@@ -15,13 +17,13 @@ test('agent fleet jobs default minimum play time to near full duration', () => {
     '--s3-uri',
     's3://example/runwave',
     '--games',
-    'mario-html5',
+    'radius-raid',
     '--agent',
     '--playtest-duration-ms',
     '120000',
   ]);
 
-  const [job] = buildJobs(args, ['mario-html5']);
+  const [job] = buildJobs(args, ['radius-raid']);
 
   assert.equal(job.playMode, 'agent');
   assert.equal(job.playtestDurationMs, 120000);
@@ -37,7 +39,7 @@ test('agent fleet jobs allow explicit minimum play time override', () => {
     '--s3-uri',
     's3://example/runwave',
     '--games',
-    'mario-html5',
+    'radius-raid',
     '--agent',
     '--playtest-duration-ms',
     '180000',
@@ -45,7 +47,7 @@ test('agent fleet jobs allow explicit minimum play time override', () => {
     '170000',
   ]);
 
-  const [job] = buildJobs(args, ['mario-html5']);
+  const [job] = buildJobs(args, ['radius-raid']);
 
   assert.equal(job.playMode, 'agent');
   assert.equal(job.playtestDurationMs, 180000);
@@ -61,7 +63,7 @@ test('fleet jobs carry mark grid dimensions', () => {
     '--s3-uri',
     's3://example/runwave',
     '--games',
-    'mario-html5',
+    'radius-raid',
     '--agent',
     '--mark-grid-rows',
     '16',
@@ -69,7 +71,7 @@ test('fleet jobs carry mark grid dimensions', () => {
     '24',
   ]);
 
-  const [job] = buildJobs(args, ['mario-html5']);
+  const [job] = buildJobs(args, ['radius-raid']);
 
   assert.equal(job.markGridRows, 16);
   assert.equal(job.markGridCols, 24);
@@ -84,15 +86,16 @@ test('fleet jobs use WebGL launch args for every game', () => {
     '--s3-uri',
     's3://example/runwave',
     '--games',
-    'mario-html5',
+    'radius-raid',
     '--agent',
   ]);
 
-  const [job] = buildJobs(args, ['mario-html5']);
+  const [job] = buildJobs(args, ['radius-raid']);
 
   assert.equal(Object.prototype.hasOwnProperty.call(job, 'requiresHardwareWebgl'), false);
   assert.equal(job.chromiumArgsMode, 'replace');
-  assert.ok(job.chromiumArgs.includes('--use-gl=egl'));
+  assert.ok(job.chromiumArgs.includes('--use-gl=angle'));
+  assert.ok(job.chromiumArgs.includes('--use-angle=swiftshader'));
   assert.ok(job.chromiumArgs.includes('--enable-unsafe-swiftshader'));
 });
 
@@ -105,15 +108,24 @@ test('all fleet jobs receive the same WebGL launch args', () => {
     '--s3-uri',
     's3://example/runwave',
     '--games',
-    'mario-html5,2048',
+    'radius-raid,2048',
   ]);
 
-  const jobs = buildJobs(args, ['mario-html5', '2048']);
+  const jobs = buildJobs(args, ['radius-raid', '2048']);
 
   assert.equal(jobs.length, 2);
   assert.deepEqual(jobs[0].chromiumArgs, jobs[1].chromiumArgs);
   assert.ok(jobs.every((job) => job.chromiumArgsMode === 'replace'));
   assert.ok(jobs.every((job) => !Object.prototype.hasOwnProperty.call(job, 'requiresHardwareWebgl')));
+});
+
+test('one-game example jobs use the Radius Raid smoke game', () => {
+  const examplesDir = path.resolve(__dirname, '../examples');
+  for (const file of ['job-agent-radius-raid.local.json', 'job-agent-radius-raid.server.json']) {
+    const job = JSON.parse(fs.readFileSync(path.join(examplesDir, file), 'utf8'));
+    assert.equal(job.game, 'radius-raid');
+    assert.match(job.jobId, /radius-raid/);
+  }
 });
 
 test('orchestrator can take ssh key from environment', () => {

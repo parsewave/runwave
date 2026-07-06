@@ -17,5 +17,7 @@ test('chromium args can replace default WebGL launch args', () => {
 test('default chromium args allow SwiftShader fallback', () => {
   const args = chromiumArgs({}, {});
 
+  assert.ok(args.includes('--use-gl=angle'));
+  assert.ok(args.includes('--use-angle=swiftshader'));
   assert.ok(args.includes('--enable-unsafe-swiftshader'));
 });
