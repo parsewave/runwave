@@ -5,7 +5,7 @@ const http = require('http');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const DEFAULT_PLAYTEST_DURATION_MS = 150000;
+const DEFAULT_MAX_DURATION = 150000;
 const DEFAULT_PROCESS_STOP_WAIT_MS = 5000;
 const DEFAULT_PROCESS_KILL_WAIT_MS = 5000;
 const DEFAULT_HTTP_TIMEOUT_MS = 60000;
@@ -32,6 +32,44 @@ function assertGameDir(gameDir) {
 
 function loadPlaytestInstructions(playtestMd) {
   return fs.readFileSync(playtestMd, 'utf8');
+}
+
+function isValidViewport(viewport) {
+  return Boolean(
+    viewport
+    && Number.isFinite(viewport.width)
+    && Number.isFinite(viewport.height)
+    && viewport.width > 0
+    && viewport.height > 0
+  );
+}
+
+function normalizeViewport(viewport, label) {
+  if (!isValidViewport(viewport)) {
+    throw new Error(`${label} viewport {width,height} is required`);
+  }
+  return {
+    width: Math.round(viewport.width),
+    height: Math.round(viewport.height),
+  };
+}
+
+function loadGameMetadata(gameDir) {
+  const metadataPath = path.join(gameDir, 'metadata.json');
+  if (!fs.existsSync(metadataPath)) {
+    throw new Error(`game directory missing metadata.json: ${metadataPath}`);
+  }
+
+  let metadata;
+  try {
+    metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`game metadata.json is invalid JSON: ${metadataPath}: ${error.message}`);
+  }
+
+  return {
+    viewport: normalizeViewport(metadata && metadata.viewport, `game metadata.json ${metadataPath}`),
+  };
 }
 
 function run(command, args, options = {}, log = defaultLog) {
@@ -187,10 +225,10 @@ function validateRecordingArtifact(stopResponse) {
   return { path: video, bytes: stat.size };
 }
 
-function buildAgentJob({ playtestDurationMs, minPlaytestMs, viewport, playtestInstructions, start = {} }) {
+function buildAgentJob({ maxDuration, minDuration, viewport, playtestInstructions, start = {} }) {
   return {
-    playtestDurationMs,
-    agentMinPlaytestMs: minPlaytestMs ?? Math.max(0, playtestDurationMs - 10000),
+    maxDuration,
+    minDuration: minDuration ?? Math.max(0, maxDuration - 10000),
     viewport,
     videoSize: viewport,
     playtestInstructions,
@@ -212,8 +250,8 @@ async function runPlaytest(options) {
     outDir,
     port,
     openRouterApiKey,
-    playtestDurationMs = DEFAULT_PLAYTEST_DURATION_MS,
-    minPlaytestMs,
+    maxDuration = DEFAULT_MAX_DURATION,
+    minDuration,
     model,
     verbose = false,
     onLog,
@@ -221,7 +259,6 @@ async function runPlaytest(options) {
     httpTimeoutMs = DEFAULT_HTTP_TIMEOUT_MS,
     processStopWaitMs = DEFAULT_PROCESS_STOP_WAIT_MS,
     processKillWaitMs = DEFAULT_PROCESS_KILL_WAIT_MS,
-    viewport,
     startOverrides = {},
     env: envOverrides = {},
     onInitialResponse,
@@ -231,8 +268,8 @@ async function runPlaytest(options) {
   if (!outDir) throw new Error('runPlaytest: outDir is required');
   if (!port) throw new Error('runPlaytest: port is required');
   if (!openRouterApiKey) throw new Error('runPlaytest: openRouterApiKey is required');
-  if (!viewport || !Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) || viewport.width <= 0 || viewport.height <= 0) {
-    throw new Error('runPlaytest: viewport {width,height} is required');
+  if (Object.prototype.hasOwnProperty.call(options || {}, 'viewport')) {
+    throw new Error('runPlaytest: viewport must be defined in game metadata.json, not passed as an option');
   }
 
   const log = typeof onLog === 'function' ? onLog : defaultLog;
@@ -241,10 +278,12 @@ async function runPlaytest(options) {
   mkdirp(absoluteOutDir);
 
   const { playtestMd } = assertGameDir(absoluteGameDir);
+  const gameMetadata = loadGameMetadata(absoluteGameDir);
+  const viewport = gameMetadata.viewport;
   const playtestInstructions = loadPlaytestInstructions(playtestMd);
 
   const runwaveRoot = path.resolve(__dirname, '..');
-  const runwaveBin = path.join(runwaveRoot, 'bin', 'runwave.js');
+  const runwaveBin = path.join(runwaveRoot, 'controller', 'bin', 'runwave.js');
   const agentPlayerPath = path.join(runwaveRoot, 'agent', 'src', 'agent-player.js');
   const { runAgenticPlaytest } = require(agentPlayerPath);
 
@@ -263,8 +302,8 @@ async function runPlaytest(options) {
     gameDir: absoluteGameDir,
     outDir: absoluteOutDir,
     port,
-    playtestDurationMs,
-    minPlaytestMs: minPlaytestMs ?? Math.max(0, playtestDurationMs - 10000),
+    maxDuration,
+    minDuration: minDuration ?? Math.max(0, maxDuration - 10000),
     model: model || env.RUNWAVE_AGENT_MODEL || env.OPENROUTER_MODEL || null,
     sessionId: runwaveSessionId,
     startedAt: new Date().toISOString(),
@@ -285,7 +324,7 @@ async function runPlaytest(options) {
   };
 
   try {
-    log('playtest.start', { gameDir: absoluteGameDir, port, playtestDurationMs });
+    log('playtest.start', { gameDir: absoluteGameDir, port, maxDuration });
 
     gameProcess = spawnLong('bash', ['start.sh'], {
       cwd: absoluteGameDir,
@@ -305,7 +344,7 @@ async function runPlaytest(options) {
       record: true,
       headless: false,
       viewport,
-      videoSize: startOverrides.videoSize || viewport,
+      videoSize: viewport,
       outputRoot: 'state/output',
       outDir: 'recordings/session',
       initialScreenshot: true,
@@ -321,11 +360,11 @@ async function runPlaytest(options) {
     }
 
     const job = buildAgentJob({
-      playtestDurationMs,
+      maxDuration,
       viewport,
       playtestInstructions,
       start,
-      minPlaytestMs,
+      minDuration,
     });
 
     const playtest = await runAgenticPlaytest({
@@ -385,6 +424,7 @@ async function runPlaytest(options) {
 
 module.exports = {
   buildAgentJob,
+  loadGameMetadata,
   runPlaytest,
   validateRecordingArtifact,
 };

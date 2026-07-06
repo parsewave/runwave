@@ -144,8 +144,8 @@ node ops/orchestrate-playtests.js \
   --s3-uri s3://pw-cruft/playtests \
   --games-s3-uri s3://pw-cruft/games \
   --runwave-ref runwave-agentic-player \
-  --playtest-duration-ms 120000 \
-  --agent-min-playtest-ms 110000 \
+  --max-duration 120000 \
+  --min-duration 110000 \
   --ssh-key "$RUNWAVE_SSH_KEY" \
   --agent \
   --concurrency-per-server 3
@@ -161,8 +161,8 @@ uploads each job to:
 s3://pw-cruft/playtests/<run-id>/<game>/attempt-001/
 ```
 
-For agent jobs, if `--agent-min-playtest-ms` is omitted, the orchestrator sets
-it to `--playtest-duration-ms - 10000`. A 120 second run therefore requires
+For agent jobs, if `--min-duration` is omitted, the orchestrator sets
+it to `--max-duration - 10000`. A 120 second run therefore requires
 about 110 seconds of agent play before early stop is allowed.
 
 ## Local Fallback
@@ -197,7 +197,7 @@ done < <(find cruft/playtests/_games-cache -mindepth 2 -maxdepth 2 -name package
   "runwaveRepo": "https://github.com/parsewave/runwave",
   "runwaveRef": "main",
   "playMode": "agent",
-  "playtestDurationMs": 120000,
+  "maxDuration": 120000,
   "s3Uri": "s3://pw-cruft/playtests/<run-id>/<game>/attempt-001"
 }
 ```

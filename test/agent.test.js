@@ -431,8 +431,8 @@ test('agent playtest loop calls model and executes returned sequence', async () 
   const controllerSteps = [];
   const result = await runAgenticPlaytest({
     job: {
-      playtestDurationMs: 7000,
-      agentMinPlaytestMs: 0,
+      maxDuration: 7000,
+      minDuration: 0,
       viewport: { width: 640, height: 360 },
     },
     initialResponse: {
@@ -495,8 +495,8 @@ test('agent loop records invalid JSON as a failed action and retries with the sa
   const controllerActions = [];
   const result = await runAgenticPlaytest({
     job: {
-      playtestDurationMs: 9000,
-      agentMinPlaytestMs: 0,
+      maxDuration: 9000,
+      minDuration: 0,
       viewport: { width: 640, height: 360 },
       agentMaxModelFallbacks: 2,
     },
@@ -558,8 +558,8 @@ test('agent loop records schema-invalid model sequences as failed actions withou
   const controllerActions = [];
   const result = await runAgenticPlaytest({
     job: {
-      playtestDurationMs: 9000,
-      agentMinPlaytestMs: 0,
+      maxDuration: 9000,
+      minDuration: 0,
       viewport: { width: 640, height: 360 },
       agentMaxModelFallbacks: 2,
     },
@@ -627,8 +627,8 @@ test('agent loop retries when model actions all normalize away', async () => {
   const controllerActions = [];
   const result = await runAgenticPlaytest({
     job: {
-      playtestDurationMs: 9000,
-      agentMinPlaytestMs: 0,
+      maxDuration: 9000,
+      minDuration: 0,
       viewport: { width: 640, height: 360 },
       agentMaxModelFallbacks: 2,
     },
@@ -695,8 +695,8 @@ test('agent loop retries when clipped timing removes every action', async () => 
   const controllerActions = [];
   const result = await runAgenticPlaytest({
     job: {
-      playtestDurationMs: 6000,
-      agentMinPlaytestMs: 0,
+      maxDuration: 6000,
+      minDuration: 0,
       viewport: { width: 640, height: 360 },
       agentMaxModelFallbacks: 2,
     },
@@ -761,8 +761,8 @@ test('agent loop records action execution failures and retries with the same scr
   const logEvents = [];
   const result = await runAgenticPlaytest({
     job: {
-      playtestDurationMs: 9000,
-      agentMinPlaytestMs: 0,
+      maxDuration: 9000,
+      minDuration: 0,
       viewport: { width: 640, height: 360 },
     },
     initialResponse: {
@@ -1044,8 +1044,8 @@ test('agent loop attaches previous sequence outcome to the prior history step', 
   let calls = 0;
   const result = await runAgenticPlaytest({
     job: {
-      playtestDurationMs: 9000,
-      agentMinPlaytestMs: 0,
+      maxDuration: 9000,
+      minDuration: 0,
       viewport: { width: 640, height: 360 },
     },
     initialResponse: {

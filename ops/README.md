@@ -107,8 +107,8 @@ node ops/orchestrate-playtests.js \
   --games-s3-uri s3://pw-cruft/games \
   --runwave-ref runwave-agentic-player \
   --play-mode agent \
-  --playtest-duration-ms 120000 \
-  --agent-min-playtest-ms 110000 \
+  --max-duration 120000 \
+  --min-duration 110000 \
   --ssh-key "$RUNWAVE_SSH_KEY" \
   --concurrency-per-server 3
 ```
@@ -121,8 +121,8 @@ Only browser games whose `start.sh` serves HTTP are scheduled by default.
 Unity/editor-only projects are installed on the machines but skipped because
 runwave drives browser targets.
 
-For agent jobs, if `--agent-min-playtest-ms` is not provided, the orchestrator
-sets it to `--playtest-duration-ms - 10000`. A 120 second run therefore requires
+For agent jobs, if `--min-duration` is not provided, the orchestrator
+sets it to `--max-duration - 10000`. A 120 second run therefore requires
 about 110 seconds of play before the agent is allowed to stop.
 
 Remote playtest jobs derive `viewport` and `videoSize` from each game's
