@@ -36,8 +36,8 @@ function parseArgs(argv) {
     concurrencyPerServer: 3,
     requiredConcurrency: 20,
     basePort: 8900,
-    playtestDurationMs: 120000,
-    agentMinPlaytestMs: null,
+    maxDuration: 120000,
+    minDuration: null,
     markGridRows: null,
     markGridCols: null,
     playMode: 'scripted',
@@ -63,8 +63,8 @@ function parseArgs(argv) {
     else if (arg === '--concurrency-per-server') args.concurrencyPerServer = Number(next());
     else if (arg === '--require-concurrency') args.requiredConcurrency = Number(next());
     else if (arg === '--base-port') args.basePort = Number(next());
-    else if (arg === '--playtest-duration-ms') args.playtestDurationMs = Number(next());
-    else if (arg === '--agent-min-playtest-ms') args.agentMinPlaytestMs = Number(next());
+    else if (arg === '--max-duration') args.maxDuration = Number(next());
+    else if (arg === '--min-duration') args.minDuration = Number(next());
     else if (arg === '--mark-grid-rows') args.markGridRows = Number(next());
     else if (arg === '--mark-grid-cols') args.markGridCols = Number(next());
     else if (arg === '--play-mode') args.playMode = next();
@@ -97,8 +97,8 @@ function usage() {
     '  --concurrency-per-server N',
     '  --require-concurrency N',
     '  --base-port N',
-    '  --playtest-duration-ms N',
-    '  --agent-min-playtest-ms N',
+    '  --max-duration N',
+    '  --min-duration N',
     '  --mark-grid-rows N',
     '  --mark-grid-cols N',
     '  --play-mode agent|scripted  (scripted is local/debug only)',
@@ -250,9 +250,9 @@ function discoverS3Games(args) {
   return { games, skipped };
 }
 
-function agentMinPlaytestMs(args) {
-  if (Number.isFinite(args.agentMinPlaytestMs)) return Math.max(0, args.agentMinPlaytestMs);
-  const durationMs = Number.isFinite(args.playtestDurationMs) ? args.playtestDurationMs : 120000;
+function resolveMinDuration(args) {
+  if (Number.isFinite(args.minDuration)) return Math.max(0, args.minDuration);
+  const durationMs = Number.isFinite(args.maxDuration) ? args.maxDuration : 120000;
   return Math.max(0, durationMs - 10000);
 }
 
@@ -269,7 +269,7 @@ function buildJobs(args, games) {
       runwaveRef: args.runwaveRef,
       playMode: args.playMode,
       skipPlaywrightInstall: args.skipPlaywrightInstall,
-      playtestDurationMs: args.playtestDurationMs,
+      maxDuration: args.maxDuration,
       s3Uri: `${args.s3Uri.replace(/\/+$/, '')}/${args.runId}/${game}/attempt-${String(attempt).padStart(3, '0')}`,
     };
     if (args.hardwareWebglGames && args.hardwareWebglGames.has(game)) {
@@ -279,7 +279,7 @@ function buildJobs(args, games) {
       job.headless = true;
       job.audioXvfb = false;
     }
-    if (args.playMode === 'agent') job.agentMinPlaytestMs = agentMinPlaytestMs(args);
+    if (args.playMode === 'agent') job.minDuration = resolveMinDuration(args);
     if (Number.isFinite(args.markGridRows)) job.markGridRows = Math.max(1, Math.round(args.markGridRows));
     if (Number.isFinite(args.markGridCols)) job.markGridCols = Math.max(1, Math.round(args.markGridCols));
     jobs.push(job);
@@ -412,7 +412,7 @@ async function main() {
   console.log(`Games: ${games.join(', ')}`);
   console.log(
     `Jobs: ${jobs.length}; concurrency per server: ${args.concurrencyPerServer}; ` +
-    `fleet capacity: ${capacity}; playtest duration: ${args.playtestDurationMs}ms`
+    `fleet capacity: ${capacity}; max duration: ${args.maxDuration}ms`
   );
   if (hardwareJobs.length) {
     console.log(`Hardware WebGL jobs: ${hardwareJobs.map((job) => job.game).join(', ')}`);
@@ -445,7 +445,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-  agentMinPlaytestMs,
+  resolveMinDuration,
   buildJobs,
   parseArgs,
 };

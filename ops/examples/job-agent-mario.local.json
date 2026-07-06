@@ -9,6 +9,6 @@
   "skipPlaywrightInstall": true,
   "channel": "chrome",
   "playMode": "agent",
-  "playtestDurationMs": 30000,
-  "agentMinPlaytestMs": 15000
+  "maxDuration": 30000,
+  "minDuration": 15000
 }

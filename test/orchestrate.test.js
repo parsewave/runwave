@@ -17,15 +17,15 @@ test('agent fleet jobs default minimum play time to near full duration', () => {
     '--games',
     'mario-html5',
     '--agent',
-    '--playtest-duration-ms',
+    '--max-duration',
     '120000',
   ]);
 
   const [job] = buildJobs(args, ['mario-html5']);
 
   assert.equal(job.playMode, 'agent');
-  assert.equal(job.playtestDurationMs, 120000);
-  assert.equal(job.agentMinPlaytestMs, 110000);
+  assert.equal(job.maxDuration, 120000);
+  assert.equal(job.minDuration, 110000);
 });
 
 test('agent fleet jobs allow explicit minimum play time override', () => {
@@ -39,17 +39,17 @@ test('agent fleet jobs allow explicit minimum play time override', () => {
     '--games',
     'mario-html5',
     '--agent',
-    '--playtest-duration-ms',
+    '--max-duration',
     '180000',
-    '--agent-min-playtest-ms',
+    '--min-duration',
     '170000',
   ]);
 
   const [job] = buildJobs(args, ['mario-html5']);
 
   assert.equal(job.playMode, 'agent');
-  assert.equal(job.playtestDurationMs, 180000);
-  assert.equal(job.agentMinPlaytestMs, 170000);
+  assert.equal(job.maxDuration, 180000);
+  assert.equal(job.minDuration, 170000);
 });
 
 test('fleet jobs carry mark grid dimensions', () => {

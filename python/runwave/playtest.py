@@ -61,8 +61,8 @@ def run_playtest(
     out_dir: PathLike,
     port: int,
     openrouter_api_key: Optional[str] = None,
-    playtest_duration_ms: Optional[int] = None,
-    min_playtest_ms: Optional[int] = None,
+    max_duration: Optional[int] = None,
+    min_duration: Optional[int] = None,
     model: Optional[str] = None,
     verbose: bool = False,
     cli_path: Optional[PathLike] = None,
@@ -84,10 +84,10 @@ def run_playtest(
     openrouter_api_key:
         OpenRouter API key. If omitted, ``OPENROUTER_API_KEY`` must already be
         in the environment (or in ``env``).
-    playtest_duration_ms:
-        Max playtest wall time. Defaults to 150000 (2m30s) if omitted.
-    min_playtest_ms:
-        Floor before the agent may self-stop. Defaults to duration - 10000.
+    max_duration:
+        Max run wall time. Defaults to 150000 (2m30s) if omitted.
+    min_duration:
+        Floor before the agent may self-stop. Defaults to max duration - 10000.
     model:
         OpenRouter model slug. Sets ``RUNWAVE_AGENT_MODEL`` for the CLI.
     verbose:
@@ -126,10 +126,10 @@ def run_playtest(
         "--out-dir", str(out_dir_path),
         "--port", str(port),
     ]
-    if playtest_duration_ms is not None:
-        args += ["--playtest-duration-ms", str(playtest_duration_ms)]
-    if min_playtest_ms is not None:
-        args += ["--min-playtest-ms", str(min_playtest_ms)]
+    if max_duration is not None:
+        args += ["--max-duration", str(max_duration)]
+    if min_duration is not None:
+        args += ["--min-duration", str(min_duration)]
     if model:
         args += ["--model", model]
     if verbose:

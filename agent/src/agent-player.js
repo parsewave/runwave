@@ -176,8 +176,8 @@ function actionsWithinDuration(actions, duration) {
 }
 
 async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, modelClient = chatCompletion, log = () => {} }) {
-  const maxMs = Number(job.playtestDurationMs ?? 120000);
-  const minMs = Number(job.agentMinPlaytestMs ?? Math.min(30000, maxMs));
+  const maxMs = Number(job.maxDuration ?? 120000);
+  const minMs = Number(job.minDuration ?? Math.min(30000, maxMs));
   const recorder = new AgentRecorder(outputDir || path.join(process.cwd(), 'artifacts', 'agent'));
   const history = [];
   const startedAt = Date.now();

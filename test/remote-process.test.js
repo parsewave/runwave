@@ -126,7 +126,6 @@ test('remote playtest start overrides carry mark grid dimensions', () => {
       markGridRows: 16,
       markGridCols: 24,
       gridScreenshots: true,
-      videoSize: { width: 1280, height: 720 },
     },
     { audioSource: 'pulse.monitor' }
   );
@@ -135,7 +134,7 @@ test('remote playtest start overrides carry mark grid dimensions', () => {
   assert.equal(overrides.markGridCols, 24);
   assert.equal(overrides.gridScreenshots, true);
   assert.equal(overrides.audioSource, 'pulse.monitor');
-  assert.deepEqual(overrides.videoSize, { width: 1280, height: 720 });
+  assert.equal(Object.hasOwn(overrides, 'videoSize'), false);
 });
 
 test('xvfb capture config leaves room for measured browser chrome', () => {

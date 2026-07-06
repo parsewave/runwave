@@ -10,7 +10,7 @@ function usage() {
     '  runwave-playtest --game-dir <path> --out-dir <path> --port <n> [options]',
     '',
     'Required:',
-    '  --game-dir <path>            directory containing start.sh and playtest.md',
+    '  --game-dir <path>            directory containing start.sh, playtest.md, and metadata.json',
     '  --out-dir <path>             directory for artifacts (video, screenshots, agent history, summary.json)',
     '  --port <n>                   port passed to start.sh via PORT= and used as http://127.0.0.1:<port>/',
     '',
@@ -19,8 +19,8 @@ function usage() {
     '  OPENROUTER_MODEL             optional model override (or use --model)',
     '',
     'Options:',
-    '  --playtest-duration-ms <n>   max playtest wall time in ms (default 150000)',
-    '  --min-playtest-ms <n>        floor before the agent may self-stop (default duration - 10000)',
+    '  --max-duration <n>         max run wall time in ms (default 150000)',
+    '  --min-duration <n>         floor before the agent may self-stop (default max duration - 10000)',
     '  --model <slug>               OpenRouter model slug (sets RUNWAVE_AGENT_MODEL)',
     '  --verbose, -v                forward verbose flag to the runwave controller',
     '  --help, -h                   show this help',
@@ -37,8 +37,8 @@ function parseArgs(argv) {
     if (arg === '--game-dir') { out.gameDir = next(); continue; }
     if (arg === '--out-dir') { out.outDir = next(); continue; }
     if (arg === '--port') { out.port = Number(next()); continue; }
-    if (arg === '--playtest-duration-ms') { out.playtestDurationMs = Number(next()); continue; }
-    if (arg === '--min-playtest-ms') { out.minPlaytestMs = Number(next()); continue; }
+    if (arg === '--max-duration') { out.maxDuration = Number(next()); continue; }
+    if (arg === '--min-duration') { out.minDuration = Number(next()); continue; }
     if (arg === '--model') { out.model = next(); continue; }
     throw new Error(`unknown argument: ${arg}`);
   }
@@ -67,8 +67,8 @@ async function main() {
     outDir: path.resolve(args.outDir),
     port: args.port,
     openRouterApiKey,
-    playtestDurationMs: args.playtestDurationMs,
-    minPlaytestMs: args.minPlaytestMs,
+    maxDuration: args.maxDuration,
+    minDuration: args.minDuration,
     model: args.model,
     verbose: args.verbose,
   });

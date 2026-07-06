@@ -195,7 +195,6 @@ function startOverridesFromJob(job = {}, audioCapture = {}) {
     markGridRows: job.markGridRows,
     markGridCols: job.markGridCols,
   };
-  if (job.videoSize) overrides.videoSize = job.videoSize;
   return overrides;
 }
 
@@ -590,42 +589,35 @@ async function main() {
     if (!fs.existsSync(path.join(gameDir, 'start.sh'))) {
       throw new Error(`game has no start.sh: ${job.game}`);
     }
-    const metadataPath = path.join(gameDir, 'metadata.json');
-    if (!fs.existsSync(metadataPath)) {
-      throw new Error(`game has no metadata.json: ${job.game}`);
-    }
-    const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
-    const metaViewport = metadata && metadata.viewport;
-    if (!metaViewport || !Number.isFinite(metaViewport.width) || !Number.isFinite(metaViewport.height)
-      || metaViewport.width <= 0 || metaViewport.height <= 0) {
-      throw new Error(`game ${job.game} metadata.json missing viewport {width,height}`);
-    }
-    job.viewport = { width: Math.round(metaViewport.width), height: Math.round(metaViewport.height) };
-    job.videoSize = job.viewport;
-    job.xvfbWidth = Math.max(Number(job.xvfbWidth) || 0, job.viewport.width);
-    job.xvfbHeight = Math.max(Number(job.xvfbHeight) || 0, job.viewport.height);
-    log('job.start', { jobId, game: job.game, port, viewport: job.viewport });
     await checkoutRunwave(job, dirs.runwave, runnerEnv);
 
-    const audioCapture = await prepareAudioCaptureEnv(runnerEnv, job);
+    const { loadGameMetadata, runPlaytest } = require(path.join(dirs.runwave, 'playtest', 'playtest.js'));
+    const gameMetadata = loadGameMetadata(gameDir);
+    const viewport = gameMetadata.viewport;
+    const runtimeJob = {
+      ...job,
+      viewport,
+      videoSize: viewport,
+      xvfbWidth: Math.max(Number(job.xvfbWidth) || 0, viewport.width),
+      xvfbHeight: Math.max(Number(job.xvfbHeight) || 0, viewport.height),
+    };
+    log('job.start', { jobId, game: job.game, port, viewport });
+
+    const audioCapture = await prepareAudioCaptureEnv(runnerEnv, runtimeJob);
     let playtestEnv = audioCapture.env;
-    const xvfbSession = await startXvfbForAudio(job, playtestEnv);
+    const xvfbSession = await startXvfbForAudio(runtimeJob, playtestEnv);
     playtestEnv = xvfbSession.env;
     xvfb = xvfbSession.process;
     if (xvfbSession.display) log('xvfb.ready', { display: xvfbSession.display });
 
     {
-      const { runPlaytest } = require(path.join(dirs.runwave, 'playtest', 'playtest.js'));
-
-      const startOverrides = startOverridesFromJob(job, audioCapture);
-
-      const viewport = job.viewport;
+      const startOverrides = startOverridesFromJob(runtimeJob, audioCapture);
       summary.viewport = viewport;
 
       const onInitialResponse = (response) => {
         const webgl = webglFromResponse(response);
         if (webgl) summary.webgl = webgl;
-        assertHardwareWebgl(job, response);
+        assertHardwareWebgl(runtimeJob, response);
       };
 
       const playtestResult = await runPlaytest({
@@ -633,11 +625,10 @@ async function main() {
         outDir: dirs.workspace,
         port,
         openRouterApiKey: runnerEnv.OPENROUTER_API_KEY,
-        playtestDurationMs: job.playtestDurationMs,
-        minPlaytestMs: job.agentMinPlaytestMs,
+        maxDuration: job.maxDuration,
+        minDuration: job.minDuration,
         verbose: job.verboseRunwave || runnerEnv.RUNWAVE_VERBOSE === '1',
         sessionId: job.runwaveSessionId || job.sessionId || job.jobId,
-        viewport,
         startOverrides,
         env: playtestEnv,
         onInitialResponse,
