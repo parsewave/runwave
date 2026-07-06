@@ -109,8 +109,11 @@ runwave-controller '{
 }'
 ```
 
-Screenshots include a 16x16 red mark grid by default. Overlay column labels are
-shown in the top/bottom margins and overlay row labels are shown in the
+Screenshots returned in `screenshot` and `captures[].path` are clean game
+screenshots. Responses also include playtester-only grid images in
+`gridScreenshot` and `captures[].gridPath`.
+The grid image contains a 16x16 red mark grid by default. Overlay column labels
+are shown in the top/bottom margins and overlay row labels are shown in the
 left/right margins. Pointer actions may use overlay row/column grid objects
 instead of exact pixels.
 

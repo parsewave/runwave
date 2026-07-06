@@ -55,6 +55,10 @@ function launchHeadless(config = {}) {
   return isRecording(config) ? false : config.headless !== false;
 }
 
+function gridScreenshotPath(file) {
+  return file.toLowerCase().endsWith('.png') ? file.slice(0, -4) + '.grid.png' : `${file}.grid.png`;
+}
+
 async function pageViewportVideoSource(page, env = process.env) {
   const display = env.DISPLAY || ':0';
   const metrics = await page.evaluate(() => ({
@@ -199,7 +203,7 @@ class BrowserSession {
     await this.time('browser.navigate.wait_after_load', { waitAfterLoad }, () => sleep(waitAfterLoad));
   }
 
-  async screenshot(outputDir, name) {
+  async screenshotArtifact(outputDir, name) {
     const fileName = `${safeName(name || `capture-${timestamp()}`)}.png`;
     const file = path.join(outputDir, fileName);
     await this.time('browser.screenshot.capture', { file, fullPage: Boolean(this.config.fullPageScreenshots) }, () =>
@@ -209,10 +213,16 @@ class BrowserSession {
         scale: 'css',
       })
     );
-    if (this.config.gridScreenshots !== false) {
-      this.timeSync('browser.screenshot.grid_overlay', { file }, () => drawGridOnScreenshot(file, this.config));
-    }
-    return file;
+    const gridFile = gridScreenshotPath(file);
+    this.timeSync('browser.screenshot.grid_copy', { file, gridFile }, () => fs.copyFileSync(file, gridFile));
+    this.timeSync('browser.screenshot.grid_overlay', { file: gridFile }, () => drawGridOnScreenshot(gridFile, this.config));
+    const artifact = { path: file, gridPath: gridFile };
+    return artifact;
+  }
+
+  async screenshot(outputDir, name) {
+    const artifact = await this.screenshotArtifact(outputDir, name);
+    return artifact.path;
   }
 
   async keyDown(key) {

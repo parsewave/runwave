@@ -91,7 +91,6 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
         outDir: recordingDir,
         initialScreenshot: true,
         finalScreenshot: false,
-        gridScreenshots: false,
         stateExpression,
         sessionWaitMs: 20000,
         ...runwaveLaunchOptions(launchConfig),

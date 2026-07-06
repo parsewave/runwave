@@ -15,13 +15,17 @@ async function waitUntil(startedAt, offsetMs, profiler, fields = {}) {
 }
 
 async function captureAt({ browser, outputDir, prefix, stateExpression, at, profiler }) {
+  const name = `${prefix}-${String(at).padStart(5, '0')}ms`;
+  const captureScreenshot = () => browser.screenshotArtifact
+    ? browser.screenshotArtifact(outputDir, name)
+    : Promise.resolve(browser.screenshot(outputDir, name)).then((path) => ({ path }));
+  const screenshot = profiler
+    ? await profiler.time('timeline.capture.screenshot', { at }, captureScreenshot)
+    : await captureScreenshot();
   return {
     at,
-    path: profiler
-      ? await profiler.time('timeline.capture.screenshot', { at }, () =>
-          browser.screenshot(outputDir, `${prefix}-${String(at).padStart(5, '0')}ms`)
-        )
-      : await browser.screenshot(outputDir, `${prefix}-${String(at).padStart(5, '0')}ms`),
+    path: screenshot.path,
+    ...(screenshot.gridPath ? { gridPath: screenshot.gridPath } : {}),
     state: profiler
       ? await profiler.time('timeline.capture.state', { at }, () => browser.state(stateExpression))
       : await browser.state(stateExpression),

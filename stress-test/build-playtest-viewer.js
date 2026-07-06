@@ -66,6 +66,10 @@ function pickVideo(videos) {
     || videos[0];
 }
 
+function isCleanScreenshot(file) {
+  return file.endsWith('.png') && !file.endsWith('.grid.png');
+}
+
 function collectRuns(artifacts, outFile, options = {}) {
   const summaries = walk(artifacts, (file) => path.basename(file) === 'summary.json');
   return summaries.map((summaryPath) => {
@@ -75,7 +79,7 @@ function collectRuns(artifacts, outFile, options = {}) {
     const game = relative[0] || summary.game || 'unknown';
     const videos = walk(attemptDir, (file) => file.endsWith('.webm')).sort();
     const video = pickVideo(videos);
-    const screenshots = walk(attemptDir, (file) => file.endsWith('.png')).sort();
+    const screenshots = walk(attemptDir, isCleanScreenshot).sort();
     return {
       game,
       attempt: relative[1] || 'attempt',
@@ -332,4 +336,13 @@ function main() {
   console.log(JSON.stringify({ out: args.out, runs: runs.length }, null, 2));
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  collectRuns,
+  isCleanScreenshot,
+  pickVideo,
+  render,
+};

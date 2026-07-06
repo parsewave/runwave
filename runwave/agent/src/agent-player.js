@@ -23,6 +23,13 @@ function latestScreenshot(response) {
   return (capture && capture.path) || body.screenshot || null;
 }
 
+function latestAgentScreenshot(response) {
+  const body = responseBody(response);
+  const captures = Array.isArray(body.captures) ? body.captures : [];
+  const capture = captures.length ? captures[captures.length - 1] : null;
+  return (capture && (capture.gridPath || capture.path)) || body.gridScreenshot || body.screenshot || null;
+}
+
 function responseState(response) {
   const body = responseBody(response);
   return body.endState || body.state || {};
@@ -193,9 +200,10 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     const remainingMs = maxMs - elapsedMs - STOP_RESERVE_MS;
     if (remainingMs <= 0) break;
 
-    const screenshot = latestScreenshot(lastResponse);
+    const screenshot = latestAgentScreenshot(lastResponse);
+    const cleanScreenshot = latestScreenshot(lastResponse);
     const state = responseState(lastResponse);
-    recorder.observation({ step, elapsedMs, screenshot, state });
+    recorder.observation({ step, elapsedMs, screenshot, cleanScreenshot, state });
 
     let sequence;
     let model;
@@ -284,7 +292,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
         error: sequence.error,
       });
 
-      const failedResult = failedActionResult({ screenshot, state, error: sequence.error });
+      const failedResult = failedActionResult({ screenshot: cleanScreenshot, state, error: sequence.error });
       history.push({
         step,
         summary: sequence.summary,
@@ -361,13 +369,13 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
         cursorMoves: buckets.cursorMoves,
         viewMoves: buckets.viewMoves,
         failedAction: true,
-        result: failedActionResult({ screenshot, state, error: message }),
+        result: failedActionResult({ screenshot: cleanScreenshot, state, error: message }),
       });
       continue;
     }
 
     lastResponse = stepResponse;
-    const result = postSequenceResult(lastResponse, screenshot);
+    const result = postSequenceResult(lastResponse, cleanScreenshot);
     history.push({
       step,
       summary: sequence.summary,
@@ -411,6 +419,7 @@ module.exports = {
   actionsWithinDuration,
   failedActionAfterInvalidJson,
   isRecoverableModelSequenceError,
+  latestAgentScreenshot,
   latestScreenshot,
   postSequenceResult,
   responseState,

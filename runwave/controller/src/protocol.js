@@ -145,7 +145,6 @@ function startSessionConfig(input, options = {}) {
       captureIntervalMs: optionalNumber(input.captureIntervalMs, 1000),
       finalScreenshot: input.finalScreenshot !== false,
       fullPageScreenshots: Boolean(input.fullPageScreenshots),
-      gridScreenshots: input.gridScreenshots !== false,
       markGridRows: optionalNumber(input.markGridRows ?? input.gridRows, DEFAULT_MARK_GRID.rows),
       markGridCols: optionalNumber(input.markGridCols ?? input.gridCols, DEFAULT_MARK_GRID.cols),
     },

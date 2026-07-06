@@ -102,9 +102,11 @@ async function main() {
       state: await profiler.time('daemon.start_response.state', () => browser.state()),
     };
     if (config.initialScreenshot !== false) {
-      payload.screenshot = await profiler.time('daemon.start_response.screenshot', () =>
-        browser.screenshot(outputDir, '000-initial')
+      const screenshot = await profiler.time('daemon.start_response.screenshot', () =>
+        browser.screenshotArtifact(outputDir, '000-initial')
       );
+      payload.screenshot = screenshot.path;
+      if (screenshot.gridPath) payload.gridScreenshot = screenshot.gridPath;
     }
     if (!payload.verboseLog) delete payload.verboseLog;
     const startResponse = profiler.timeSync('daemon.start_response.write_output', () =>

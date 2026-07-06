@@ -8,8 +8,14 @@ const test = require('node:test');
 const { PNG } = require('pngjs');
 
 const { normalizeSequence } = require('../src/action-parser');
-const { actionsWithinDuration, failedActionAfterInvalidJson, runAgenticPlaytest } = require('../src/agent-player');
-const { chatCompletion, parseJsonResponse } = require('../src/model-client');
+const {
+  actionsWithinDuration,
+  failedActionAfterInvalidJson,
+  latestAgentScreenshot,
+  latestScreenshot,
+  runAgenticPlaytest,
+} = require('../src/agent-player');
+const { chatCompletion, dataUrl, parseJsonResponse } = require('../src/model-client');
 const { buildPlaytesterPrompt, compactHistory, sequenceSchemaGuide } = require('../src/prompt');
 const { drawMarkGridOnScreenshot } = require('../../controller/src/grid-overlay');
 const { gridSafeSampleRatio, randomPointInCells } = require('../../protocol/src/mark-grid');
@@ -58,6 +64,26 @@ test('normalizes model sequences into controller steps', () => {
   assert.equal(viewMove.dx, 50);
   assert.equal(sequence.shouldStop, true);
   assert.equal(sequence.previousSequenceOutcome, 'Enter opened the menu.');
+});
+
+test('agent screenshot selection separates clean evidence from grid targeting images', () => {
+  const response = {
+    screenshot: '/tmp/initial-clean.png',
+    gridScreenshot: '/tmp/initial-grid.png',
+    captures: [
+      {
+        path: '/tmp/capture-clean.png',
+        gridPath: '/tmp/capture-grid.png',
+      },
+    ],
+  };
+
+  assert.equal(latestScreenshot(response), '/tmp/capture-clean.png');
+  assert.equal(latestAgentScreenshot(response), '/tmp/capture-grid.png');
+  assert.equal(latestScreenshot({ screenshot: '/tmp/clean.png' }), '/tmp/clean.png');
+  assert.equal(latestAgentScreenshot({ screenshot: '/tmp/clean.png' }), '/tmp/clean.png');
+  assert.equal(latestScreenshot({ gridScreenshot: '/tmp/grid-only.png' }), null);
+  assert.equal(latestAgentScreenshot({ gridScreenshot: '/tmp/grid-only.png' }), '/tmp/grid-only.png');
 });
 
 test('normalizes grid-cell model actions into concrete pointer events', () => {
@@ -481,6 +507,69 @@ test('agent playtest loop calls model and executes returned sequence', async () 
   assert.equal(promptLog[0].screenshot, screenshot);
   assert.match(promptLog[0].prompt, /You are an agentic browser-game playtester/);
   assert.equal(fs.existsSync(path.join(dir, 'agent', 'agent-summary.json')), true);
+});
+
+test('agent loop sends grid screenshots to the model and records clean screenshots as evidence', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-grid-split-test-'));
+  const cleanInitial = path.join(dir, 'initial.png');
+  const gridInitial = path.join(dir, 'initial.grid.png');
+  const cleanAfter = path.join(dir, 'after.png');
+  const gridAfter = path.join(dir, 'after.grid.png');
+  fs.writeFileSync(cleanInitial, 'clean initial screenshot bytes');
+  fs.writeFileSync(gridInitial, 'grid initial screenshot bytes');
+  fs.writeFileSync(cleanAfter, 'clean after screenshot bytes');
+  fs.writeFileSync(gridAfter, 'grid after screenshot bytes');
+
+  const modelScreenshots = [];
+  const result = await runAgenticPlaytest({
+    job: {
+      playtestDurationMs: 7000,
+      agentMinPlaytestMs: 0,
+      viewport: { width: 640, height: 360 },
+    },
+    initialResponse: {
+      screenshot: cleanInitial,
+      gridScreenshot: gridInitial,
+      state: { screen: 'initial' },
+    },
+    outputDir: path.join(dir, 'agent'),
+    modelClient: async ({ messages }) => {
+      const image = messages[0].content.find((item) => item.type === 'image_url');
+      modelScreenshots.push(image.image_url.url);
+      return {
+        model: 'fake-model',
+        usage: { total_tokens: 1 },
+        json: {
+          summary: 'start screen is visible',
+          actions: [{ type: 'key', start: 0, end: 500, key: 'Enter' }],
+          should_stop: true,
+        },
+      };
+    },
+    runAction: async () => ({
+      ok: true,
+      captures: [{ path: cleanAfter, gridPath: gridAfter }],
+      endState: { screen: 'after' },
+    }),
+  });
+
+  const promptLog = fs
+    .readFileSync(path.join(dir, 'agent', 'agent-prompts.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  const observationLog = fs
+    .readFileSync(path.join(dir, 'agent', 'agent-observations.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+
+  assert.equal(modelScreenshots[0], dataUrl(gridInitial));
+  assert.equal(promptLog[0].screenshot, gridInitial);
+  assert.equal(observationLog[0].screenshot, gridInitial);
+  assert.equal(observationLog[0].cleanScreenshot, cleanInitial);
+  assert.equal(result.history[0].result.screenshot, cleanAfter);
+  assert.equal(result.history[0].result.screenshotChanged, true);
 });
 
 test('agent loop records invalid JSON as a failed action and retries with the same screenshot', async () => {

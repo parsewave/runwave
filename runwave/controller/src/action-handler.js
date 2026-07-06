@@ -24,6 +24,14 @@ function withVerboseLog(runtime, payload) {
   };
 }
 
+function screenshotFields(artifact) {
+  if (!artifact || typeof artifact !== 'object') return {};
+  return {
+    screenshot: artifact.path,
+    ...(artifact.gridPath ? { gridScreenshot: artifact.gridPath } : {}),
+  };
+}
+
 async function writeStateResponse(runtime, input) {
   const { output, paths } = runtime;
   const payload = await runtime.profiler.time('action.state.build_payload', { action_name: input.action_name }, async () =>
@@ -46,15 +54,16 @@ async function writeScreenshotResponse(runtime, input) {
   const outputDir = runtime.profiler.timeSync('action.screenshot.action_dir', { action_name: input.action_name }, () =>
     output.actionDir(input.action_name)
   );
+  const screenshot = await runtime.profiler.time('action.screenshot.capture', { action_name: input.action_name }, () =>
+    browser.screenshotArtifact(outputDir, input.name || 'screenshot')
+  );
   const payload = withVerboseLog(runtime, {
     ok: true,
     action: 'screenshot',
     action_name: input.action_name,
     session_id: runtime.sessionId,
     sessionDir: paths.runDir,
-    screenshot: await runtime.profiler.time('action.screenshot.capture', { action_name: input.action_name }, () =>
-      browser.screenshot(outputDir, input.name || 'screenshot')
-    ),
+    ...screenshotFields(screenshot),
     state: await readState(runtime, input),
   });
   return runtime.profiler.timeSync('action.screenshot.write_response', { action_name: input.action_name }, () =>
@@ -73,6 +82,9 @@ async function writeNavigateResponse(runtime, input) {
     browser.navigate(isReset ? { url: browser.launchUrl } : input)
   );
   if (isReset) runtime.stepIndex = 0;
+  const screenshot = await runtime.profiler.time('action.navigate.screenshot', { action_name: input.action_name }, () =>
+    browser.screenshotArtifact(outputDir, '000-after-navigate')
+  );
 
   const payload = withVerboseLog(runtime, {
     ok: true,
@@ -80,9 +92,7 @@ async function writeNavigateResponse(runtime, input) {
     action_name: input.action_name,
     session_id: runtime.sessionId,
     sessionDir: paths.runDir,
-    screenshot: await runtime.profiler.time('action.navigate.screenshot', { action_name: input.action_name }, () =>
-      browser.screenshot(outputDir, '000-after-navigate')
-    ),
+    ...screenshotFields(screenshot),
     state: await readState(runtime, input),
   });
   return runtime.profiler.timeSync('action.navigate.write_response', { action_name: input.action_name }, () =>
@@ -128,7 +138,7 @@ async function writeStopResponse(runtime, input) {
     input.finalScreenshot === false || config.finalScreenshot === false
       ? null
       : await runtime.profiler.time('action.stop.screenshot', { action_name: input.action_name }, () =>
-          browser.screenshot(outputDir, '999-final')
+          browser.screenshotArtifact(outputDir, '999-final')
         );
   const recording = await runtime.profiler.time('action.stop.browser_close', { action_name: input.action_name }, () => browser.close());
   const video = typeof recording === 'string' ? recording : recording.video;
@@ -148,7 +158,7 @@ async function writeStopResponse(runtime, input) {
   if (recording && typeof recording === 'object') {
     if (recording.audioVideo) payload.audioVideo = recording.audioVideo;
   }
-  if (screenshot) payload.screenshot = screenshot;
+  Object.assign(payload, screenshotFields(screenshot));
   const response = runtime.profiler.timeSync('action.stop.write_response', { action_name: input.action_name }, () =>
     output.response(input.action_name, payload)
   );
