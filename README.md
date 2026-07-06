@@ -8,6 +8,8 @@ It includes remote stress testing code (`./stress-test`) as a first class compon
 
 ![Runwave playing 12 games](/assets/12-games.gif)
 
+All games are run via chromium using dockerfiles.
+
 ## Requirements
 
 Runwave's recording pipeline is **gstreamer-only** as other methods lead to audio/video mismatches. This entails:
@@ -74,3 +76,8 @@ Controller verbose mode writes newline-delimited JSON timing events to
 verbose operation responses. The log records CLI, daemon, browser, output writing,
 state, screenshot, navigation, step timeline, input-event, capture, and cleanup
 timings.
+
+
+## Test Locally
+
+A good first step is to run a single playtest using the example game. This will create a local recording. See the skill `skills/runwave-local-stress-test` for more details.
