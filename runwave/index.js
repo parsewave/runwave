@@ -243,9 +243,8 @@ async function runPlaytest(options) {
   const { playtestMd } = assertGameDir(absoluteGameDir);
   const playtestInstructions = loadPlaytestInstructions(playtestMd);
 
-  const runwaveRoot = path.resolve(__dirname, '..');
-  const controllerBin = path.join(runwaveRoot, 'runwave', 'controller.js');
-  const agentPlayerPath = path.join(runwaveRoot, 'agent', 'src', 'agent-player.js');
+  const controllerBin = path.join(__dirname, 'controller.js');
+  const agentPlayerPath = path.join(__dirname, 'agent', 'src', 'agent-player.js');
   const { runAgenticPlaytest } = require(agentPlayerPath);
 
   const env = {

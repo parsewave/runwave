@@ -23,8 +23,8 @@ running high-concurrency browser-game playtests across Hetzner servers.
 Real fleet runs should use the agentic OpenRouter planner with `--agent` or
 `--play-mode agent`. The scripted exploration path is kept only for local smoke
 tests and controller debugging, and should not be used for fleet results. The
-controller still only controls the browser; the agent planner lives separately
-under `agent/`.
+controller still only controls the browser; the agent planner lives under
+`runwave/agent/`.
 
 ## Provision
 
@@ -129,7 +129,7 @@ debug path explicitly needs to override controller start options.
 
 ## Agent Mode
 
-Agent mode uses the browser controller as the hands and the `agent/` package as the
+Agent mode uses the browser controller as the hands and the `runwave/agent/` package as the
 model-calling planner. The planner currently uses OpenRouter, reading
 `OPENROUTER_API_KEY` from the environment or `~/.c.yaml`. Override the model with
 `RUNWAVE_AGENT_MODEL` or `OPENROUTER_MODEL`.

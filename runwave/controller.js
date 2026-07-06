@@ -1,3 +1,3 @@
 #!/usr/bin/env node
 
-require('../controller/src/api').main();
+require('./controller/src/api').main();
