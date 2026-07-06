@@ -1,6 +1,6 @@
 'use strict';
 
 module.exports = {
-  ...require('./action-normalizer'),
+  ...require('./action'),
   ...require('./mark-grid'),
 };
