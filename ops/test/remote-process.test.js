@@ -15,7 +15,7 @@ const {
   startOverridesFromJob,
   stopLongProcess,
   xvfbCaptureConfig,
-} = require('../ops/remote/run-playtest');
+} = require('../remote/run-playtest');
 
 function fakeChild(pid = 12345) {
   const child = new EventEmitter();

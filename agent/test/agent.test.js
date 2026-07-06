@@ -7,13 +7,13 @@ const path = require('path');
 const test = require('node:test');
 const { PNG } = require('pngjs');
 
-const { normalizeSequence } = require('../agent/src/action-parser');
-const { actionsWithinDuration, failedActionAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
-const { chatCompletion, parseJsonResponse } = require('../agent/src/model-client');
-const { buildPlaytesterPrompt, compactHistory, sequenceSchemaGuide } = require('../agent/src/prompt');
-const { drawMarkGridOnScreenshot } = require('../controller/src/grid-overlay');
-const { gridSafeSampleRatio, randomPointInCells } = require('../controller/src/mark-grid');
-const { normalizeStep } = require('../controller/src/step-normalizer');
+const { normalizeSequence } = require('../src/action-parser');
+const { actionsWithinDuration, failedActionAfterInvalidJson, runAgenticPlaytest } = require('../src/agent-player');
+const { chatCompletion, parseJsonResponse } = require('../src/model-client');
+const { buildPlaytesterPrompt, compactHistory, sequenceSchemaGuide } = require('../src/prompt');
+const { drawMarkGridOnScreenshot } = require('../../controller/src/grid-overlay');
+const { gridSafeSampleRatio, randomPointInCells } = require('../../controller/src/mark-grid');
+const { normalizeStep } = require('../../controller/src/step-normalizer');
 
 test('normalizes model sequences into controller steps', () => {
   const sequence = normalizeSequence(

@@ -3,8 +3,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { buildJobs, parseArgs } = require('../ops/orchestrate-playtests');
-const { defaultSshKey } = require('../ops/lib/ssh-key');
+const { buildJobs, parseArgs } = require('../orchestrate-playtests');
+const { defaultSshKey } = require('../lib/ssh-key');
 
 test('agent fleet jobs default minimum play time to near full duration', () => {
   const args = parseArgs([

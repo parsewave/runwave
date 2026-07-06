@@ -8,7 +8,7 @@ const {
   chromiumLaunchArgs,
   launchHeadless,
   pageViewportVideoSource,
-} = require('../controller/src/browser-session');
+} = require('../src/browser-session');
 
 test('chromium launch args leave non-recording runs unchanged', () => {
   const args = chromiumLaunchArgs({ record: false }, {});
