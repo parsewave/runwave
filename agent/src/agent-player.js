@@ -239,10 +239,10 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     }
 
     const duration = Math.max(100, Math.min(sequence.durationMs, remainingMs));
-    let controllerActions = [];
+    let stepActions = [];
     if (!sequence.failedAction) {
-      controllerActions = actionsWithinDuration(sequence.actions, duration);
-      if (sequence.actions.length && !controllerActions.length) {
+      stepActions = actionsWithinDuration(sequence.actions, duration);
+      if (sequence.actions.length && !stepActions.length) {
         const error = new Error('all model actions were outside the remaining sequence duration after clipping');
         error.code = MODEL_SEQUENCE_ERROR_CODE;
         modelErrorCount += 1;
@@ -260,7 +260,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     step += 1;
     if (sequence.failedAction) {
       const actionName = `agent-step-${String(step).padStart(3, '0')}-failed-action`;
-      const controllerStep = {
+      const stepRequest = {
         action: 'none',
         action_name: actionName,
         name: 'failed-action',
@@ -271,7 +271,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
         elapsedMs,
         screenshot,
         sequence,
-        controllerStep,
+        stepRequest,
         model,
         modelElapsedMs,
         rawText,
@@ -302,22 +302,22 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       continue;
     }
 
-    const controllerStep = {
+    const stepRequest = {
       action: 'step',
       action_name: `agent-step-${String(step).padStart(3, '0')}`,
       duration,
-      actions: controllerActions,
+      actions: stepActions,
       captures: [duration],
       autoCaptures: false,
     };
-    const buckets = sequenceBuckets(controllerStep.actions);
+    const buckets = sequenceBuckets(stepRequest.actions);
 
     recorder.sequence({
       step,
       elapsedMs,
       screenshot,
-      sequence: { ...sequence, actions: controllerStep.actions },
-      controllerStep,
+      sequence: { ...sequence, actions: stepRequest.actions },
+      stepRequest,
       model,
       modelElapsedMs,
       rawText,
@@ -328,8 +328,8 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       duration,
       model,
       modelElapsedMs,
-      actionCount: controllerStep.actions.length,
-      keyActionCount: actionsByType(controllerStep.actions, 'key').length,
+      actionCount: stepRequest.actions.length,
+      keyActionCount: actionsByType(stepRequest.actions, 'key').length,
       clickCount: buckets.clicks.length,
       dragCount: buckets.drags.length,
       cursorMoveCount: buckets.cursorMoves.length,
@@ -338,7 +338,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
 
     let stepResponse;
     try {
-      stepResponse = await runAction(controllerStep);
+      stepResponse = await runAction(stepRequest);
     } catch (error) {
       const message = String(error && (error.message || error) || 'runwave action failed').slice(0, 500);
       log('agent.sequence_execution_error', {
@@ -355,7 +355,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
         step,
         summary: sequence.summary || 'Failed action: the action sequence could not be executed.',
         rationale: `Record the action execution failure, keep the current screenshot and state unchanged, and ask for a new action sequence. Error: ${message}`,
-        actions: controllerStep.actions,
+        actions: stepRequest.actions,
         clicks: buckets.clicks,
         drags: buckets.drags,
         cursorMoves: buckets.cursorMoves,
@@ -372,7 +372,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       step,
       summary: sequence.summary,
       rationale: sequence.rationale,
-      actions: controllerStep.actions,
+      actions: stepRequest.actions,
       clicks: buckets.clicks,
       drags: buckets.drags,
       cursorMoves: buckets.cursorMoves,

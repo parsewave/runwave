@@ -1,6 +1,6 @@
 const path = require('path');
 const { pathToFileURL } = require('url');
-const { DEFAULT_MARK_GRID } = require('./mark-grid');
+const { DEFAULT_MARK_GRID } = require('../../protocol/src/mark-grid');
 const { workspaceRoot } = require('./paths');
 
 function usage() {

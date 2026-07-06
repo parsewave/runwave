@@ -3,7 +3,7 @@ const {
   inferDurationFromRawActions,
   normalizeActions,
   readNumber,
-} = require('./action-normalizer');
+} = require('../../protocol/src/action-normalizer');
 
 const defaultKeyAliases = {
   left: 'ArrowLeft',

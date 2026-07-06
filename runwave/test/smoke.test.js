@@ -5,8 +5,8 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const test = require('node:test');
 
-const packageRoot = path.resolve(__dirname, '..');
-const cli = path.join(packageRoot, 'bin', 'runwave.js');
+const packageRoot = path.resolve(__dirname, '../..');
+const cli = path.join(packageRoot, 'runwave', 'cli.js');
 
 function recordingPrerequisitesMissing() {
   if (process.platform !== 'linux') return 'not linux';
@@ -80,7 +80,7 @@ test('CLI opens a page, clicks, captures state, and finalizes recording', async 
         action: 'start',
         action_name: 'smoke-start',
         session_id: sessionId,
-        file: 'test/fixtures/click-target.html',
+        file: 'runwave/test/fixtures/click-target.html',
         force: true,
         record: true,
         headless: true,

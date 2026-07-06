@@ -13,20 +13,21 @@
     "cli": "node runwave/cli.js",
     "controller": "node runwave/controller.js",
     "smoke": "npm run test:smoke",
-    "test": "node --test agent/test/*.test.js controller/test/*.test.js stress-test/test/*.test.js test/*.test.js",
+    "test": "node --test agent/test/*.test.js controller/test/*.test.js stress-test/test/*.test.js runwave/test/*.test.js",
     "test:agent": "node --test agent/test/*.test.js",
     "test:all": "npm test && npm run test:py",
     "test:controller": "node --test controller/test/*.test.js",
     "test:integration": "npm run test:runwave",
-    "test:runwave": "node --test test/*.test.js",
+    "test:runwave": "node --test runwave/test/*.test.js",
     "test:stress-test": "node --test stress-test/test/*.test.js",
-    "test:smoke": "node --test test/smoke.test.js",
+    "test:smoke": "node --test runwave/test/smoke.test.js",
     "test:py": "PYTHONWARNINGS=error python3 -m unittest discover -s runwavepy/tests -t runwavepy"
   },
   "files": [
     "runwave",
     "controller",
     "agent",
+    "protocol",
     "README.md"
   ],
   "engines": {

@@ -1,6 +1,6 @@
 const fs = require('fs');
 const { PNG } = require('pngjs');
-const { markGridFromConfig } = require('./mark-grid');
+const { markGridFromConfig } = require('../../protocol/src/mark-grid');
 
 const FONT = {
   '0': ['111', '101', '101', '101', '111'],

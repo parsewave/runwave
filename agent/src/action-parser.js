@@ -5,7 +5,7 @@ const {
   assertAllowedFields,
   asActionArray,
   normalizeActions,
-} = require('../../controller/src/action-normalizer');
+} = require('../../protocol/src/action-normalizer');
 
 const DEFAULT_DURATION_MS = 500;
 const MIN_DURATION_MS = 500;

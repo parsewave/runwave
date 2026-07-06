@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { buildAgentJob, validateRecordingArtifact } = require('../runwave');
+const { buildAgentJob, validateRecordingArtifact } = require('..');
 
 test('playtest agent job inherits mark grid dimensions from the start action', () => {
   const job = buildAgentJob({

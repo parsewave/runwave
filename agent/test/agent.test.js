@@ -12,7 +12,7 @@ const { actionsWithinDuration, failedActionAfterInvalidJson, runAgenticPlaytest 
 const { chatCompletion, parseJsonResponse } = require('../src/model-client');
 const { buildPlaytesterPrompt, compactHistory, sequenceSchemaGuide } = require('../src/prompt');
 const { drawMarkGridOnScreenshot } = require('../../controller/src/grid-overlay');
-const { gridSafeSampleRatio, randomPointInCells } = require('../../controller/src/mark-grid');
+const { gridSafeSampleRatio, randomPointInCells } = require('../../protocol/src/mark-grid');
 const { normalizeStep } = require('../../controller/src/step-normalizer');
 
 test('normalizes model sequences into controller steps', () => {
