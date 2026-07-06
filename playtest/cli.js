@@ -2,7 +2,7 @@
 'use strict';
 
 const path = require('path');
-const { runPlaytest } = require('../playtest/playtest');
+const { runPlaytest } = require('./playtest');
 
 function usage() {
   return [

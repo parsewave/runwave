@@ -7,7 +7,7 @@
   "main": "controller/src/cli.js",
   "bin": {
     "runwave": "bin/runwave.js",
-    "runwave-playtest": "bin/runwave-playtest.js"
+    "runwave-playtest": "playtest/cli.js"
   },
   "scripts": {
     "cli": "node bin/runwave.js",

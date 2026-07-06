@@ -1,6 +1,6 @@
 """Python wrapper around the runwave-playtest Node CLI.
 
-Shells out to ``runwave-playtest`` (see ``bin/runwave-playtest.js`` in the
+Shells out to ``runwave-playtest`` (see ``playtest/cli.js`` in the
 runwave repo). All the same requirements apply: recording needs a Linux host
 with gstreamer, an X server or Xvfb, and PulseAudio. See the runwave README
 for details.
