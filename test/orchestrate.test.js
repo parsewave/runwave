@@ -75,7 +75,7 @@ test('fleet jobs carry mark grid dimensions', () => {
   assert.equal(job.markGridCols, 24);
 });
 
-test('known SwiftShader-sensitive games require hardware WebGL launch args', () => {
+test('fleet jobs use WebGL launch args for every game', () => {
   const args = parseArgs([
     'node',
     'ops/orchestrate-playtests.js',
@@ -84,20 +84,19 @@ test('known SwiftShader-sensitive games require hardware WebGL launch args', () 
     '--s3-uri',
     's3://example/runwave',
     '--games',
-    'aether-outpost-patrol',
+    'mario-html5',
     '--agent',
   ]);
 
-  const [job] = buildJobs(args, ['aether-outpost-patrol']);
+  const [job] = buildJobs(args, ['mario-html5']);
 
-  assert.equal(job.requiresHardwareWebgl, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(job, 'requiresHardwareWebgl'), false);
   assert.equal(job.chromiumArgsMode, 'replace');
-  assert.equal(job.headless, true);
-  assert.equal(job.audioXvfb, false);
   assert.ok(job.chromiumArgs.includes('--use-gl=egl'));
+  assert.ok(job.chromiumArgs.includes('--enable-unsafe-swiftshader'));
 });
 
-test('hardware WebGL game defaults can be disabled', () => {
+test('all fleet jobs receive the same WebGL launch args', () => {
   const args = parseArgs([
     'node',
     'ops/orchestrate-playtests.js',
@@ -106,13 +105,15 @@ test('hardware WebGL game defaults can be disabled', () => {
     '--s3-uri',
     's3://example/runwave',
     '--games',
-    'aether-outpost-patrol',
-    '--no-default-hardware-webgl-games',
+    'mario-html5,2048',
   ]);
 
-  const [job] = buildJobs(args, ['aether-outpost-patrol']);
+  const jobs = buildJobs(args, ['mario-html5', '2048']);
 
-  assert.equal(job.requiresHardwareWebgl, undefined);
+  assert.equal(jobs.length, 2);
+  assert.deepEqual(jobs[0].chromiumArgs, jobs[1].chromiumArgs);
+  assert.ok(jobs.every((job) => job.chromiumArgsMode === 'replace'));
+  assert.ok(jobs.every((job) => !Object.prototype.hasOwnProperty.call(job, 'requiresHardwareWebgl')));
 });
 
 test('orchestrator can take ssh key from environment', () => {

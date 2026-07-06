@@ -5,8 +5,8 @@ running many browser-game playtests across Hetzner servers.
 
 ## Shape
 
-- Fleet: 8 workers by default. Use hardware-WebGL-verified workers for full
-  batches that include WebGL-sensitive games such as `aether-outpost-patrol`.
+- Fleet: 8 workers by default. All browser-game jobs use WebGL-oriented
+  Chromium launch flags; SwiftShader is allowed as a CPU fallback.
 - Capacity: 24 concurrent playtests at the default `3` jobs per server, sized
   for 20 simultaneous playtests plus headroom.
 - Games: synced from `s3://pw-cruft/games` to every server at
@@ -28,15 +28,13 @@ under `agent/`.
 
 ## Provision
 
-Create the fleet. For production batches with WebGL-sensitive games, set
-`SERVER_TYPE` to a worker type that has already been verified to expose a
-non-SwiftShader Chromium WebGL renderer:
+Create the fleet:
 
 ```sh
 export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
 # Optional if the Hetzner key name cannot be inferred from RUNWAVE_SSH_KEY.pub:
 # export RUNWAVE_SSH_KEY_NAME="<hetzner-ssh-key-name>"
-SERVER_TYPE=<verified-worker-type> SERVER_COUNT=8 LOCATION=hel1 ops/provision-hetzner.sh
+SERVER_TYPE=<worker-type> SERVER_COUNT=8 LOCATION=hel1 ops/provision-hetzner.sh
 ```
 
 Defaults:

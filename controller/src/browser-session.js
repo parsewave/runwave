@@ -7,7 +7,14 @@ const { drawGridOnScreenshot } = require('./grid-overlay');
 const { parseArgList, targetUrl } = require('./protocol');
 const { readPageState } = require('./state-reader');
 
-const DEFAULT_CHROMIUM_ARGS = ['--no-sandbox', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'];
+const DEFAULT_CHROMIUM_ARGS = [
+  '--no-sandbox',
+  '--ignore-gpu-blocklist',
+  '--enable-gpu',
+  '--use-gl=egl',
+  '--enable-unsafe-swiftshader',
+  '--autoplay-policy=no-user-gesture-required',
+];
 
 function chromiumArgs(config = {}, env = process.env) {
   const configured = parseArgList(config.chromiumArgs ?? env.RUNWAVE_CHROMIUM_ARGS);

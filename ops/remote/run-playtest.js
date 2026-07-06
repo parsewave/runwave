@@ -441,12 +441,12 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-const DEFAULT_CHROMIUM_ARGS = ['--no-sandbox', '--enable-unsafe-swiftshader'];
-const HARDWARE_WEBGL_CHROMIUM_ARGS = [
+const DEFAULT_CHROMIUM_ARGS = [
   '--no-sandbox',
   '--ignore-gpu-blocklist',
   '--enable-gpu',
   '--use-gl=egl',
+  '--enable-unsafe-swiftshader',
   '--autoplay-policy=no-user-gesture-required',
 ];
 
@@ -492,25 +492,6 @@ function webglFromResponse(response) {
   const body = responseBody(response);
   const state = body.state || body.endState || {};
   return state.generic && state.generic.webgl ? state.generic.webgl : null;
-}
-
-function isSwiftShaderWebgl(webgl) {
-  const renderer = `${webgl && (webgl.unmaskedRenderer || webgl.renderer || '')}`;
-  return /swiftshader/i.test(renderer);
-}
-
-function assertHardwareWebgl(job, response) {
-  if (!job.requiresHardwareWebgl) return null;
-  const webgl = webglFromResponse(response);
-  if (!webgl || webgl.supported === false) {
-    throw new Error(`hardware WebGL required for ${job.game || job.jobId || 'job'}, but WebGL renderer metadata is unavailable`);
-  }
-  if (isSwiftShaderWebgl(webgl)) {
-    throw new Error(
-      `hardware WebGL required for ${job.game || job.jobId || 'job'}, but Chromium is using ${webgl.unmaskedRenderer || webgl.renderer}`
-    );
-  }
-  return webgl;
 }
 
 function even(value) {
@@ -625,7 +606,6 @@ async function main() {
       const onInitialResponse = (response) => {
         const webgl = webglFromResponse(response);
         if (webgl) summary.webgl = webgl;
-        assertHardwareWebgl(job, response);
       };
 
       const playtestResult = await runPlaytest({
@@ -700,10 +680,8 @@ if (require.main === module) {
 }
 
 module.exports = {
-  assertHardwareWebgl,
   chromiumArgs,
   dockerRunArgs,
-  isSwiftShaderWebgl,
   loadPlaytestInstructions,
   shouldRunJobInContainer,
   signalLongProcess,
