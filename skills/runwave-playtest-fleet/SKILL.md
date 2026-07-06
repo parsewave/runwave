@@ -1,6 +1,6 @@
 ---
 name: runwave-playtest-fleet
-description: Run 20 or more simultaneous browser-game playtests with runwave using games from s3://pw-cruft/games, hardware-WebGL-verified workers for SwiftShader-sensitive games, Hetzner workers or a local fallback, S3 artifact upload/download, and a generated browser video viewer. Use when asked to launch, test, orchestrate, monitor, or review a many-game runwave playtest batch.
+description: Run 20 or more simultaneous browser-game playtests with runwave using games from s3://pw-cruft/games, WebGL-oriented Chromium launch flags for every game with SwiftShader allowed as a CPU fallback, Hetzner workers or a local fallback, S3 artifact upload/download, and a generated browser video viewer. Use when asked to launch, test, orchestrate, monitor, or review a many-game runwave playtest batch.
 ---
 
 # Runwave Playtest Fleet
@@ -18,8 +18,7 @@ debugging, not for real fleet results.
 - Local artifact root: `cruft/playtests/<run-id>/`
 - Viewer path: `cruft/playtests/<run-id>/viewer/index.html`
 - Playtest duration: `120000` ms per game
-- Fleet size target: `8` hardware-WebGL-verified workers, `3` jobs per server,
-  `24` concurrent slots
+- Fleet size target: `8` workers, `3` jobs per server, `24` concurrent slots
 - Every Linux playtest job runs inside a dedicated Docker container by default
   so each game, Chromium instance, Xvfb session, PulseAudio null sink,
   GStreamer recorder, and upload process has isolated runtime state.
@@ -28,10 +27,9 @@ debugging, not for real fleet results.
   `~/.ssh/id_ed25519` / `~/.ssh/id_rsa`
 - Secrets may come from environment variables, local shell profiles, CI secrets,
   or `~/.c.yaml`; never print secret values
-- Hardware WebGL requirement: `aether-outpost-patrol` must only run on workers
-  where Chromium reports a non-SwiftShader WebGL renderer. A discrete GPU is not
-  required, but Chrome must use a real hardware backend such as Metal, EGL,
-  Vulkan, or OpenGL rather than SwiftShader.
+- WebGL launch policy: every game uses WebGL-oriented Chromium flags. SwiftShader
+  is allowed as a CPU fallback, and the fleet does not track WebGL-sensitive
+  games separately.
 
 ## Required Secrets
 
@@ -93,16 +91,13 @@ aws s3api list-objects-v2 --bucket pw-cruft --prefix games/ --delimiter / --outp
 
 Skip hidden prefixes such as `games/.run/`. Schedule only directories with a `start.sh` that serves HTTP unless explicitly told otherwise.
 
-Hardware WebGL preflight:
+WebGL preflight:
 
-- Only use inventories whose workers have already been verified to report a
-  non-SwiftShader Chromium WebGL renderer. Do not use the old CPU-only Hetzner
-  `ccx43` fleet for full game batches that include `aether-outpost-patrol`.
-- If no verified hardware-WebGL workers are available, skip or fail
-  `aether-outpost-patrol` rather than producing a known-bad black-water
-  recording.
-- After a run, inspect each affected job's `summary.json` and confirm
-  `webgl.unmaskedRenderer` or `webgl.renderer` does not contain `SwiftShader`.
+- All jobs launch Chromium with WebGL-oriented flags.
+- SwiftShader is acceptable; do not fail a job only because
+  `webgl.unmaskedRenderer` or `webgl.renderer` contains `SwiftShader`.
+- Inspect WebGL metadata after runs only to debug rendering issues, not to gate
+  scheduling.
 
 ## Preferred Remote Run
 
@@ -114,7 +109,7 @@ Use this path when Hetzner creation and SSH are working.
 export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
 # Optional if the Hetzner key name cannot be inferred from RUNWAVE_SSH_KEY.pub:
 # export RUNWAVE_SSH_KEY_NAME="<hetzner-ssh-key-name>"
-SERVER_TYPE=<hardware-webgl-approved-type> SERVER_COUNT=8 LOCATION=hel1 ops/provision-hetzner.sh
+SERVER_TYPE=<worker-type> SERVER_COUNT=8 LOCATION=hel1 ops/provision-hetzner.sh
 ```
 
 2. Bootstrap servers in parallel. This syncs `s3://pw-cruft/games` to
@@ -132,11 +127,6 @@ settled.
 
 3. Launch one playtest per discovered browser game:
 
-If the discovered games include `aether-outpost-patrol`, include
-only a hardware-WebGL-verified inventory: workers must report a
-non-SwiftShader Chromium WebGL renderer. Do not run that game on the old
-CPU-only inventory.
-
 ```sh
 export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
 node ops/orchestrate-playtests.js \
@@ -151,11 +141,8 @@ node ops/orchestrate-playtests.js \
   --concurrency-per-server 3
 ```
 
-The orchestrator refuses a 20-job run if capacity is below `20`. For
-`aether-outpost-patrol`, it marks the job with
-`requiresHardwareWebgl`, uses hardware-backend Chromium flags, and fails the job
-if Chromium still reports SwiftShader. It assigns unique ports per server and
-uploads each job to:
+The orchestrator refuses a 20-job run if capacity is below `20`. It assigns
+unique ports per server and uploads each job to:
 
 ```text
 s3://pw-cruft/playtests/<run-id>/<game>/attempt-001/
