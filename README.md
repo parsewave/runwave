@@ -8,7 +8,17 @@ It includes remote stress testing code (`./stress-test`) as a first class compon
 
 ![Runwave playing 12 games](/assets/12-games.gif)
 
-All games are run via chromium using dockerfiles.
+All games are run via chromium inside docker containers.
+
+## Limitations
+
+Runwave can only play games that:
+- run in the chromium browser
+- do not need a GPU
+- do not involve a lit of precise clicks
+- do not require reaction speeds of < 2 seconds
+
+Currently the agent can only use openrouter as its model provider.
 
 ## Requirements
 
