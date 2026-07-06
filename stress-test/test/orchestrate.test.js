@@ -9,7 +9,7 @@ const { defaultSshKey } = require('../lib/ssh-key');
 test('agent fleet jobs default minimum play time to near full duration', () => {
   const args = parseArgs([
     'node',
-    'ops/orchestrate-playtests.js',
+    'stress-test/orchestrate-playtests.js',
     '--inventory',
     'inventory.json',
     '--s3-uri',
@@ -31,7 +31,7 @@ test('agent fleet jobs default minimum play time to near full duration', () => {
 test('agent fleet jobs allow explicit minimum play time override', () => {
   const args = parseArgs([
     'node',
-    'ops/orchestrate-playtests.js',
+    'stress-test/orchestrate-playtests.js',
     '--inventory',
     'inventory.json',
     '--s3-uri',
@@ -55,7 +55,7 @@ test('agent fleet jobs allow explicit minimum play time override', () => {
 test('fleet jobs carry mark grid dimensions', () => {
   const args = parseArgs([
     'node',
-    'ops/orchestrate-playtests.js',
+    'stress-test/orchestrate-playtests.js',
     '--inventory',
     'inventory.json',
     '--s3-uri',
@@ -78,7 +78,7 @@ test('fleet jobs carry mark grid dimensions', () => {
 test('fleet jobs use WebGL launch args for every game', () => {
   const args = parseArgs([
     'node',
-    'ops/orchestrate-playtests.js',
+    'stress-test/orchestrate-playtests.js',
     '--inventory',
     'inventory.json',
     '--s3-uri',
@@ -99,7 +99,7 @@ test('fleet jobs use WebGL launch args for every game', () => {
 test('all fleet jobs receive the same WebGL launch args', () => {
   const args = parseArgs([
     'node',
-    'ops/orchestrate-playtests.js',
+    'stress-test/orchestrate-playtests.js',
     '--inventory',
     'inventory.json',
     '--s3-uri',
@@ -124,7 +124,7 @@ test('orchestrator can take ssh key from environment', () => {
   try {
     const args = parseArgs([
       'node',
-      'ops/orchestrate-playtests.js',
+      'stress-test/orchestrate-playtests.js',
       '--inventory',
       'inventory.json',
       '--s3-uri',

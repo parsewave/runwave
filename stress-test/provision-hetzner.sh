@@ -36,7 +36,7 @@ command -v jq >/dev/null 2>&1 || {
 
 ssh_key_name_from_local_key() {
   local key pub fingerprint
-  key="$(node "${ROOT_DIR}/ops/lib/ssh-key.js")"
+  key="$(node "${ROOT_DIR}/stress-test/lib/ssh-key.js")"
   pub="${key}.pub"
   if [ ! -f "${pub}" ]; then
     return 1

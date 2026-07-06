@@ -1,11 +1,11 @@
 ---
-name: runwave-playtest-fleet
-description: Run 20 or more simultaneous browser-game playtests with runwave using games from s3://pw-cruft/games, WebGL-oriented Chromium launch flags for every game with SwiftShader allowed as a CPU fallback, Hetzner workers or a local fallback, S3 artifact upload/download, and a generated browser video viewer. Use when asked to launch, test, orchestrate, monitor, or review a many-game runwave playtest batch.
+name: runwave-stress-test
+description: Run 20 or more simultaneous browser-game stress-test playtests with runwave using games from s3://pw-cruft/games, WebGL-oriented Chromium launch flags for every game with SwiftShader allowed as a CPU fallback, Hetzner workers or a local fallback, S3 artifact upload/download, and a generated browser video viewer. Use when asked to launch, test, orchestrate, monitor, or review a many-game runwave stress-test batch.
 ---
 
-# Runwave Playtest Fleet
+# Runwave Stress Test
 
-Use this skill to run an agentic many-game browser playtest batch end to end:
+Use this skill to run an agentic many-game browser stress-test batch end to end:
 discover games from S3, run one isolated OpenRouter-planned runwave job per
 game, upload artifacts to S3, download artifacts into `cruft/playtests`, and
 build a video viewer. Scripted mode is only for local smoke tests and controller
@@ -71,13 +71,13 @@ current operation.
 From the repo root:
 
 ```sh
-node --check ops/orchestrate-playtests.js
-node --check ops/remote/run-playtest.js
-node --check ops/build-playtest-viewer.js
-bash -n ops/provision-hetzner.sh
-bash -n ops/bootstrap-servers.sh
-bash -n ops/bootstrap-servers-parallel.sh
-bash -n ops/remote/bootstrap-runner.sh
+node --check stress-test/orchestrate-playtests.js
+node --check stress-test/remote/run-playtest.js
+node --check stress-test/build-playtest-viewer.js
+bash -n stress-test/provision-hetzner.sh
+bash -n stress-test/bootstrap-servers.sh
+bash -n stress-test/bootstrap-servers-parallel.sh
+bash -n stress-test/remote/bootstrap-runner.sh
 ```
 
 Check S3 game discovery after AWS credentials are available:
@@ -109,7 +109,7 @@ Use this path when Hetzner creation and SSH are working.
 export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
 # Optional if the Hetzner key name cannot be inferred from RUNWAVE_SSH_KEY.pub:
 # export RUNWAVE_SSH_KEY_NAME="<hetzner-ssh-key-name>"
-SERVER_TYPE=<worker-type> SERVER_COUNT=8 LOCATION=hel1 ops/provision-hetzner.sh
+SERVER_TYPE=<worker-type> SERVER_COUNT=8 LOCATION=hel1 stress-test/provision-hetzner.sh
 ```
 
 2. Bootstrap servers in parallel. This syncs `s3://pw-cruft/games` to
@@ -118,7 +118,7 @@ SERVER_TYPE=<worker-type> SERVER_COUNT=8 LOCATION=hel1 ops/provision-hetzner.sh
    job.
 
 ```sh
-ops/bootstrap-servers-parallel.sh cruft/inventory/<batch>.json
+stress-test/bootstrap-servers-parallel.sh cruft/inventory/<batch>.json
 ```
 
 If any worker fails, inspect `cruft/playtests/_bootstrap-logs/<batch>/<worker>.log`.
@@ -129,7 +129,7 @@ settled.
 
 ```sh
 export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
-node ops/orchestrate-playtests.js \
+node stress-test/orchestrate-playtests.js \
   --inventory cruft/inventory/<batch>.json \
   --s3-uri s3://pw-cruft/playtests \
   --games-s3-uri s3://pw-cruft/games \
@@ -195,13 +195,13 @@ Do not put those fields in normal fleet job specs.
 4. Run jobs with:
 
 ```sh
-docker build -f ops/remote/playtest-runner.Dockerfile \
+docker build -f stress-test/remote/playtest-runner.Dockerfile \
   -t runwave-playtest-runner:latest \
-  ops/remote
+  stress-test/remote
 
 RUNWAVE_GAMES_ROOT="$PWD/cruft/playtests/_games-cache" \
 RUNWAVE_JOBS_ROOT="$PWD/cruft/playtests/<run-id>/local-jobs" \
-node ops/remote/run-playtest.js --job cruft/playtests/<run-id>/job-specs/<job>.json
+node stress-test/remote/run-playtest.js --job cruft/playtests/<run-id>/job-specs/<job>.json
 ```
 
 For local parallel execution, spawn up to four of these commands at a time. Capture each job’s stdout/stderr to `cruft/playtests/<run-id>/<jobId>.log`, and write a `results.json` containing `{jobId, game, code, log, s3Uri}` for every job.
@@ -236,7 +236,7 @@ env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u ALL_PROXY -u al
 Build the viewer:
 
 ```sh
-node ops/build-playtest-viewer.js \
+node stress-test/build-playtest-viewer.js \
   --artifacts cruft/playtests/<run-id>/s3-artifacts \
   --out cruft/playtests/<run-id>/viewer/index.html
 ```

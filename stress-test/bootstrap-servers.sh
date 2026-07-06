@@ -7,9 +7,9 @@ SSH_USER="${SSH_USER:-root}"
 GAMES_S3_URI="${GAMES_S3_URI:-s3://pw-cruft/games}"
 GAMES_DIR="${GAMES_DIR:-${ROOT_DIR}/cruft/games}"
 
-source "${ROOT_DIR}/ops/lib/bootstrap-servers.sh"
+source "${ROOT_DIR}/stress-test/lib/bootstrap-servers.sh"
 
-runwave_bootstrap_init "ops/bootstrap-servers.sh ops/inventory/<batch>.json"
+runwave_bootstrap_init "stress-test/bootstrap-servers.sh stress-test/inventory/<batch>.json"
 echo "Bootstrapping ${server_count} servers"
 
 while IFS=$'\t' read -r name ip; do

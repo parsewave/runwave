@@ -17,7 +17,7 @@ runwave_bootstrap_init() {
     exit 1
   }
 
-  SSH_KEY="$(node "${ROOT_DIR}/ops/lib/ssh-key.js")"
+  SSH_KEY="$(node "${ROOT_DIR}/stress-test/lib/ssh-key.js")"
 
   tmp_dir="$(mktemp -d)"
   cleanup() {
@@ -79,9 +79,9 @@ runwave_bootstrap_one() {
   local ip="$2"
   local ssh_opts=(-i "${SSH_KEY}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=15)
   local scp_files=(
-    "${ROOT_DIR}/ops/remote/bootstrap-runner.sh"
-    "${ROOT_DIR}/ops/remote/playtest-runner.Dockerfile"
-    "${ROOT_DIR}/ops/remote/run-playtest.js"
+    "${ROOT_DIR}/stress-test/remote/bootstrap-runner.sh"
+    "${ROOT_DIR}/stress-test/remote/playtest-runner.Dockerfile"
+    "${ROOT_DIR}/stress-test/remote/run-playtest.js"
     "${env_file}"
   )
   if [ -n "${games_tar}" ]; then

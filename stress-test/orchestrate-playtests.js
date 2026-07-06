@@ -74,7 +74,7 @@ function parseArgs(argv) {
 function usage() {
   return [
     'Usage:',
-    '  node ops/orchestrate-playtests.js --inventory ops/inventory/<batch>.json --s3-uri s3://bucket/prefix [options]',
+    '  node stress-test/orchestrate-playtests.js --inventory stress-test/inventory/<batch>.json --s3-uri s3://bucket/prefix [options]',
     '',
     'Options:',
     '  --total-attempts N',

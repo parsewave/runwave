@@ -7,9 +7,9 @@ SSH_USER="${SSH_USER:-root}"
 GAMES_S3_URI="${GAMES_S3_URI:-s3://pw-cruft/games}"
 GAMES_DIR="${GAMES_DIR:-${ROOT_DIR}/cruft/games}"
 
-source "${ROOT_DIR}/ops/lib/bootstrap-servers.sh"
+source "${ROOT_DIR}/stress-test/lib/bootstrap-servers.sh"
 
-runwave_bootstrap_init "ops/bootstrap-servers-parallel.sh cruft/inventory/<batch>.json"
+runwave_bootstrap_init "stress-test/bootstrap-servers-parallel.sh cruft/inventory/<batch>.json"
 batch="$(basename "${INVENTORY}" .json)"
 LOG_DIR="${RUNWAVE_BOOTSTRAP_LOG_DIR:-${ROOT_DIR}/cruft/playtests/_bootstrap-logs/${batch}}"
 mkdir -p "${LOG_DIR}"

@@ -3,25 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const {
-  chromiumArgs,
-} = require('../ops/remote/run-playtest');
-const { readPageState } = require('../controller/src/state-reader');
-
-test('chromium args can replace default WebGL launch args', () => {
-  const args = chromiumArgs({
-    chromiumArgsMode: 'replace',
-    chromiumArgs: ['--no-sandbox', '--ignore-gpu-blocklist', '--use-gl=egl'],
-  }, {});
-
-  assert.deepEqual(args, ['--no-sandbox', '--ignore-gpu-blocklist', '--use-gl=egl']);
-});
-
-test('default chromium args allow SwiftShader fallback', () => {
-  const args = chromiumArgs({}, {});
-
-  assert.ok(args.includes('--enable-unsafe-swiftshader'));
-});
+const { readPageState } = require('../src/state-reader');
 
 test('WebGL renderer probe is cached and releases its temporary context', async () => {
   const previousWindow = global.window;

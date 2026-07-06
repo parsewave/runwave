@@ -1,7 +1,7 @@
-# Runwave Playtest Fleet
+# Runwave Stress Test
 
 This directory contains the local orchestration and remote worker scripts for
-running many browser-game playtests across Hetzner servers.
+running high-concurrency browser-game playtests across Hetzner servers.
 
 ## Shape
 
@@ -34,7 +34,7 @@ Create the fleet:
 export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
 # Optional if the Hetzner key name cannot be inferred from RUNWAVE_SSH_KEY.pub:
 # export RUNWAVE_SSH_KEY_NAME="<hetzner-ssh-key-name>"
-SERVER_TYPE=<worker-type> SERVER_COUNT=8 LOCATION=hel1 ops/provision-hetzner.sh
+SERVER_TYPE=<worker-type> SERVER_COUNT=8 LOCATION=hel1 stress-test/provision-hetzner.sh
 ```
 
 Defaults:
@@ -53,7 +53,7 @@ generated state and should not be committed.
 Install dependencies and sync all browser games from S3 to each server:
 
 ```sh
-ops/bootstrap-servers-parallel.sh cruft/inventory/<batch>.json
+stress-test/bootstrap-servers-parallel.sh cruft/inventory/<batch>.json
 ```
 
 This reads credentials from `~/.c.yaml` and writes them to
@@ -75,7 +75,7 @@ fallback for production playtests.
 The default game source is `s3://pw-cruft/games`. Override it with:
 
 ```sh
-GAMES_S3_URI=s3://OTHER_BUCKET/other-prefix ops/bootstrap-servers-parallel.sh cruft/inventory/<batch>.json
+GAMES_S3_URI=s3://OTHER_BUCKET/other-prefix stress-test/bootstrap-servers-parallel.sh cruft/inventory/<batch>.json
 ```
 
 ## Run
@@ -83,7 +83,7 @@ GAMES_S3_URI=s3://OTHER_BUCKET/other-prefix ops/bootstrap-servers-parallel.sh cr
 Run one attempt per detected browser game:
 
 ```sh
-node ops/orchestrate-playtests.js \
+node stress-test/orchestrate-playtests.js \
   --inventory cruft/inventory/<batch>.json \
   --s3-uri s3://pw-cruft/playtests \
   --games-s3-uri s3://pw-cruft/games \
@@ -99,7 +99,7 @@ Run one agentic attempt for every discovered browser game:
 
 ```sh
 export RUNWAVE_SSH_KEY="$HOME/.ssh/id_ed25519"
-node ops/orchestrate-playtests.js \
+node stress-test/orchestrate-playtests.js \
   --inventory cruft/inventory/<batch>.json \
   --s3-uri s3://pw-cruft/playtests \
   --games-s3-uri s3://pw-cruft/games \
@@ -137,9 +137,9 @@ model-calling planner. The planner currently uses OpenRouter, reading
 For a single local game smoke:
 
 ```sh
-docker build -f ops/remote/playtest-runner.Dockerfile \
+docker build -f stress-test/remote/playtest-runner.Dockerfile \
   -t runwave-playtest-runner:latest \
-  ops/remote
+  stress-test/remote
 
 aws s3 sync s3://pw-cruft/games/mario-html5/ \
   cruft/playtests/_games-cache/mario-html5/ \
@@ -147,7 +147,7 @@ aws s3 sync s3://pw-cruft/games/mario-html5/ \
 
 RUNWAVE_GAMES_ROOT="$PWD/cruft/playtests/_games-cache" \
 RUNWAVE_JOBS_ROOT="$PWD/cruft/playtests/local-agent-smoke/jobs" \
-node ops/remote/run-playtest.js --job ops/examples/job-agent-mario.local.json
+node stress-test/remote/run-playtest.js --job stress-test/examples/job-agent-mario.local.json
 ```
 
 Linux local smoke runs use the same Docker wrapper by default. Set
@@ -158,7 +158,7 @@ On machines with Chrome already installed and Playwright downloads blocked, set
 `skipPlaywrightInstall: true` and `channel: "chrome"` in the job JSON.
 
 For a server-side one-game agent run, use
-`ops/examples/job-agent-mario.server.json`. It runs agent mode for a 3-minute
+`stress-test/examples/job-agent-mario.server.json`. It runs agent mode for a 3-minute
 safety window and enables verbose controller timing logs.
 
 ## Viewer
@@ -168,7 +168,7 @@ After downloading artifacts, build a local video viewer:
 ![Runwave playtest viewer showing multiple recorded game videos](assets/playtest-viewer.png)
 
 ```sh
-node ops/build-playtest-viewer.js \
+node stress-test/build-playtest-viewer.js \
   --artifacts cruft/playtests/<run-id>/s3-artifacts \
   --out cruft/playtests/<run-id>/viewer/index.html
 ```
