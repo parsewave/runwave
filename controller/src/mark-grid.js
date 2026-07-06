@@ -1,7 +1,8 @@
 const DEFAULT_MARK_GRID = {
-  rows: 8,
-  cols: 8,
+  rows: 16,
+  cols: 16,
 };
+const DEFAULT_GRID_SAFE_SAMPLE_RATIO = 0.9;
 
 function markGridFromConfig(config = {}) {
   const rows = Number(config.markGridRows ?? config.gridRows ?? DEFAULT_MARK_GRID.rows);
@@ -16,12 +17,22 @@ function viewportFromConfig(config = {}) {
   return config.viewport || config.videoSize || null;
 }
 
+function gridSafeSampleRatio(config = {}) {
+  const raw = Number(
+    config.markGridSafeSampleRatio
+      ?? config.gridSafeSampleRatio
+      ?? DEFAULT_GRID_SAFE_SAMPLE_RATIO
+  );
+  return Number.isFinite(raw) && raw > 0 && raw <= 1 ? raw : DEFAULT_GRID_SAFE_SAMPLE_RATIO;
+}
+
 function normalizeCellList(value, grid = DEFAULT_MARK_GRID, limit = 4) {
   const raw = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
   const max = grid.rows * grid.cols;
   const cells = [];
   for (const item of raw) {
-    const id = Number(item);
+    const rowCol = cellFromRowCol(item, grid);
+    const id = rowCol === null ? Number(item) : rowCol;
     if (!Number.isFinite(id)) continue;
     const rounded = Math.round(id);
     if (rounded < 0 || rounded >= max) continue;
@@ -31,8 +42,20 @@ function normalizeCellList(value, grid = DEFAULT_MARK_GRID, limit = 4) {
   return cells;
 }
 
+function cellFromRowCol(value, grid = DEFAULT_MARK_GRID) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value.overlay_row ?? value.row;
+  const col = value.overlay_col ?? value.col;
+  if (typeof row !== 'number' || typeof col !== 'number') return null;
+  if (!Number.isInteger(row) || !Number.isInteger(col)) return null;
+  if (row < 0 || row >= grid.rows || col < 0 || col >= grid.cols) return null;
+  return row * grid.cols + col;
+}
+
 function cellsFromObject(object, grid = DEFAULT_MARK_GRID, limit = 4) {
   if (!object || typeof object !== 'object') return [];
+  const directCell = cellFromRowCol(object, grid);
+  if (directCell !== null) return [directCell];
   return normalizeCellList(
     object.cells ?? object.grid_cells ?? object.gridCells ?? object.grid_ids ?? object.gridIds ?? object.cell ?? object.grid_id,
     grid,
@@ -63,15 +86,30 @@ function cellBounds(cell, viewport, grid = DEFAULT_MARK_GRID) {
   };
 }
 
-function randomPointInCells(cells, viewport, grid = DEFAULT_MARK_GRID, rng = Math.random) {
+function randomPointInCells(
+  cells,
+  viewport,
+  grid = DEFAULT_MARK_GRID,
+  rng = Math.random,
+  safeSampleRatio = DEFAULT_GRID_SAFE_SAMPLE_RATIO
+) {
   const normalized = normalizeCellList(cells, grid, 4);
   if (!normalized.length) {
     throw new Error('grid cell action requires at least one valid cell id');
   }
   const cell = normalized[Math.floor(rng() * normalized.length)];
   const bounds = cellBounds(cell, viewport, grid);
-  const x = bounds.left + rng() * Math.max(1, bounds.right - bounds.left);
-  const y = bounds.top + rng() * Math.max(1, bounds.bottom - bounds.top);
+  const ratio = Number.isFinite(Number(safeSampleRatio))
+    && Number(safeSampleRatio) > 0
+    && Number(safeSampleRatio) <= 1
+    ? Number(safeSampleRatio)
+    : DEFAULT_GRID_SAFE_SAMPLE_RATIO;
+  const width = Math.max(1, bounds.right - bounds.left);
+  const height = Math.max(1, bounds.bottom - bounds.top);
+  const insetX = (width * (1 - ratio)) / 2;
+  const insetY = (height * (1 - ratio)) / 2;
+  const x = bounds.left + insetX + rng() * Math.max(1, width - insetX * 2);
+  const y = bounds.top + insetY + rng() * Math.max(1, height - insetY * 2);
   return {
     x: Math.max(0, Math.min(Math.round(x), Math.round(Number(viewport.width)) - 1)),
     y: Math.max(0, Math.min(Math.round(y), Math.round(Number(viewport.height)) - 1)),
@@ -91,10 +129,13 @@ function clickBurstTimes(at, duration, count = 10, intervalMs = 100) {
 }
 
 module.exports = {
+  DEFAULT_GRID_SAFE_SAMPLE_RATIO,
   DEFAULT_MARK_GRID,
+  gridSafeSampleRatio,
   markGridFromConfig,
   viewportFromConfig,
   normalizeCellList,
+  cellFromRowCol,
   cellsFromObject,
   cellBounds,
   randomPointInCells,

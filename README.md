@@ -1,10 +1,11 @@
 # Runwave
 
-Runwave is a reusable Playwright CLI for browser games and canvas apps.
+Runwave is a reusable Playwright CLI and agentic playtester for browser games
+and canvas apps.
 
 This package is the task-neutral version of the PR145 browser runner. It only
-provides browser control and artifact capture. It does not include a VLM
-playtester, frame picker, or judge.
+provides browser control, artifact capture, and an optional OpenRouter-backed
+playtester. It does not include a frame picker or judge.
 
 ## Requirements
 
@@ -23,7 +24,7 @@ fallback. Any run that sets `record: true` requires all of:
   `PULSE_SINK` before starting Chromium; pass `audioSource: "runwave_sink.monitor"`
   (or `RUNWAVE_AUDIO_SOURCE`) to the start action.
 
-The harness checks these prerequisites before spawning gstreamer and fails
+The controller checks these prerequisites before spawning gstreamer and fails
 fast with a message naming the missing piece.
 
 Non-recording usage (screenshots, state, keyboard/mouse) has no such
@@ -43,7 +44,8 @@ From a private GitHub repo in a task Dockerfile:
 ```dockerfile
 RUN apt-get update && apt-get install -y \
     gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly gstreamer1.0-x pulseaudio xvfb
+    gstreamer1.0-plugins-ugly gstreamer1.0-x gstreamer1.0-pulseaudio \
+    pulseaudio xvfb
 RUN npm install -g https://github.com/parsewave/runwave.git
 RUN npx playwright install --with-deps chromium
 ```
@@ -186,16 +188,17 @@ runwave '{
   "action_name": "turn-003-click-start",
   "session_id": "playtest-001",
   "actions": [
-    { "type": "click", "start": 100, "end": 500, "x": 512, "y": 310 }
+    { "type": "click", "start": 100, "x": 512, "y": 310 }
   ]
 }'
 ```
 
-Screenshots include an 8x8 red mark grid by default. Pointer actions may use
-up to 4 grid cell IDs instead of exact pixels. Cell IDs run row-major from `0`
-at the top-left to `63` at the bottom-right.
+Screenshots include a 16x16 red mark grid by default. Overlay column labels are
+shown in the top/bottom margins and overlay row labels are shown in the
+left/right margins. Pointer actions may use overlay row/column grid objects
+instead of exact pixels.
 
-Single grid-cell click:
+Single overlay grid click:
 
 ```sh
 runwave '{
@@ -203,7 +206,7 @@ runwave '{
   "action_name": "turn-003-click-start-cell",
   "session_id": "playtest-001",
   "actions": [
-    { "type": "click", "start": 100, "end": 500, "cells": [27] }
+    { "type": "click", "start": 100, "cell": { "overlay_row": 6, "overlay_col": 7 } }
   ]
 }'
 ```
@@ -216,7 +219,7 @@ runwave '{
   "action_name": "turn-003-multi-click",
   "session_id": "playtest-001",
   "actions": [
-    { "type": "multi_click", "start": 100, "cells": [27, 28], "count": 10 }
+    { "type": "multi_click", "start": 100, "cells": [{ "overlay_row": 6, "overlay_col": 7 }, { "overlay_row": 6, "overlay_col": 8 }], "count": 10 }
   ]
 }'
 ```
@@ -239,13 +242,13 @@ for browser-native draggable/drop elements.
 Drag endpoints can also use grid cells:
 
 ```json
-{ "type": "drag", "start": 100, "from_cells": [34], "to_cells": [35], "mode": "mouse" }
+{ "type": "drag", "start": 100, "from": { "overlay_row": 8, "overlay_col": 10 }, "to": { "overlay_row": 8, "overlay_col": 11 }, "mode": "mouse" }
 ```
 
 Move the cursor without clicking:
 
 ```json
-{ "action": "step", "action_name": "turn-005-hover", "session_id": "playtest-001", "actions": [{ "type": "cursor_move", "start": 100, "end": 500, "cells": [27] }] }
+{ "action": "step", "action_name": "turn-005-hover", "session_id": "playtest-001", "actions": [{ "type": "cursor_move", "start": 100, "end": 500, "cell": { "overlay_row": 6, "overlay_col": 7 } }] }
 ```
 
 Move the mouse without clicking for camera control:

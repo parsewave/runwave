@@ -12,7 +12,9 @@ const {
   loadPlaytestInstructions,
   shouldRunJobInContainer,
   signalLongProcess,
+  startOverridesFromJob,
   stopLongProcess,
+  xvfbCaptureConfig,
 } = require('../ops/remote/run-playtest');
 
 function fakeChild(pid = 12345) {
@@ -116,6 +118,61 @@ test('rejects missing or mis-cased playtest.md instructions', () => {
     () => loadPlaytestInstructions(casedDir, 'cased-game'),
     /game has no playtest\.md: cased-game/
   );
+});
+
+test('remote playtest start overrides carry mark grid dimensions', () => {
+  const overrides = startOverridesFromJob(
+    {
+      markGridRows: 16,
+      markGridCols: 24,
+      gridScreenshots: true,
+      videoSize: { width: 1280, height: 720 },
+    },
+    { audioSource: 'pulse.monitor' }
+  );
+
+  assert.equal(overrides.markGridRows, 16);
+  assert.equal(overrides.markGridCols, 24);
+  assert.equal(overrides.gridScreenshots, true);
+  assert.equal(overrides.audioSource, 'pulse.monitor');
+  assert.deepEqual(overrides.videoSize, { width: 1280, height: 720 });
+});
+
+test('xvfb capture config leaves room for measured browser chrome', () => {
+  const capture = xvfbCaptureConfig(
+    {
+      port: 9311,
+      viewport: { width: 656, height: 496 },
+      videoSize: { width: 656, height: 496 },
+      xvfbWidth: 656,
+      xvfbHeight: 496,
+    },
+    {}
+  );
+
+  assert.equal(capture.captureX, 0);
+  assert.equal(capture.captureY, 0);
+  assert.equal(capture.paddingX, 64);
+  assert.equal(capture.screenWidth, 720);
+  assert.equal(capture.screenHeight, 656);
+  assert.equal(capture.screen, '720x656x24');
+});
+
+test('xvfb capture config pads exact-width viewports for measured X offsets', () => {
+  const capture = xvfbCaptureConfig(
+    {
+      port: 9311,
+      viewport: { width: 660, height: 1000 },
+      videoSize: { width: 660, height: 1000 },
+      xvfbWidth: 660,
+      xvfbHeight: 1000,
+    },
+    {}
+  );
+
+  assert.equal(capture.screenWidth, 724);
+  assert.equal(capture.screenHeight, 1160);
+  assert.equal(capture.screen, '724x1160x24');
 });
 
 test('linux playtest jobs run in a container by default unless disabled or already inside one', () => {

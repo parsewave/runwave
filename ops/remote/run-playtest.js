@@ -8,7 +8,9 @@ const { spawn } = require('child_process');
 
 const DEFAULT_PROCESS_STOP_WAIT_MS = 5000;
 const DEFAULT_PROCESS_KILL_WAIT_MS = 5000;
-const DEFAULT_AUDIO_VIDEO_CAPTURE_Y = 94;
+const DEFAULT_AUDIO_VIDEO_CAPTURE_Y = 0;
+const DEFAULT_XVFB_CAPTURE_PADDING_X = 64;
+const DEFAULT_XVFB_CAPTURE_PADDING_Y = 160;
 
 function parseArgs(argv) {
   const out = {};
@@ -91,7 +93,6 @@ function dockerEnvNames(env = process.env) {
     /^RUNWAVE_SKIP_PLAYWRIGHT_INSTALL$/,
     /^RUNWAVE_VERBOSE$/,
     /^RUNWAVE_VIDEO_/,
-    /^RUNWAVE_VLM_VIEWPORT_PREFLIGHT$/,
     /^RUNWAVE_XVFB_/,
     /^RUNWAVE_PROCESS_(STOP|KILL)_WAIT_MS$/,
     /^HTTP_PROXY$/i,
@@ -181,6 +182,23 @@ function loadPlaytestInstructions(gameDir, game) {
   return fs.readFileSync(playtestPath, 'utf8');
 }
 
+function startOverridesFromJob(job = {}, audioCapture = {}) {
+  const overrides = {
+    audioSource: audioCapture.audioSource,
+    gstreamerPath: job.gstreamerPath,
+    channel: job.channel,
+    executablePath: job.executablePath,
+    chromiumArgs: job.chromiumArgs,
+    chromiumArgsMode: job.chromiumArgsMode,
+    keyAliases: job.keyAliases,
+    gridScreenshots: job.gridScreenshots,
+    markGridRows: job.markGridRows,
+    markGridCols: job.markGridCols,
+  };
+  if (job.videoSize) overrides.videoSize = job.videoSize;
+  return overrides;
+}
+
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     log('command.start', { command, args, cwd: options.cwd });
@@ -255,6 +273,29 @@ async function prepareAudioCaptureEnv(env, job) {
 
 async function startXvfbForAudio(job, env) {
   if (job.audioXvfb === false) return { env, process: null, display: env.DISPLAY || null };
+  const capture = xvfbCaptureConfig(job, env);
+  const xvfb = spawnLong('Xvfb', [capture.display, '-screen', '0', capture.screen, '-nolisten', 'tcp'], {
+    env,
+  });
+  const waitMs = Number(job.xvfbStartWaitMs ?? env.RUNWAVE_XVFB_START_WAIT_MS ?? 500);
+  if (waitMs > 0) await sleep(waitMs);
+  if (processHasClosed(xvfb)) {
+    throw new Error(`Xvfb exited during startup for display ${capture.display}`);
+  }
+  return {
+    env: {
+      ...env,
+      DISPLAY: capture.display,
+      NO_AT_BRIDGE: env.NO_AT_BRIDGE || '1',
+      RUNWAVE_VIDEO_X: String(capture.captureX),
+      RUNWAVE_VIDEO_Y: String(capture.captureY),
+    },
+    process: xvfb,
+    display: capture.display,
+  };
+}
+
+function xvfbCaptureConfig(job = {}, env = process.env) {
   const display = job.xvfbDisplay || env.RUNWAVE_XVFB_DISPLAY || `:${100 + (Number(job.port || 0) % 500)}`;
   const captureSize = job.videoSize || job.viewport || { width: 1280, height: 720 };
   const captureWidth = positiveInteger(captureSize.width, 1280);
@@ -267,27 +308,29 @@ async function startXvfbForAudio(job, env) {
     job.audioVideoCaptureY ?? env.RUNWAVE_AUDIO_VIDEO_CAPTURE_Y ?? env.RUNWAVE_VIDEO_Y,
     DEFAULT_AUDIO_VIDEO_CAPTURE_Y
   );
-  const screenWidth = positiveInteger(job.xvfbWidth ?? env.RUNWAVE_XVFB_WIDTH, captureWidth + captureX);
-  const screenHeight = positiveInteger(job.xvfbHeight ?? env.RUNWAVE_XVFB_HEIGHT, captureHeight + captureY);
+  const paddingX = nonNegativeInteger(
+    job.xvfbCapturePaddingX ?? env.RUNWAVE_XVFB_CAPTURE_PADDING_X,
+    DEFAULT_XVFB_CAPTURE_PADDING_X
+  );
+  const paddingY = nonNegativeInteger(
+    job.xvfbCapturePaddingY ?? env.RUNWAVE_XVFB_CAPTURE_PADDING_Y,
+    DEFAULT_XVFB_CAPTURE_PADDING_Y
+  );
+  const configuredWidth = positiveInteger(job.xvfbWidth ?? env.RUNWAVE_XVFB_WIDTH, captureWidth + captureX);
+  const configuredHeight = positiveInteger(job.xvfbHeight ?? env.RUNWAVE_XVFB_HEIGHT, captureHeight + captureY + paddingY);
+  const screenWidth = Math.max(configuredWidth, captureWidth + captureX + paddingX);
+  const screenHeight = Math.max(configuredHeight, captureHeight + captureY + paddingY);
   const screen = job.xvfbScreen || env.RUNWAVE_XVFB_SCREEN || `${screenWidth}x${screenHeight}x24`;
-  const xvfb = spawnLong('Xvfb', [display, '-screen', '0', screen, '-nolisten', 'tcp'], {
-    env,
-  });
-  const waitMs = Number(job.xvfbStartWaitMs ?? env.RUNWAVE_XVFB_START_WAIT_MS ?? 500);
-  if (waitMs > 0) await sleep(waitMs);
-  if (processHasClosed(xvfb)) {
-    throw new Error(`Xvfb exited during startup for display ${display}`);
-  }
   return {
-    env: {
-      ...env,
-      DISPLAY: display,
-      NO_AT_BRIDGE: env.NO_AT_BRIDGE || '1',
-      RUNWAVE_VIDEO_X: String(captureX),
-      RUNWAVE_VIDEO_Y: String(captureY),
-    },
-    process: xvfb,
     display,
+    captureX,
+    captureY,
+    captureWidth,
+    captureHeight,
+    paddingX,
+    screenWidth,
+    screenHeight,
+    screen,
   };
 }
 
@@ -574,17 +617,7 @@ async function main() {
     {
       const { runPlaytest } = require(path.join(dirs.runwave, 'playtest', 'playtest.js'));
 
-      const startOverrides = {
-        audioSource: audioCapture.audioSource,
-        gstreamerPath: job.gstreamerPath,
-        channel: job.channel,
-        executablePath: job.executablePath,
-        chromiumArgs: job.chromiumArgs,
-        chromiumArgsMode: job.chromiumArgsMode,
-        keyAliases: job.keyAliases,
-        gridScreenshots: job.gridScreenshots,
-      };
-      if (job.videoSize) startOverrides.videoSize = job.videoSize;
+      const startOverrides = startOverridesFromJob(job, audioCapture);
 
       const viewport = job.viewport;
       summary.viewport = viewport;
@@ -634,15 +667,24 @@ async function main() {
         return { stopped: false, reason: 'error', error: error.message };
       });
     }
-    if (job.s3Uri) summary.uploadedTo = job.s3Uri.replace(/\/+$/, '');
+    if (job.s3Uri) {
+      summary.uploadTarget = job.s3Uri.replace(/\/+$/, '');
+      summary.uploadStatus = 'pending';
+    }
     fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
     const uploadedTo = await uploadWorkspace(job, dirs, runnerEnv).catch((error) => {
       log('upload.error', { jobId, error: error.message });
+      summary.uploadStatus = 'failed';
       summary.uploadError = error.message;
       fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
       return null;
     });
-    if (uploadedTo) summary.uploadedTo = uploadedTo;
+    if (uploadedTo) {
+      summary.uploadedTo = uploadedTo;
+      summary.uploadStatus = 'uploaded';
+    } else if (job.s3Uri && summary.uploadStatus !== 'failed') {
+      summary.uploadStatus = 'skipped';
+    }
     fs.writeFileSync(path.join(dirs.workspace, 'summary.json'), JSON.stringify(summary, null, 2));
     log('job.end', { jobId, status: summary.status, uploadedTo });
   }
@@ -665,6 +707,8 @@ module.exports = {
   loadPlaytestInstructions,
   shouldRunJobInContainer,
   signalLongProcess,
+  startOverridesFromJob,
   stopLongProcess,
   waitForProcessClose,
+  xvfbCaptureConfig,
 };

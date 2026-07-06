@@ -5,11 +5,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const test = require('node:test');
+const { PNG } = require('pngjs');
 
 const { normalizeSequence } = require('../agent/src/action-parser');
-const { failedActionAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
+const { actionsWithinDuration, failedActionAfterInvalidJson, runAgenticPlaytest } = require('../agent/src/agent-player');
 const { chatCompletion, parseJsonResponse } = require('../agent/src/model-client');
-const { buildPlaytesterPrompt, compactHistory } = require('../agent/src/prompt');
+const { buildPlaytesterPrompt, compactHistory, sequenceSchemaGuide } = require('../agent/src/prompt');
+const { drawMarkGridOnScreenshot } = require('../controller/src/grid-overlay');
+const { gridSafeSampleRatio, randomPointInCells } = require('../controller/src/mark-grid');
 const { normalizeStep } = require('../controller/src/step-normalizer');
 
 test('normalizes model sequences into controller steps', () => {
@@ -67,7 +70,7 @@ test('normalizes grid-cell model actions into concrete pointer events', () => {
         { type: 'cursor_move', start: 400, cells: [27] },
       ],
     },
-    { viewport: { width: 800, height: 800 } }
+    { viewport: { width: 800, height: 800 }, config: { markGridRows: 20, markGridCols: 20 } }
   );
 
   const clicks = sequence.actions.filter((action) => action.type === 'click');
@@ -77,12 +80,12 @@ test('normalizes grid-cell model actions into concrete pointer events', () => {
   assert.ok(clicks.every((click) => !Object.hasOwn(click, 'clickMode')));
   assert.equal(clicks[0].cells[0], 9);
   assert.equal(clicks[0].end, 150);
-  assert.ok(clicks[0].x >= 100 && clicks[0].x <= 199);
-  assert.ok(clicks[0].y >= 100 && clicks[0].y <= 199);
+  assert.ok(clicks[0].x >= 360 && clicks[0].x <= 399);
+  assert.ok(clicks[0].y >= 0 && clicks[0].y <= 39);
   assert.deepEqual(clicks.slice(1).map((click) => click.start), [200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100]);
   assert.deepEqual(clicks.slice(1).map((click) => click.end), [250, 350, 450, 550, 650, 750, 850, 950, 1050, 1150]);
-  assert.ok(clicks.slice(1).every((click) => click.x >= 200 && click.x <= 400));
-  assert.ok(clicks.slice(1).every((click) => click.y >= 200 && click.y <= 300));
+  assert.ok(clicks.slice(1).every((click) => click.x >= 720 && click.x <= 799));
+  assert.ok(clicks.slice(1).every((click) => click.y >= 0 && click.y <= 39));
   assert.deepEqual(drag.from.cells, [34]);
   assert.deepEqual(drag.to.cells, [35]);
   assert.equal(drag.end, 350);
@@ -91,6 +94,64 @@ test('normalizes grid-cell model actions into concrete pointer events', () => {
 
   const step = normalizeStep({ actions: sequence.actions }, { viewport: { width: 800, height: 800 } }, 1);
   assert.equal(step.clicks.length, 11);
+});
+
+test('normalizes overlay row and column grid targets into concrete pointer events', () => {
+  const sequence = normalizeSequence(
+    {
+      actions: [
+        { type: 'click', start: 100, cell: { overlay_row: 1, overlay_col: 2 } },
+        { type: 'multi_click', start: 200, cells: [{ overlay_row: 2, overlay_col: 0 }, { overlay_row: 2, overlay_col: 1 }], count: 2 },
+        { type: 'drag', start: 300, from: { overlay_row: 3, overlay_col: 4 }, to: { overlay_row: 3, overlay_col: 5 }, mode: 'mouse' },
+        { type: 'cursor_move', start: 400, cell: { overlay_row: 0, overlay_col: 7 } },
+      ],
+    },
+    { viewport: { width: 800, height: 800 }, config: { markGridRows: 8, markGridCols: 8 } }
+  );
+
+  const clicks = sequence.actions.filter((action) => action.type === 'click');
+  const drag = sequence.actions.find((action) => action.type === 'drag');
+  const cursorMove = sequence.actions.find((action) => action.type === 'cursor_move');
+  assert.equal(clicks[0].cells[0], 10);
+  assert.ok(clicks[0].x >= 200 && clicks[0].x <= 299);
+  assert.ok(clicks[0].y >= 100 && clicks[0].y <= 199);
+  assert.equal(clicks.slice(1).length, 2);
+  assert.ok(clicks.slice(1).every((click) => [16, 17].includes(click.cells[0])));
+  assert.deepEqual(drag.from.cells, [28]);
+  assert.deepEqual(drag.to.cells, [29]);
+  assert.deepEqual(cursorMove.cells, [7]);
+});
+
+test('keeps legacy row and column grid targets compatible', () => {
+  const sequence = normalizeSequence(
+    {
+      actions: [
+        { type: 'click', start: 100, cell: { row: 1, col: 2 } },
+        { type: 'drag', start: 300, from: { row: 3, col: 4 }, to: { row: 3, col: 5 }, mode: 'mouse' },
+      ],
+    },
+    { viewport: { width: 800, height: 800 }, config: { markGridRows: 8, markGridCols: 8 } }
+  );
+
+  const click = sequence.actions.find((action) => action.type === 'click');
+  const drag = sequence.actions.find((action) => action.type === 'drag');
+  assert.equal(click.cells[0], 10);
+  assert.deepEqual(drag.from.cells, [28]);
+  assert.deepEqual(drag.to.cells, [29]);
+});
+
+test('samples grid-cell points away from cell boundaries by default', () => {
+  const grid = { rows: 8, cols: 8 };
+  const viewport = { width: 800, height: 800 };
+  const lower = randomPointInCells([0], viewport, grid, () => 0);
+  const upper = randomPointInCells([0], viewport, grid, () => 0.999999);
+
+  assert.deepEqual(lower, { x: 5, y: 5, cells: [0] });
+  assert.deepEqual(upper, { x: 95, y: 95, cells: [0] });
+  assert.equal(gridSafeSampleRatio({}), 0.9);
+  assert.equal(gridSafeSampleRatio({ markGridSafeSampleRatio: 0.95 }), 0.95);
+  assert.equal(gridSafeSampleRatio({ gridSafeSampleRatio: 1 }), 1);
+  assert.equal(gridSafeSampleRatio({ gridSafeSampleRatio: 0 }), 0.9);
 });
 
 test('rejects model sequence fields outside the canonical schema', () => {
@@ -106,6 +167,36 @@ test('rejects model sequence fields outside the canonical schema', () => {
     () => normalizeSequence({ actions: [{ type: 'wait', start: 0 }] }, { viewport: { width: 800, height: 800 } }),
     /unknown sequence action type: wait/
   );
+});
+
+test('rejects model sequences that cannot produce gameplay actions', () => {
+  assert.throws(
+    () => normalizeSequence([], { viewport: { width: 800, height: 800 } }),
+    /model sequence must be a plain object/
+  );
+  assert.throws(
+    () => normalizeSequence({ summary: 'bad stop', actions: [], should_stop: 'false' }, { viewport: { width: 800, height: 800 } }),
+    /should_stop must be a boolean/
+  );
+  assert.throws(
+    () => normalizeSequence({ summary: 'bad stop', actions: [], should_stop: 1 }, { viewport: { width: 800, height: 800 } }),
+    /should_stop must be a boolean/
+  );
+  assert.throws(
+    () => normalizeSequence({ summary: 'thinking only' }, { viewport: { width: 800, height: 800 } }),
+    /actions must contain at least one action/
+  );
+  assert.throws(
+    () => normalizeSequence({ summary: 'no action', actions: [] }, { viewport: { width: 800, height: 800 } }),
+    /actions must contain at least one action/
+  );
+
+  const stopOnly = normalizeSequence(
+    { summary: 'done', actions: [], should_stop: true },
+    { viewport: { width: 800, height: 800 } }
+  );
+  assert.equal(stopOnly.shouldStop, true);
+  assert.deepEqual(stopOnly.actions, []);
 });
 
 test('drops model actions with invalid short-action timing', () => {
@@ -125,17 +216,51 @@ test('drops model actions with invalid short-action timing', () => {
   assert.equal(sequence.durationMs, 5000);
 });
 
+test('rejects model sequences when every requested action is dropped', () => {
+  assert.throws(
+    () => normalizeSequence(
+      {
+        actions: [
+          { type: 'click', start: 0, end: 500, x: 10, y: 10 },
+          { type: 'drag', start: 0, end: 2501, from: { x: 0, y: 0 }, to: { x: 10, y: 10 } },
+        ],
+      },
+      { viewport: { width: 800, height: 800 } }
+    ),
+    /all model actions were invalid after normalization/
+  );
+});
+
+test('clips agent actions to the shortened remaining step duration', () => {
+  const actions = actionsWithinDuration(
+    [
+      { type: 'key', start: 0, end: 800, key: 'ArrowRight' },
+      { type: 'drag', start: 100, end: 600, from: { x: 1, y: 1 }, to: { x: 2, y: 2 } },
+      { type: 'click', start: 490, end: 540, x: 10, y: 10 },
+      { type: 'click', start: 500, end: 550, x: 20, y: 20 },
+      { type: 'click', start: 900, end: 950, x: 30, y: 30 },
+    ],
+    500
+  );
+
+  assert.deepEqual(actions, [
+    { type: 'key', start: 0, end: 500, key: 'ArrowRight' },
+    { type: 'drag', start: 100, end: 500, from: { x: 1, y: 1 }, to: { x: 2, y: 2 } },
+    { type: 'click', start: 490, end: 500, x: 10, y: 10 },
+  ]);
+});
+
 test('normalizes controller grid-cell steps into concrete pointer events', () => {
   const step = normalizeStep(
     {
       actions: [
         { type: 'click', start: 100, cells: [0] },
-        { type: 'multi_click', start: 200, cells: [63], count: 3 },
-        { type: 'drag', start: 300, from_cells: [8], to_cells: [15] },
-        { type: 'cursor_move', start: 400, cells: [7] },
+        { type: 'multi_click', start: 200, cells: [255], count: 3 },
+        { type: 'drag', start: 300, from_cells: [20], to_cells: [39] },
+        { type: 'cursor_move', start: 400, cells: [19] },
       ],
     },
-    { viewport: { width: 800, height: 800 } },
+    { viewport: { width: 800, height: 800 }, markGridRows: 20, markGridCols: 20 },
     1
   );
 
@@ -143,13 +268,80 @@ test('normalizes controller grid-cell steps into concrete pointer events', () =>
   assert.equal(step.clicks.length, 4);
   assert.deepEqual(step.clicks.slice(1).map((click) => click.start), [200, 300, 400]);
   assert.deepEqual(step.clicks.slice(1).map((click) => click.end), [250, 350, 450]);
-  assert.ok(step.clicks[0].x >= 0 && step.clicks[0].x <= 99);
-  assert.ok(step.clicks[0].y >= 0 && step.clicks[0].y <= 99);
-  assert.ok(step.clicks.slice(1).every((click) => click.x >= 700 && click.x <= 799));
-  assert.ok(step.clicks.slice(1).every((click) => click.y >= 700 && click.y <= 799));
-  assert.deepEqual(step.drags[0].from.cells, [8]);
-  assert.deepEqual(step.drags[0].to.cells, [15]);
+  assert.ok(step.clicks[0].x >= 0 && step.clicks[0].x <= 39);
+  assert.ok(step.clicks[0].y >= 0 && step.clicks[0].y <= 39);
+  assert.ok(step.clicks.slice(1).every((click) => click.x >= 600 && click.x <= 639));
+  assert.ok(step.clicks.slice(1).every((click) => click.y >= 480 && click.y <= 519));
+  assert.deepEqual(step.drags[0].from.cells, [20]);
+  assert.deepEqual(step.drags[0].to.cells, [39]);
+  assert.deepEqual(step.cursorMoves[0].to.cells, [19]);
+});
+
+test('normalizes controller overlay row and column grid steps in strict mode', () => {
+  const step = normalizeStep(
+    {
+      actions: [
+        { type: 'click', start: 100, cell: { overlay_row: 1, overlay_col: 2 } },
+        { type: 'multi_click', start: 200, cells: [{ overlay_row: 2, overlay_col: 0 }, { overlay_row: 2, overlay_col: 1 }], count: 2 },
+        { type: 'drag', start: 300, from: { overlay_row: 3, overlay_col: 4 }, to: { overlay_row: 3, overlay_col: 5 } },
+        { type: 'cursor_move', start: 400, cell: { overlay_row: 0, overlay_col: 7 } },
+      ],
+    },
+    { viewport: { width: 800, height: 800 }, markGridRows: 8, markGridCols: 8 },
+    1
+  );
+
+  assert.equal(step.duration, 450);
+  assert.equal(step.clicks[0].cells[0], 10);
+  assert.ok(step.clicks[0].x >= 200 && step.clicks[0].x <= 299);
+  assert.ok(step.clicks[0].y >= 100 && step.clicks[0].y <= 199);
+  assert.equal(step.clicks.slice(1).length, 2);
+  assert.ok(step.clicks.slice(1).every((click) => [16, 17].includes(click.cells[0])));
+  assert.deepEqual(step.drags[0].from.cells, [28]);
+  assert.deepEqual(step.drags[0].to.cells, [29]);
   assert.deepEqual(step.cursorMoves[0].to.cells, [7]);
+});
+
+test('mark grid overlay keeps labels in the margins', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-grid-overlay-test-'));
+  const file = path.join(dir, 'screen.png');
+  const png = new PNG({ width: 240, height: 160 });
+  for (let y = 0; y < png.height; y += 1) {
+    for (let x = 0; x < png.width; x += 1) {
+      const index = (png.width * y + x) << 2;
+      png.data[index] = x % 256;
+      png.data[index + 1] = y % 256;
+      png.data[index + 2] = (x + y) % 256;
+      png.data[index + 3] = 255;
+    }
+  }
+  fs.writeFileSync(file, PNG.sync.write(png));
+
+  drawMarkGridOnScreenshot(file, { markGridRows: 20, markGridCols: 20 });
+  const output = PNG.sync.read(fs.readFileSync(file));
+  const marginX = (output.width - png.width) / 2;
+  const marginY = (output.height - png.height) / 2;
+  const cellWidth = png.width / 20;
+  const cellHeight = png.height / 20;
+
+  assert.ok(output.width > png.width);
+  assert.ok(output.height > png.height);
+  assert.equal(marginX, marginY);
+  assert.ok(marginX > 0);
+
+  for (let y = 1; y < png.height - 1; y += 1) {
+    for (let x = 1; x < png.width - 1; x += 1) {
+      const nearVerticalLine = Math.abs((x / cellWidth) - Math.round(x / cellWidth)) < 0.08;
+      const nearHorizontalLine = Math.abs((y / cellHeight) - Math.round(y / cellHeight)) < 0.12;
+      if (nearVerticalLine || nearHorizontalLine) continue;
+
+      const sourceIndex = (png.width * y + x) << 2;
+      const outputIndex = (output.width * (y + marginY) + x + marginX) << 2;
+      assert.equal(output.data[outputIndex], png.data[sourceIndex]);
+      assert.equal(output.data[outputIndex + 1], png.data[sourceIndex + 1]);
+      assert.equal(output.data[outputIndex + 2], png.data[sourceIndex + 2]);
+    }
+  }
 });
 
 test('infers controller duration from action timing fields only', () => {
@@ -423,6 +615,139 @@ test('agent loop records schema-invalid model sequences as failed actions withou
   assert.equal(modelScreenshots[0], modelScreenshots[1]);
 });
 
+test('agent loop retries when model actions all normalize away', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-empty-normalized-action-test-'));
+  const screenshot = path.join(dir, 'screen.png');
+  const afterScreenshot = path.join(dir, 'after-screen.png');
+  fs.writeFileSync(screenshot, 'initial screenshot bytes');
+  fs.writeFileSync(afterScreenshot, 'after screenshot bytes');
+
+  const modelScreenshots = [];
+  let calls = 0;
+  const controllerActions = [];
+  const result = await runAgenticPlaytest({
+    job: {
+      playtestDurationMs: 9000,
+      agentMinPlaytestMs: 0,
+      viewport: { width: 640, height: 360 },
+      agentMaxModelFallbacks: 2,
+    },
+    initialResponse: {
+      screenshot,
+      state: { screen: 'unchanged' },
+    },
+    outputDir: path.join(dir, 'agent'),
+    modelClient: async ({ messages }) => {
+      calls += 1;
+      const image = messages[0].content.find((item) => item.type === 'image_url');
+      modelScreenshots.push(image.image_url.url);
+      if (calls === 1) {
+        return {
+          model: 'fake-model',
+          text: '{"summary":"bad timing","actions":[{"type":"click","start":0,"end":500,"x":10,"y":10}]}',
+          usage: { total_tokens: 1 },
+          json: {
+            summary: 'bad timing',
+            actions: [{ type: 'click', start: 0, end: 500, x: 10, y: 10 }],
+          },
+        };
+      }
+      return {
+        model: 'fake-model',
+        text: '{"summary":"valid","actions":[{"type":"key","start":0,"end":500,"key":"Enter"}],"should_stop":true}',
+        usage: { total_tokens: 1 },
+        json: {
+          summary: 'valid',
+          actions: [{ type: 'key', start: 0, end: 500, key: 'Enter' }],
+          should_stop: true,
+        },
+      };
+    },
+    runAction: async (action) => {
+      controllerActions.push(action);
+      return { ok: true, action: 'step', captures: [{ path: afterScreenshot }], endState: { screen: 'after' } };
+    },
+  });
+
+  assert.equal(result.steps, 2);
+  assert.equal(result.modelErrorCount, 1);
+  assert.equal(controllerActions.length, 1);
+  assert.equal(controllerActions[0].action, 'step');
+  assert.equal(result.history[0].failedAction, true);
+  assert.equal(result.history[0].actions[0].type, 'failed_action');
+  assert.match(result.history[0].result.error, /all model actions were invalid after normalization/);
+  assert.equal(result.history[0].result.screenshot, screenshot);
+  assert.equal(result.history[0].result.screenshotChanged, false);
+  assert.deepEqual(result.history[0].result.state, { screen: 'unchanged' });
+  assert.equal(result.history[1].actions[0].key, 'Enter');
+  assert.equal(modelScreenshots[0], modelScreenshots[1]);
+});
+
+test('agent loop retries when clipped timing removes every action', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-empty-clipped-action-test-'));
+  const screenshot = path.join(dir, 'screen.png');
+  const afterScreenshot = path.join(dir, 'after-screen.png');
+  fs.writeFileSync(screenshot, 'initial screenshot bytes');
+  fs.writeFileSync(afterScreenshot, 'after screenshot bytes');
+
+  const modelScreenshots = [];
+  let calls = 0;
+  const controllerActions = [];
+  const result = await runAgenticPlaytest({
+    job: {
+      playtestDurationMs: 6000,
+      agentMinPlaytestMs: 0,
+      viewport: { width: 640, height: 360 },
+      agentMaxModelFallbacks: 2,
+    },
+    initialResponse: {
+      screenshot,
+      state: { screen: 'unchanged' },
+    },
+    outputDir: path.join(dir, 'agent'),
+    modelClient: async ({ messages }) => {
+      calls += 1;
+      const image = messages[0].content.find((item) => item.type === 'image_url');
+      modelScreenshots.push(image.image_url.url);
+      if (calls === 1) {
+        return {
+          model: 'fake-model',
+          text: '{"summary":"starts too late","actions":[{"type":"key","start":2000,"end":2500,"key":"Enter"}]}',
+          usage: { total_tokens: 1 },
+          json: {
+            summary: 'starts too late',
+            actions: [{ type: 'key', start: 2000, end: 2500, key: 'Enter' }],
+          },
+        };
+      }
+      return {
+        model: 'fake-model',
+        text: '{"summary":"valid","actions":[{"type":"key","start":0,"end":100,"key":"Enter"}],"should_stop":true}',
+        usage: { total_tokens: 1 },
+        json: {
+          summary: 'valid',
+          actions: [{ type: 'key', start: 0, end: 100, key: 'Enter' }],
+          should_stop: true,
+        },
+      };
+    },
+    runAction: async (action) => {
+      controllerActions.push(action);
+      return { ok: true, action: 'step', captures: [{ path: afterScreenshot }], endState: { screen: 'after' } };
+    },
+  });
+
+  assert.equal(result.steps, 2);
+  assert.equal(result.modelErrorCount, 1);
+  assert.equal(controllerActions.length, 1);
+  assert.equal(controllerActions[0].actions[0].key, 'Enter');
+  assert.equal(result.history[0].failedAction, true);
+  assert.match(result.history[0].result.error, /outside the remaining sequence duration/);
+  assert.equal(result.history[0].result.screenshotChanged, false);
+  assert.equal(result.history[1].actions[0].key, 'Enter');
+  assert.equal(modelScreenshots[0], modelScreenshots[1]);
+});
+
 test('agent loop records action execution failures and retries with the same screenshot', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-agent-execution-failed-action-test-'));
   const screenshot = path.join(dir, 'screen.png');
@@ -616,21 +941,37 @@ test('playtester prompt warns when recent sequences repeat', () => {
 
   assert.match(prompt, /Warning:/);
   assert.match(prompt, /Space, Enter, Escape, and P/);
-  assert.match(prompt, /"type": "drag"/);
+  assert.match(prompt, /"type":"drag"/);
   assert.match(prompt, /Single Player/);
   assert.match(prompt, /Do not spend turns only describing or waiting on a menu/);
-  assert.match(prompt, /8x8 red mark grid/);
-  assert.match(prompt, /"type": "multi_click"/);
-  assert.match(prompt, /Each action must have a "type"/);
-  assert.match(prompt, /"actions":/);
-  assert.match(prompt, /"start": 0/);
-  assert.match(prompt, /"end": 300/);
-  assert.match(prompt, /runner will send that duration explicitly/);
-  assert.match(prompt, /Leave at least 100ms after the final click, drag, multi_click, or cursor_move/);
+  assert.match(prompt, /light 16x16 red mark grid/);
+  assert.match(prompt, /Overlay column labels are in the top\/bottom margins/);
+  assert.match(prompt, /"type":"multi_click"/);
+  assert.match(prompt, /JSON output contract/);
+  assert.match(prompt, /Top-level keys must be exactly/);
+  assert.match(prompt, /"actions"/);
+  assert.match(prompt, /"start":0/);
+  assert.match(prompt, /"end":500/);
+  assert.match(prompt, /RunWave adds a short default/);
+  assert.match(prompt, /"cell":\{"overlay_row":8,"overlay_col":8\}/);
+  assert.match(prompt, /overlay grid targeting/);
+  assert.match(prompt, /reason about that game structure separately/);
+  assert.match(prompt, /failed about 3-5 times/);
+  assert.match(prompt, /learn the pattern/);
+  assert.match(prompt, /Every non-stop response must include at least one action/);
   assert.doesNotMatch(prompt, /"commands":/);
   assert.doesNotMatch(prompt, /duration_ms/);
   assert.doesNotMatch(prompt, /"clicks":/);
   assert.doesNotMatch(prompt, /"multi_clicks":/);
+});
+
+test('sequence schema guide uses configured overlay row and column grid examples', () => {
+  const guide = sequenceSchemaGuide({ rows: 16, cols: 16 });
+
+  assert.match(guide, /overlay_row\/overlay_col targets from the 16x16 overlay/);
+  assert.match(guide, /"cell":\{"overlay_row":8,"overlay_col":8\}/);
+  assert.match(guide, /"from":\{"overlay_row":8,"overlay_col":8\}/);
+  assert.match(guide, /"to":\{"overlay_row":8,"overlay_col":9\}/);
 });
 
 test('playtester prompt includes game-specific playtest instructions', () => {

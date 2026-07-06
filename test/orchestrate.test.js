@@ -52,7 +52,7 @@ test('agent fleet jobs allow explicit minimum play time override', () => {
   assert.equal(job.agentMinPlaytestMs, 170000);
 });
 
-test('fleet jobs can enable VLM viewport preflight', () => {
+test('fleet jobs carry mark grid dimensions', () => {
   const args = parseArgs([
     'node',
     'ops/orchestrate-playtests.js',
@@ -63,15 +63,16 @@ test('fleet jobs can enable VLM viewport preflight', () => {
     '--games',
     'mario-html5',
     '--agent',
-    '--vlm-viewport-preflight',
-    '--viewport-preflight-attempts',
-    '2',
+    '--mark-grid-rows',
+    '16',
+    '--mark-grid-cols',
+    '24',
   ]);
 
   const [job] = buildJobs(args, ['mario-html5']);
 
-  assert.equal(job.vlmViewportPreflight, true);
-  assert.equal(job.viewportPreflightAttempts, 2);
+  assert.equal(job.markGridRows, 16);
+  assert.equal(job.markGridCols, 24);
 });
 
 test('known SwiftShader-sensitive games require hardware WebGL launch args', () => {

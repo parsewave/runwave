@@ -170,7 +170,36 @@ function parseActionResponse(result, action) {
   return response;
 }
 
-function harnessArgs(runwaveBin, action, verbose) {
+function validateRecordingArtifact(stopResponse) {
+  const video = stopResponse && (stopResponse.audioVideo || stopResponse.video);
+  if (!video || typeof video !== 'string') {
+    throw new Error('runwave stop did not return an audio/video recording path');
+  }
+  let stat;
+  try {
+    stat = fs.statSync(video);
+  } catch (error) {
+    throw new Error(`runwave recording is missing: ${video}`);
+  }
+  if (!stat.isFile() || stat.size <= 0) {
+    throw new Error(`runwave recording is empty or invalid: ${video}`);
+  }
+  return { path: video, bytes: stat.size };
+}
+
+function buildAgentJob({ playtestDurationMs, minPlaytestMs, viewport, playtestInstructions, start = {} }) {
+  return {
+    playtestDurationMs,
+    agentMinPlaytestMs: minPlaytestMs ?? Math.max(0, playtestDurationMs - 10000),
+    viewport,
+    videoSize: viewport,
+    playtestInstructions,
+    markGridRows: start.markGridRows,
+    markGridCols: start.markGridCols,
+  };
+}
+
+function controllerArgs(runwaveBin, action, verbose) {
   const args = [runwaveBin];
   if (verbose) args.push('-v');
   args.push(JSON.stringify(action));
@@ -246,11 +275,12 @@ async function runPlaytest(options) {
   fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2));
 
   let gameProcess = null;
-  let harnessStarted = false;
+  let controllerStarted = false;
+  let failure = null;
 
-  const runHarnessAction = async (action) => {
+  const runControllerAction = async (action) => {
     const payload = { ...action, session_id: action.session_id || runwaveSessionId };
-    const result = await run('node', harnessArgs(runwaveBin, payload, verbose), { cwd: absoluteOutDir, env }, log);
+    const result = await run('node', controllerArgs(runwaveBin, payload, verbose), { cwd: absoluteOutDir, env }, log);
     return parseActionResponse(result, payload);
   };
 
@@ -283,25 +313,25 @@ async function runPlaytest(options) {
       sessionWaitMs: 120000,
     };
 
-    const initialResponse = await runHarnessAction(start);
-    harnessStarted = true;
+    const initialResponse = await runControllerAction(start);
+    controllerStarted = true;
 
     if (typeof onInitialResponse === 'function') {
       await onInitialResponse(initialResponse);
     }
 
-    const job = {
+    const job = buildAgentJob({
       playtestDurationMs,
-      agentMinPlaytestMs: minPlaytestMs ?? Math.max(0, playtestDurationMs - 10000),
       viewport,
-      videoSize: viewport,
       playtestInstructions,
-    };
+      start,
+      minPlaytestMs,
+    });
 
     const playtest = await runAgenticPlaytest({
       job,
       initialResponse,
-      runAction: runHarnessAction,
+      runAction: runControllerAction,
       outputDir: path.join(absoluteOutDir, 'agent'),
       log,
     });
@@ -316,17 +346,22 @@ async function runPlaytest(options) {
     summary.viewport = viewport;
     summary.status = 'passed';
   } catch (error) {
+    failure = error;
     summary.status = 'failed';
     summary.error = error.message;
     summary.stack = error.stack;
     log('playtest.error', { error: error.message });
-    throw Object.assign(error, { summary });
   } finally {
-    if (harnessStarted) {
+    if (controllerStarted) {
       try {
-        await runHarnessAction({ action: 'stop', action_name: 'stop', session_id: runwaveSessionId });
+        const stopResponse = await runControllerAction({ action: 'stop', action_name: 'stop', session_id: runwaveSessionId });
+        summary.recording = validateRecordingArtifact(stopResponse);
       } catch (error) {
-        log('harness.stop.error', { error: error.message });
+        if (!failure) failure = error;
+        summary.status = 'failed';
+        summary.error = summary.error || error.message;
+        summary.recordingError = error.message;
+        log('controller.stop.error', { error: error.message });
       }
     }
     if (gameProcess) {
@@ -344,9 +379,12 @@ async function runPlaytest(options) {
     log('playtest.end', { status: summary.status });
   }
 
+  if (failure) throw Object.assign(failure, { summary });
   return summary;
 }
 
 module.exports = {
+  buildAgentJob,
   runPlaytest,
+  validateRecordingArtifact,
 };

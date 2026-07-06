@@ -112,6 +112,7 @@ function render(runs, artifacts) {
       <div class="transport">
         <button type="button" data-action="play">Play</button>
         <button type="button" data-action="pause">Pause</button>
+        <button type="button" data-action="fullscreen">Fullscreen</button>
         <input class="seek" type="range" min="0" max="1000" value="0" step="1" data-action="seek" aria-label="Seek ${escapeHtml(run.game)}" disabled>
         <span class="time" aria-live="off">0:00 / 0:00</span>
       </div>
@@ -238,6 +239,24 @@ function render(runs, artifacts) {
       }
     };
 
+    const fullscreenVideo = async (video) => {
+      if (!video) return false;
+      applyCardVolume(video.closest('.card'));
+      try {
+        if (video.requestFullscreen) {
+          await video.requestFullscreen();
+          return true;
+        }
+        if (video.webkitEnterFullscreen) {
+          video.webkitEnterFullscreen();
+          return true;
+        }
+      } catch {
+        return false;
+      }
+      return false;
+    };
+
     const renderGrid = () => {
       const matches = matchingCards();
       const visible = new Set(matches);
@@ -267,6 +286,7 @@ function render(runs, artifacts) {
       const video = card?.querySelector('video');
       if (button.dataset.action === 'play') playVideo(video);
       if (button.dataset.action === 'pause') video?.pause();
+      if (button.dataset.action === 'fullscreen') fullscreenVideo(video);
       if (button.dataset.action === 'volume') {
         card.dataset.volume = card.dataset.volume === 'off' ? 'on' : 'off';
         applyCardVolume(card);

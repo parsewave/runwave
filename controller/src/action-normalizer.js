@@ -3,12 +3,25 @@
 const {
   cellsFromObject,
   clickBurstTimes,
+  gridSafeSampleRatio,
   markGridFromConfig,
   randomPointInCells,
   viewportFromConfig,
 } = require('./mark-grid');
 
-const CELL_FIELDS = ['cells', 'grid_cells', 'gridCells', 'grid_ids', 'gridIds', 'cell', 'grid_id'];
+const CELL_FIELDS = [
+  'cells',
+  'grid_cells',
+  'gridCells',
+  'grid_ids',
+  'gridIds',
+  'cell',
+  'grid_id',
+  'overlay_row',
+  'overlay_col',
+  'row',
+  'col',
+];
 const POINT_FIELDS = new Set(['x', 'y', ...CELL_FIELDS]);
 
 const ACTION_FIELDS = {
@@ -172,7 +185,13 @@ function normalizePoint(point, label, options) {
   const cells = cellsFromObject(point, grid, 4);
   if (cells.length) {
     try {
-      return randomPointInCells(cells, viewport, grid);
+      return randomPointInCells(
+        cells,
+        viewport,
+        grid,
+        Math.random,
+        gridSafeSampleRatio(options.config || {})
+      );
     } catch (error) {
       if (options.strict) throw new Error(`${label} ${error.message}`);
       return null;

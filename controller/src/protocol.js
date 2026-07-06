@@ -1,5 +1,6 @@
 const path = require('path');
 const { pathToFileURL } = require('url');
+const { DEFAULT_MARK_GRID } = require('./mark-grid');
 const { workspaceRoot } = require('./paths');
 
 function usage() {
@@ -121,7 +122,7 @@ function startSessionConfig(input, options = {}) {
   return {
     launchUrl: targetUrl(input, options),
     browser: {
-      headless: input.headless !== false,
+      headless: record ? false : input.headless !== false,
       channel: optionalString(input.channel),
       executablePath: optionalString(input.executablePath),
       chromiumArgsMode: String(input.chromiumArgsMode || process.env.RUNWAVE_CHROMIUM_ARGS_MODE || 'append').toLowerCase(),
@@ -145,8 +146,8 @@ function startSessionConfig(input, options = {}) {
       finalScreenshot: input.finalScreenshot !== false,
       fullPageScreenshots: Boolean(input.fullPageScreenshots),
       gridScreenshots: input.gridScreenshots !== false,
-      markGridRows: optionalNumber(input.markGridRows ?? input.gridRows, 8),
-      markGridCols: optionalNumber(input.markGridCols ?? input.gridCols, 8),
+      markGridRows: optionalNumber(input.markGridRows ?? input.gridRows, DEFAULT_MARK_GRID.rows),
+      markGridCols: optionalNumber(input.markGridCols ?? input.gridCols, DEFAULT_MARK_GRID.cols),
     },
   };
 }

@@ -22,7 +22,7 @@ function usage() {
     '  --playtest-duration-ms <n>   max playtest wall time in ms (default 150000)',
     '  --min-playtest-ms <n>        floor before the agent may self-stop (default duration - 10000)',
     '  --model <slug>               OpenRouter model slug (sets RUNWAVE_AGENT_MODEL)',
-    '  --verbose, -v                forward verbose flag to the runwave harness',
+    '  --verbose, -v                forward verbose flag to the runwave controller',
     '  --help, -h                   show this help',
   ].join('\n');
 }

@@ -5,7 +5,11 @@ description: Run 20 or more simultaneous browser-game playtests with runwave usi
 
 # Runwave Playtest Fleet
 
-Use this skill to run a many-game browser playtest batch end to end: discover games from S3, run one isolated runwave job per game, upload artifacts to S3, download artifacts into `cruft/playtests`, and build a video viewer.
+Use this skill to run an agentic many-game browser playtest batch end to end:
+discover games from S3, run one isolated OpenRouter-planned runwave job per
+game, upload artifacts to S3, download artifacts into `cruft/playtests`, and
+build a video viewer. Scripted mode is only for local smoke tests and controller
+debugging, not for real fleet results.
 
 ## Defaults
 
@@ -48,12 +52,15 @@ Required for SSH access to workers:
 - Hetzner SSH key name via `RUNWAVE_SSH_KEY_NAME` / `SSH_KEY_NAME`, or inferred
   from the matching local public key
 
-Often required by the playtester or runwave-adjacent agent layer, depending on
-the selected planner/model:
+Required by the current agentic playtester:
+
+- `OPENROUTER_API_KEY`
+
+Sometimes required by runwave-adjacent tooling, depending on the selected
+planner/model or private repo access:
 
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
-- `OPENROUTER_API_KEY`
 - `PARSEWAVE_API_TOKEN`
 - `GITHUB_ACCESS_TOKEN` or `GH_TOKEN`, if private runwave refs/repos are used
 
@@ -139,8 +146,6 @@ node ops/orchestrate-playtests.js \
   --runwave-ref runwave-agentic-player \
   --playtest-duration-ms 120000 \
   --agent-min-playtest-ms 110000 \
-  --vlm-viewport-preflight \
-  --viewport-preflight-attempts 2 \
   --ssh-key "$RUNWAVE_SSH_KEY" \
   --agent \
   --concurrency-per-server 3
@@ -159,11 +164,6 @@ s3://pw-cruft/playtests/<run-id>/<game>/attempt-001/
 For agent jobs, if `--agent-min-playtest-ms` is omitted, the orchestrator sets
 it to `--playtest-duration-ms - 10000`. A 120 second run therefore requires
 about 110 seconds of agent play before early stop is allowed.
-
-Use `--vlm-viewport-preflight --viewport-preflight-attempts 2` when visual
-framing matters. This asks the VLM to choose among deterministic viewport
-candidates before the agent starts playing, with one retry before deterministic
-fallback.
 
 ## Local Fallback
 
@@ -196,12 +196,14 @@ done < <(find cruft/playtests/_games-cache -mindepth 2 -maxdepth 2 -name package
   "port": 9300,
   "runwaveRepo": "https://github.com/parsewave/runwave",
   "runwaveRef": "main",
+  "playMode": "agent",
   "playtestDurationMs": 120000,
-  "s3Uri": "s3://pw-cruft/playtests/<run-id>/<game>/attempt-001",
-  "viewport": { "width": 960, "height": 540 },
-  "videoSize": { "width": 960, "height": 540 }
+  "s3Uri": "s3://pw-cruft/playtests/<run-id>/<game>/attempt-001"
 }
 ```
+
+Remote jobs read `viewport` and `videoSize` from the game's `metadata.json`.
+Do not put those fields in normal fleet job specs.
 
 4. Run jobs with:
 
@@ -253,10 +255,7 @@ node ops/build-playtest-viewer.js \
 ```
 
 The viewer is static HTML with filterable cards, embedded WebM videos,
-screenshot strips, and links to each `summary.json`. It must page the run list
-in groups of four games, autoplay only the currently visible four videos muted,
-pause/unload videos outside the current page, and provide Previous/Next controls
-to move through the rest of the run without decoding all 20+ videos at once.
+fullscreen controls, poster screenshots, and links to each `summary.json`.
 
 ## Verification
 
