@@ -283,7 +283,7 @@ async function runPlaytest(options) {
   const playtestInstructions = loadPlaytestInstructions(playtestMd);
 
   const runwaveRoot = path.resolve(__dirname, '..');
-  const runwaveBin = path.join(runwaveRoot, 'bin', 'runwave.js');
+  const runwaveBin = path.join(runwaveRoot, 'controller', 'bin', 'runwave.js');
   const agentPlayerPath = path.join(runwaveRoot, 'agent', 'src', 'agent-player.js');
   const { runAgenticPlaytest } = require(agentPlayerPath);
 

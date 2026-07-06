@@ -6,7 +6,7 @@ const { spawnSync } = require('child_process');
 const test = require('node:test');
 
 const packageRoot = path.resolve(__dirname, '..');
-const cli = path.join(packageRoot, 'bin', 'runwave.js');
+const cli = path.join(packageRoot, 'controller', 'bin', 'runwave.js');
 
 function recordingPrerequisitesMissing() {
   if (process.platform !== 'linux') return 'not linux';
