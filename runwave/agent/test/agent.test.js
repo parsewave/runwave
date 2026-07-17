@@ -974,6 +974,23 @@ test('sequence schema guide uses configured overlay row and column grid examples
   assert.match(guide, /"to":\{"overlay_row":8,"overlay_col":9\}/);
 });
 
+test('playtester prompt uses native Linux wording for linux targets', () => {
+  const prompt = buildPlaytesterPrompt({
+    job: { targetKind: 'linux' },
+    elapsedMs: 10000,
+    maxMs: 120000,
+    viewport: { width: 1280, height: 720 },
+    state: { targetKind: 'linux', window: { width: 1280, height: 720 } },
+    history: [],
+  });
+
+  assert.match(prompt, /native Linux-game playtester/);
+  assert.match(prompt, /Linux game state JSON/);
+  assert.match(prompt, /browser-only html5 drag\/drop is not available/);
+  assert.doesNotMatch(prompt, /literal Playwright keys/);
+  assert.doesNotMatch(prompt, /state JSON reports a canvas/);
+});
+
 test('playtester prompt includes game-specific playtest instructions', () => {
   const prompt = buildPlaytesterPrompt({
     job: {

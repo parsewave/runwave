@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { buildAgentJob, validateRecordingArtifact } = require('..');
+const { buildAgentJob, buildStartAction, effectiveViewport, validateRecordingArtifact } = require('..');
 
 test('playtest agent job inherits mark grid dimensions from the start action', () => {
   const job = buildAgentJob({
@@ -20,6 +20,7 @@ test('playtest agent job inherits mark grid dimensions from the start action', (
     },
   });
 
+  assert.equal(job.targetKind, 'web');
   assert.equal(job.playtestDurationMs, 180000);
   assert.equal(job.agentMinPlaytestMs, 120000);
   assert.deepEqual(job.viewport, { width: 1280, height: 720 });
@@ -27,6 +28,40 @@ test('playtest agent job inherits mark grid dimensions from the start action', (
   assert.equal(job.playtestInstructions, '# Controls\n\n- Start: Enter.\n');
   assert.equal(job.markGridRows, 16);
   assert.equal(job.markGridCols, 24);
+});
+
+test('linux playtests build a native controller start action without a web URL', () => {
+  const start = buildStartAction({
+    targetKind: 'linux',
+    runwaveSessionId: 'linux-session',
+    viewport: { width: 1280, height: 720 },
+    absoluteGameDir: '/games/native',
+    startOverrides: {
+      windowTitle: 'Native Game',
+      windowWaitMs: 30000,
+    },
+  });
+
+  assert.equal(start.kind, 'linux');
+  assert.equal(start.command, 'bash');
+  assert.deepEqual(start.args, ['start.sh']);
+  assert.equal(start.cwd, '/games/native');
+  assert.equal(start.windowTitle, 'Native Game');
+  assert.equal(start.windowWaitMs, 30000);
+  assert.equal(start.url, undefined);
+  assert.equal(start.record, true);
+  assert.equal(start.force, true);
+});
+
+test('agent viewport follows the effective controller state when available', () => {
+  assert.deepEqual(
+    effectiveViewport({ output: { state: { viewport: { width: 801.3, height: 599.7 } } } }, { width: 1280, height: 720 }),
+    { width: 801, height: 600 }
+  );
+  assert.deepEqual(
+    effectiveViewport({ output: { state: {} } }, { width: 1280, height: 720 }),
+    { width: 1280, height: 720 }
+  );
 });
 
 test('playtest recording validation requires a non-empty WebM artifact', () => {

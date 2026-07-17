@@ -58,12 +58,17 @@ def run_playtest(
     *,
     game_dir: PathLike,
     out_dir: PathLike,
-    port: int,
+    port: Optional[int] = None,
+    target_kind: str = "web",
     openrouter_api_key: Optional[str] = None,
     viewport: Optional[Mapping[str, int]] = None,
     playtest_duration_ms: Optional[int] = None,
     min_playtest_ms: Optional[int] = None,
     model: Optional[str] = None,
+    window_title: Optional[str] = None,
+    window_class: Optional[str] = None,
+    window_id: Optional[str] = None,
+    window_wait_ms: Optional[int] = None,
     verbose: bool = False,
     cli_path: Optional[PathLike] = None,
     env: Optional[Mapping[str, str]] = None,
@@ -80,7 +85,10 @@ def run_playtest(
         Created if it does not exist.
     port:
         Port passed to ``start.sh`` via ``PORT=`` and used as
-        ``http://127.0.0.1:<port>/``.
+        ``http://127.0.0.1:<port>/``. Required for web games; ignored for
+        native Linux games.
+    target_kind:
+        ``"web"`` for browser games or ``"linux"`` for native Linux games.
     openrouter_api_key:
         OpenRouter API key. If omitted, ``OPENROUTER_API_KEY`` must already be
         in the environment (or in ``env``).
@@ -126,8 +134,10 @@ def run_playtest(
         resolved_cli,
         "--game-dir", str(game_dir_path),
         "--out-dir", str(out_dir_path),
-        "--port", str(port),
+        "--kind", target_kind,
     ]
+    if port is not None:
+        args += ["--port", str(port)]
     if viewport is not None:
         args += ["--viewport", f"{viewport['width']}x{viewport['height']}"]
     if playtest_duration_ms is not None:
@@ -136,6 +146,14 @@ def run_playtest(
         args += ["--min-playtest-ms", str(min_playtest_ms)]
     if model:
         args += ["--model", model]
+    if window_title:
+        args += ["--window-title", window_title]
+    if window_class:
+        args += ["--window-class", window_class]
+    if window_id:
+        args += ["--window-id", window_id]
+    if window_wait_ms is not None:
+        args += ["--window-wait-ms", str(window_wait_ms)]
     if verbose:
         args.append("--verbose")
 

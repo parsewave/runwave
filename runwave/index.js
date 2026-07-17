@@ -4,6 +4,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { spawn } = require('child_process');
+const { normalizeTargetKind } = require('./controller/src/protocol');
 
 const DEFAULT_PLAYTEST_DURATION_MS = 150000;
 const DEFAULT_PROCESS_STOP_WAIT_MS = 5000;
@@ -187,8 +188,9 @@ function validateRecordingArtifact(stopResponse) {
   return { path: video, bytes: stat.size };
 }
 
-function buildAgentJob({ playtestDurationMs, minPlaytestMs, viewport, playtestInstructions, start = {} }) {
+function buildAgentJob({ playtestDurationMs, minPlaytestMs, viewport, playtestInstructions, start = {}, targetKind = 'web' }) {
   return {
+    targetKind,
     playtestDurationMs,
     agentMinPlaytestMs: minPlaytestMs ?? Math.max(0, playtestDurationMs - 10000),
     viewport,
@@ -196,6 +198,65 @@ function buildAgentJob({ playtestDurationMs, minPlaytestMs, viewport, playtestIn
     playtestInstructions,
     markGridRows: start.markGridRows,
     markGridCols: start.markGridCols,
+  };
+}
+
+function responseState(response) {
+  return (response && response.output && response.output.state) || (response && response.state) || null;
+}
+
+function effectiveViewport(response, fallback) {
+  const state = responseState(response);
+  const viewport = state && state.viewport;
+  if (
+    viewport
+    && Number.isFinite(Number(viewport.width))
+    && Number(viewport.width) > 0
+    && Number.isFinite(Number(viewport.height))
+    && Number(viewport.height) > 0
+  ) {
+    return { width: Math.round(Number(viewport.width)), height: Math.round(Number(viewport.height)) };
+  }
+  return fallback;
+}
+
+function buildStartAction({
+  targetKind,
+  runwaveSessionId,
+  viewport,
+  startOverrides = {},
+  absoluteGameDir,
+  url,
+}) {
+  const common = {
+    ...startOverrides,
+    action: 'start',
+    action_name: 'start',
+    session_id: runwaveSessionId,
+    kind: targetKind,
+    record: true,
+    viewport,
+    videoSize: startOverrides.videoSize || viewport,
+    outputRoot: 'state/output',
+    outDir: 'recordings/session',
+    initialScreenshot: true,
+    force: true,
+    sessionWaitMs: 120000,
+  };
+
+  if (targetKind === 'linux') {
+    return {
+      ...common,
+      command: startOverrides.command || startOverrides.launchCommand || 'bash',
+      args: startOverrides.args || startOverrides.launchArgs || ['start.sh'],
+      cwd: startOverrides.cwd || startOverrides.launchCwd || absoluteGameDir,
+    };
+  }
+
+  return {
+    ...common,
+    url,
+    headless: false,
   };
 }
 
@@ -225,11 +286,15 @@ async function runPlaytest(options) {
     startOverrides = {},
     env: envOverrides = {},
     onInitialResponse,
+    kind,
+    targetKind: requestedTargetKind,
+    gameKind,
   } = options || {};
 
+  const targetKind = normalizeTargetKind(kind ?? requestedTargetKind ?? gameKind ?? startOverrides.kind ?? startOverrides.targetKind);
   if (!gameDir) throw new Error('runPlaytest: gameDir is required');
   if (!outDir) throw new Error('runPlaytest: outDir is required');
-  if (!port) throw new Error('runPlaytest: port is required');
+  if (targetKind === 'web' && !port) throw new Error('runPlaytest: port is required for web games');
   if (!openRouterApiKey) throw new Error('runPlaytest: openRouterApiKey is required');
   if (!viewport || !Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) || viewport.width <= 0 || viewport.height <= 0) {
     throw new Error('runPlaytest: viewport {width,height} is required');
@@ -261,7 +326,8 @@ async function runPlaytest(options) {
   const summary = {
     gameDir: absoluteGameDir,
     outDir: absoluteOutDir,
-    port,
+    targetKind,
+    ...(targetKind === 'web' ? { port } : {}),
     playtestDurationMs,
     minPlaytestMs: minPlaytestMs ?? Math.max(0, playtestDurationMs - 10000),
     model: model || env.RUNWAVE_AGENT_MODEL || env.OPENROUTER_MODEL || null,
@@ -284,33 +350,28 @@ async function runPlaytest(options) {
   };
 
   try {
-    log('playtest.start', { gameDir: absoluteGameDir, port, playtestDurationMs });
+    log('playtest.start', { gameDir: absoluteGameDir, targetKind, port: targetKind === 'web' ? port : undefined, playtestDurationMs });
 
-    gameProcess = spawnLong('bash', ['start.sh'], {
-      cwd: absoluteGameDir,
-      env: { ...env, PORT: String(port) },
-    }, log);
+    let url = null;
+    if (targetKind === 'web') {
+      gameProcess = spawnLong('bash', ['start.sh'], {
+        cwd: absoluteGameDir,
+        env: { ...env, PORT: String(port) },
+      }, log);
 
-    const url = `http://127.0.0.1:${port}/`;
-    await waitForHttp(url, httpTimeoutMs);
-    log('game.ready', { url });
+      url = `http://127.0.0.1:${port}/`;
+      await waitForHttp(url, httpTimeoutMs);
+      log('game.ready', { url });
+    }
 
-    const start = {
-      ...startOverrides,
-      action: 'start',
-      action_name: 'start',
-      session_id: runwaveSessionId,
-      url,
-      record: true,
-      headless: false,
+    const start = buildStartAction({
+      targetKind,
+      runwaveSessionId,
       viewport,
-      videoSize: startOverrides.videoSize || viewport,
-      outputRoot: 'state/output',
-      outDir: 'recordings/session',
-      initialScreenshot: true,
-      force: true,
-      sessionWaitMs: 120000,
-    };
+      startOverrides,
+      absoluteGameDir,
+      url,
+    });
 
     const initialResponse = await runControllerAction(start);
     controllerStarted = true;
@@ -321,10 +382,11 @@ async function runPlaytest(options) {
 
     const job = buildAgentJob({
       playtestDurationMs,
-      viewport,
+      viewport: effectiveViewport(initialResponse, viewport),
       playtestInstructions,
       start,
       minPlaytestMs,
+      targetKind,
     });
 
     const playtest = await runAgenticPlaytest({
@@ -342,7 +404,7 @@ async function runPlaytest(options) {
       stoppedByAgent: playtest.stoppedByAgent,
       outputDir: playtest.outputDir,
     };
-    summary.viewport = viewport;
+    summary.viewport = job.viewport;
     summary.status = 'passed';
   } catch (error) {
     failure = error;
@@ -384,6 +446,8 @@ async function runPlaytest(options) {
 
 module.exports = {
   buildAgentJob,
+  buildStartAction,
+  effectiveViewport,
   runPlaytest,
   validateRecordingArtifact,
 };

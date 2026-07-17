@@ -83,6 +83,7 @@ class RunPlaytestTests(unittest.TestCase):
                 [
                     "--game-dir", str(game_dir.resolve()),
                     "--out-dir", str(out_dir.resolve()),
+                    "--kind", "web",
                     "--port", "4011",
                     "--viewport", "1280x720",
                     "--playtest-duration-ms", "120000",
@@ -160,6 +161,51 @@ class RunPlaytestTests(unittest.TestCase):
 
             self.assertEqual(raised.exception.exit_code, 0)
             self.assertIsNone(raised.exception.summary)
+
+    def test_run_playtest_supports_linux_target_without_port(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            root_path = Path(root)
+            game_dir = root_path / "game"
+            out_dir = root_path / "out"
+            game_dir.mkdir()
+            cli = _write_fake_cli(
+                root_path,
+                """
+                import json
+                import sys
+                from pathlib import Path
+
+                args = sys.argv[1:]
+                out_dir = Path(args[args.index("--out-dir") + 1])
+                out_dir.mkdir(parents=True, exist_ok=True)
+                (out_dir / "call.json").write_text(json.dumps({"args": args}), encoding="utf-8")
+                (out_dir / "summary.json").write_text(json.dumps({"status": "passed"}), encoding="utf-8")
+                """,
+            )
+
+            run_playtest(
+                game_dir=game_dir,
+                out_dir=out_dir,
+                target_kind="linux",
+                openrouter_api_key="secret-key",
+                viewport={"width": 1280, "height": 720},
+                window_title="Native Game",
+                window_wait_ms=30000,
+                cli_path=cli,
+            )
+
+            call = json.loads((out_dir / "call.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                call["args"],
+                [
+                    "--game-dir", str(game_dir.resolve()),
+                    "--out-dir", str(out_dir.resolve()),
+                    "--kind", "linux",
+                    "--viewport", "1280x720",
+                    "--window-title", "Native Game",
+                    "--window-wait-ms", "30000",
+                ],
+            )
 
 
 if __name__ == "__main__":

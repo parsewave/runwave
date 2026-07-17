@@ -2,13 +2,13 @@
 
 const http = require('http');
 const path = require('path');
-const { BrowserSession } = require('./browser-session');
+const { createSession } = require('./session-factory');
 const { OutputWriter } = require('./output-writer');
 const { handleAction } = require('./action-handler');
 const { readRequestJson, writeResponse } = require('./http-json');
 const { defaultOutputRoot, defaultRecordingRoot, sessionFileForId, workspaceRoot } = require('./paths');
 const { createProfiler } = require('./profiler');
-const { assertActionName, assertSessionId, sessionId, startSessionConfig, targetUrl } = require('./protocol');
+const { assertActionName, assertSessionId, sessionId, startSessionConfig, targetKind, targetUrl } = require('./protocol');
 const { ensureDir, timestamp, writeJson } = require('./file-utils');
 
 function buildPaths(config) {
@@ -33,23 +33,24 @@ async function main() {
   profiler.timeSync('daemon.assert_session_id', () => assertSessionId(config));
   const id = sessionId(config);
   const sessionFile = sessionFileForId(id);
-  profiler.timeSync('daemon.target_url', () => targetUrl(config));
+  const kind = targetKind(config);
+  if (kind === 'web') profiler.timeSync('daemon.target_url', () => targetUrl(config));
   profiler.timeSync('daemon.ensure_run_dir', { dir: paths.runDir }, () => ensureDir(paths.runDir));
   profiler.timeSync('daemon.ensure_output_root', { dir: paths.outputRoot }, () => ensureDir(paths.outputRoot));
 
   const output = profiler.timeSync('daemon.output_writer', { outputRoot: paths.outputRoot }, () =>
     new OutputWriter(paths.outputRoot, profiler.child('output-writer'))
   );
-  const browser = profiler.timeSync('daemon.browser_session_create', () =>
-    new BrowserSession(config, paths, profiler.child('browser-session'))
+  const controller = profiler.timeSync('daemon.controller_session_create', { kind }, () =>
+    createSession(config, paths, profiler.child(`${kind}-session`))
   );
-  await profiler.time('daemon.browser_start', () => browser.start());
+  await profiler.time('daemon.controller_start', { kind }, () => controller.start());
 
   const runtime = {
     config,
     paths,
     output,
-    browser,
+    browser: controller,
     profiler,
     sessionId: id,
     sessionFile,
@@ -96,14 +97,14 @@ async function main() {
       session_id: id,
       sessionDir: paths.runDir,
       outputRoot: paths.outputRoot,
-      videoDir: browser.videoDir,
-      audioDir: browser.audioDir,
+      videoDir: controller.videoDir,
+      audioDir: controller.audioDir,
       verboseLog: profiler.enabled ? paths.verboseLogPath : undefined,
-      state: await profiler.time('daemon.start_response.state', () => browser.state()),
+      state: await profiler.time('daemon.start_response.state', () => controller.state()),
     };
     if (config.initialScreenshot !== false) {
       payload.screenshot = await profiler.time('daemon.start_response.screenshot', () =>
-        browser.screenshot(outputDir, '000-initial')
+        controller.screenshot(outputDir, '000-initial')
       );
     }
     if (!payload.verboseLog) delete payload.verboseLog;
@@ -115,11 +116,12 @@ async function main() {
       port,
       sessionDir: paths.runDir,
       outputRoot: paths.outputRoot,
-      videoDir: browser.videoDir,
-      audioDir: browser.audioDir,
+      videoDir: controller.videoDir,
+      audioDir: controller.audioDir,
       verboseLogPath: paths.verboseLogPath,
       sessionId: id,
-      launchUrl: browser.launchUrl,
+      targetKind: kind,
+      launchUrl: controller.launchUrl,
       startConfig: startSessionConfig(config),
       initialOutputDir: outputDir,
       initialResponsePath: startResponse.responsePath,

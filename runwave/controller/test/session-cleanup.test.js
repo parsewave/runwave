@@ -128,7 +128,77 @@ test('start rejects a live session with different viewport or launch options', a
           postJson: async (port, payload) => ({ ok: true, action: payload.action }),
         }
       ),
-      /different start configuration \(browser, context\).*"force": true/
+      /different start configuration \((browser, context|context, browser)\).*"force": true/
+    );
+
+    assert.equal(fs.existsSync(sessionFile), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('linux start configuration does not require a browser URL', () => {
+  const config = startSessionConfig({
+    action: 'start',
+    action_name: 'linux-start',
+    kind: 'linux',
+    command: './game',
+    args: ['--windowed'],
+    cwd: '/tmp/game',
+    windowTitle: 'Native Game',
+    viewport: { width: 1280, height: 720 },
+    record: true,
+  });
+
+  assert.equal(config.kind, 'linux');
+  assert.equal(config.launchUrl, undefined);
+  assert.deepEqual(config.context.viewport, { width: 1280, height: 720 });
+  assert.deepEqual(config.linux, {
+    command: './game',
+    args: ['--windowed'],
+    cwd: '/tmp/game',
+    envKeys: [],
+    windowId: null,
+    windowTitle: 'Native Game',
+    windowClass: null,
+    windowWaitMs: 15000,
+    resizeWindow: true,
+  });
+});
+
+test('linux start rejects a live session with a different native launch command', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-linux-target-mismatch-'));
+  const originalStart = {
+    action: 'start',
+    action_name: 'old-linux-start',
+    kind: 'linux',
+    command: './game',
+    args: ['--windowed'],
+    cwd: '/tmp/game',
+    windowTitle: 'Native Game',
+    viewport: { width: 1280, height: 720 },
+  };
+  const sessionFile = writeSession(tmpDir, {
+    pid: 12345,
+    port: 43210,
+    startConfig: startSessionConfig(originalStart),
+  });
+
+  try {
+    await assert.rejects(
+      existingSessionStart(
+        {
+          ...originalStart,
+          action_name: 'new-linux-start',
+          command: './other-game',
+        },
+        profiler(),
+        {
+          sessionFilePath: sessionFile,
+          postJson: async (port, payload) => ({ ok: true, action: payload.action }),
+        }
+      ),
+      /different start configuration \(linux\).*"force": true/
     );
 
     assert.equal(fs.existsSync(sessionFile), true);

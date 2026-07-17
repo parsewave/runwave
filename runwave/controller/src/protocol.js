@@ -7,20 +7,23 @@ function usage() {
   return {
     usage: `runwave '<json>'`,
     notes: [
-      'Every browser operation must include action_name and session_id.',
+      'Every controller operation must include action_name and session_id.',
       'Use {"action":"sessions"} to list known sessions.',
-      'Use start with either url or file.',
+      'Use web start with either url or file. Use linux start with kind:"linux" and a command or window selector.',
       'Each operation writes artifacts to state/output/<action_name>/ by default.',
       'Relative file and output paths resolve from RUNWAVE_WORKSPACE or the current working directory.',
     ],
     examples: [
       {
         action: 'start',
-        action_name: 'start-run',
-        session_id: 'playtest-001',
-        file: 'sunnyland-platformer/index.html',
+        action_name: 'start-linux-run',
+        session_id: 'playtest-002',
+        kind: 'linux',
+        command: './game',
+        args: ['--windowed'],
+        cwd: '/absolute/path/to/game',
+        windowTitle: 'Native Game',
         record: true,
-        keyAliases: { right: 'd', left: 'a', jump: 'w' },
       },
       {
         action: 'step',
@@ -50,7 +53,7 @@ function assertActionName(input) {
 function sessionId(input) {
   const value = input && (input.session_id ?? input.sessionId);
   const text = String(value ?? '').trim();
-  if (!text) throw new Error('session_id is required for start, stop, and browser actions');
+  if (!text) throw new Error('session_id is required for start, stop, and controller actions');
   return text;
 }
 
@@ -65,6 +68,17 @@ function targetUrl(input, options = {}) {
     return pathToFileURL(filePath).href;
   }
   throw new Error('start/navigate requires either url or file');
+}
+
+function normalizeTargetKind(value) {
+  const text = String(value || 'web').trim().toLowerCase();
+  if (!text || text === 'web' || text === 'browser' || text === 'chromium') return 'web';
+  if (text === 'linux' || text === 'native') return 'linux';
+  throw new Error(`unsupported runwave target kind: ${value}`);
+}
+
+function targetKind(input) {
+  return normalizeTargetKind(input && (input.kind ?? input.targetKind ?? input.sessionKind));
 }
 
 function parseArgList(value) {
@@ -116,27 +130,33 @@ function optionalNumber(value, fallback) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function linuxStartConfig(input = {}) {
+  const launch = input.launch && typeof input.launch === 'object' ? input.launch : {};
+  const launchEnv = input.env ?? launch.env;
+  return {
+    command: optionalString(input.command ?? input.launchCommand ?? launch.command),
+    args: parseArgList(input.args ?? input.launchArgs ?? launch.args),
+    cwd: optionalString(input.cwd ?? input.launchCwd ?? launch.cwd),
+    envKeys: Object.keys(sortedObject(launchEnv)),
+    windowId: optionalString(input.windowId ?? input.window_id),
+    windowTitle: optionalString(input.windowTitle ?? input.window_title),
+    windowClass: optionalString(input.windowClass ?? input.window_class),
+    windowWaitMs: optionalNumber(input.windowWaitMs ?? input.window_wait_ms, 15000),
+    resizeWindow: input.resizeWindow !== false,
+  };
+}
+
 function startSessionConfig(input, options = {}) {
+  const kind = targetKind(input);
   const viewport = normalizeSize(input.viewport, { width: 1024, height: 620 });
   const record = Boolean(input.record || input.recordAudio);
-  return {
-    launchUrl: targetUrl(input, options),
-    browser: {
-      headless: record ? false : input.headless !== false,
-      channel: optionalString(input.channel),
-      executablePath: optionalString(input.executablePath),
-      chromiumArgsMode: String(input.chromiumArgsMode || process.env.RUNWAVE_CHROMIUM_ARGS_MODE || 'append').toLowerCase(),
-      chromiumArgs: parseArgList(input.chromiumArgs ?? process.env.RUNWAVE_CHROMIUM_ARGS),
-    },
+  const common = {
+    kind,
     context: {
       viewport,
       deviceScaleFactor: optionalNumber(input.deviceScaleFactor, 1),
       record,
       videoSize: record ? normalizeSize(input.videoSize || input.viewport, viewport) : null,
-    },
-    navigation: {
-      waitUntil: String(input.waitUntil || 'load'),
-      waitAfterLoad: optionalNumber(input.waitAfterLoad, 700),
     },
     defaults: {
       keyAliases: sortedObject(input.keyAliases),
@@ -148,6 +168,29 @@ function startSessionConfig(input, options = {}) {
       gridScreenshots: input.gridScreenshots !== false,
       markGridRows: optionalNumber(input.markGridRows ?? input.gridRows, DEFAULT_MARK_GRID.rows),
       markGridCols: optionalNumber(input.markGridCols ?? input.gridCols, DEFAULT_MARK_GRID.cols),
+    },
+  };
+
+  if (kind === 'linux') {
+    return {
+      ...common,
+      linux: linuxStartConfig(input),
+    };
+  }
+
+  return {
+    ...common,
+    launchUrl: targetUrl(input, options),
+    browser: {
+      headless: record ? false : input.headless !== false,
+      channel: optionalString(input.channel),
+      executablePath: optionalString(input.executablePath),
+      chromiumArgsMode: String(input.chromiumArgsMode || process.env.RUNWAVE_CHROMIUM_ARGS_MODE || 'append').toLowerCase(),
+      chromiumArgs: parseArgList(input.chromiumArgs ?? process.env.RUNWAVE_CHROMIUM_ARGS),
+    },
+    navigation: {
+      waitUntil: String(input.waitUntil || 'load'),
+      waitAfterLoad: optionalNumber(input.waitAfterLoad, 700),
     },
   };
 }
@@ -179,6 +222,9 @@ module.exports = {
   assertSessionId,
   sessionId,
   targetUrl,
+  targetKind,
+  normalizeTargetKind,
+  linuxStartConfig,
   parseArgList,
   startSessionConfig,
   diffStartSessionConfig,

@@ -8,11 +8,12 @@ function usage() {
   return [
     'Usage:',
     '  runwave --game-dir <path> --out-dir <path> --port <n> --viewport <width>x<height> [options]',
+    '  runwave --kind linux --game-dir <path> --out-dir <path> --viewport <width>x<height> [options]',
     '',
     'Required:',
     '  --game-dir <path>            directory containing start.sh and playtest.md',
     '  --out-dir <path>             directory for artifacts (video, screenshots, agent history, summary.json)',
-    '  --port <n>                   port passed to start.sh via PORT= and used as http://127.0.0.1:<port>/',
+    '  --port <n>                   web mode only: port passed to start.sh via PORT= and used as http://127.0.0.1:<port>/',
     '  --viewport <width>x<height>  browser viewport and video size, e.g. 1280x720',
     '',
     'Environment:',
@@ -20,6 +21,11 @@ function usage() {
     '  OPENROUTER_MODEL             optional model override (or use --model)',
     '',
     'Options:',
+    '  --kind <web|linux>           target kind (default web)',
+    '  --window-title <text>        linux mode: title/name hint used to find the game window',
+    '  --window-class <text>        linux mode: X11 class hint used to find the game window',
+    '  --window-id <id>             linux mode: explicit X11 window id',
+    '  --window-wait-ms <n>         linux mode: wait for a visible game window (default 15000)',
     '  --playtest-duration-ms <n>   max playtest wall time in ms (default 150000)',
     '  --min-playtest-ms <n>        floor before the agent may self-stop (default duration - 10000)',
     '  --model <slug>               OpenRouter model slug (sets RUNWAVE_AGENT_MODEL)',
@@ -35,7 +41,7 @@ function parseViewport(value) {
 }
 
 function parseArgs(argv) {
-  const out = { verbose: false };
+  const out = { verbose: false, kind: 'web', startOverrides: {} };
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = () => argv[++i];
@@ -44,6 +50,11 @@ function parseArgs(argv) {
     if (arg === '--game-dir') { out.gameDir = next(); continue; }
     if (arg === '--out-dir') { out.outDir = next(); continue; }
     if (arg === '--port') { out.port = Number(next()); continue; }
+    if (arg === '--kind') { out.kind = next(); continue; }
+    if (arg === '--window-title') { out.startOverrides.windowTitle = next(); continue; }
+    if (arg === '--window-class') { out.startOverrides.windowClass = next(); continue; }
+    if (arg === '--window-id') { out.startOverrides.windowId = next(); continue; }
+    if (arg === '--window-wait-ms') { out.startOverrides.windowWaitMs = Number(next()); continue; }
     if (arg === '--viewport') { out.viewport = parseViewport(next()); continue; }
     if (arg === '--playtest-duration-ms') { out.playtestDurationMs = Number(next()); continue; }
     if (arg === '--min-playtest-ms') { out.minPlaytestMs = Number(next()); continue; }
@@ -62,7 +73,7 @@ async function main() {
   const missing = [];
   if (!args.gameDir) missing.push('--game-dir');
   if (!args.outDir) missing.push('--out-dir');
-  if (!args.port) missing.push('--port');
+  if (!['linux', 'native'].includes(String(args.kind || 'web').toLowerCase()) && !args.port) missing.push('--port');
   if (!args.viewport) missing.push('--viewport');
   const openRouterApiKey = process.env.OPENROUTER_API_KEY;
   if (!openRouterApiKey) missing.push('OPENROUTER_API_KEY');
@@ -75,12 +86,14 @@ async function main() {
     gameDir: path.resolve(args.gameDir),
     outDir: path.resolve(args.outDir),
     port: args.port,
+    kind: args.kind,
     viewport: args.viewport,
     openRouterApiKey,
     playtestDurationMs: args.playtestDurationMs,
     minPlaytestMs: args.minPlaytestMs,
     model: args.model,
     verbose: args.verbose,
+    startOverrides: args.startOverrides,
   });
 
   process.exit(summary.status === 'passed' ? 0 : 1);
