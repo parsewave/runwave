@@ -986,6 +986,7 @@ test('playtester prompt uses native Linux wording for linux targets', () => {
 
   assert.match(prompt, /native Linux-game playtester/);
   assert.match(prompt, /Linux game state JSON/);
+  assert.match(prompt, /full Linux display capture/);
   assert.match(prompt, /browser-only html5 drag\/drop is not available/);
   assert.doesNotMatch(prompt, /literal Playwright keys/);
   assert.doesNotMatch(prompt, /state JSON reports a canvas/);

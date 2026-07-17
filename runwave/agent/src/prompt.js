@@ -207,6 +207,9 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     ? '- Use type "drag" for drag/swipe games with "from" and "to" overlay row/column objects. Use mode "mouse"; browser-native "html5" drag is not available for Linux games.'
     : '- Use type "drag" for drag/swipe games with "from" and "to" overlay row/column objects. Use mode "mouse" for canvas or pointer games; use mode "html5" for browser-native drag/drop elements such as match-3 candy boards.';
   const stateLabel = targetKind === 'linux' ? 'Linux game state JSON:' : 'Browser/game state JSON:';
+  const viewportLine = targetKind === 'linux'
+    ? `Viewport: ${viewport.width}x${viewport.height}. The screenshot is the full Linux display capture with a light ${grid.rows}x${grid.cols} red mark grid over it. Overlay column labels are in the top/bottom margins and overlay row labels are in the left/right margins.`
+    : `Viewport: ${viewport.width}x${viewport.height}. The screenshot has a light ${grid.rows}x${grid.cols} red mark grid over the inner game area. Overlay column labels are in the top/bottom margins and overlay row labels are in the left/right margins.`;
 
   return [
     `You are an agentic ${playtesterRole}. Your job is to create a useful gameplay video, not to judge the game.`,
@@ -221,7 +224,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     sequenceSchemaGuide(grid, targetKind),
     '',
     `Time remaining: ${secondsLeft}s.`,
-    `Viewport: ${viewport.width}x${viewport.height}. The screenshot has a light ${grid.rows}x${grid.cols} red mark grid over the inner game area. Overlay column labels are in the top/bottom margins and overlay row labels are in the left/right margins.`,
+    viewportLine,
     `Available common controls: ${controls.join(', ')}. You may use ${keyRuntime}.`,
     '',
     ...playtestInstructionsSection(job),

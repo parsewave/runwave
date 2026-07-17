@@ -68,6 +68,13 @@ Useful `start` options:
 - `windowTitle`, `windowClass`, or `windowId`: optional Linux window selector.
   If omitted, Runwave chooses the largest visible X11 window after launch.
 - `windowWaitMs`: native Linux window wait timeout. Defaults to 15000.
+- `viewport`: for native Linux sessions, the full X11 display area to
+  screenshot, record, grid, and use for pointer coordinates. The detected game
+  window is used for focus and best-effort resizing, not as the capture crop.
+  The launched process also receives `RUNWAVE_VIEWPORT_WIDTH`,
+  `RUNWAVE_VIEWPORT_HEIGHT`, `RUNWAVE_CAPTURE_X`, `RUNWAVE_CAPTURE_Y`,
+  `RUNWAVE_CAPTURE_WIDTH`, and `RUNWAVE_CAPTURE_HEIGHT` environment variables
+  for optional wrapper-side size hints.
 - `session_id`: required session identifier. Reuse it for all actions targeting
   the same controller session.
 - `record`: enable gstreamer audio+video WebM recording. Requires all the
@@ -245,7 +252,7 @@ For native Linux sessions, state includes:
 
 - target kind
 - X11 display
-- viewport/window dimensions
+- viewport/capture dimensions for the full recorded display
 - selected window id and position
 - launched process pid/running status when the controller owns the process
 

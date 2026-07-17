@@ -20,6 +20,29 @@ function normalizedViewport(config = {}) {
   };
 }
 
+function displayCaptureGeometry(config = {}, env = process.env) {
+  const source = parseX11VideoSource(config.videoSource || defaultVideoSource(process.platform, env), env);
+  const viewport = normalizedViewport(config);
+  return {
+    displayName: source.displayName,
+    x: source.x,
+    y: source.y,
+    width: viewport.width,
+    height: viewport.height,
+  };
+}
+
+function displayCaptureEnv(capture) {
+  return {
+    RUNWAVE_VIEWPORT_WIDTH: String(capture.width),
+    RUNWAVE_VIEWPORT_HEIGHT: String(capture.height),
+    RUNWAVE_CAPTURE_X: String(capture.x),
+    RUNWAVE_CAPTURE_Y: String(capture.y),
+    RUNWAVE_CAPTURE_WIDTH: String(capture.width),
+    RUNWAVE_CAPTURE_HEIGHT: String(capture.height),
+  };
+}
+
 function linuxLaunchConfig(config = {}) {
   const launch = config.launch && typeof config.launch === 'object' ? config.launch : {};
   return {
@@ -191,12 +214,14 @@ class LinuxSession {
     this.process = null;
     this.windowId = this.launch.windowId ? String(this.launch.windowId) : null;
     this.geometry = null;
+    this.captureGeometry = null;
     this.videoDir = null;
     this.audioDir = undefined;
     this.audioRecorder = null;
     this.processError = null;
     this.mousePosition = { x: 0, y: 0 };
     this.launchUrl = null;
+    this.lastFitAttemptKey = null;
   }
 
   timeSync(event, fields, fn) {
@@ -223,9 +248,10 @@ class LinuxSession {
     if (!this.launch.command) return null;
     const stdout = fs.openSync(path.join(this.paths.runDir, 'linux-game.stdout.log'), 'a');
     const stderr = fs.openSync(path.join(this.paths.runDir, 'linux-game.stderr.log'), 'a');
+    const capture = this.captureGeometry || displayCaptureGeometry(this.config);
     this.process = spawn(this.launch.command, this.launch.args, {
       cwd: this.launch.cwd,
-      env: { ...process.env, ...(this.launch.env || {}) },
+      env: { ...process.env, ...displayCaptureEnv(capture), ...(this.launch.env || {}) },
       detached: true,
       stdio: ['ignore', stdout, stderr],
     });
@@ -301,7 +327,8 @@ class LinuxSession {
     const geometry = this.chooseWindow();
     this.windowId = geometry.id;
     this.geometry = geometry;
-    return geometry;
+    this.fitWindowToCapture();
+    return this.geometry;
   }
 
   currentWindowGeometry() {
@@ -309,7 +336,8 @@ class LinuxSession {
       try {
         const geometry = this.windowGeometry(this.windowId);
         this.geometry = geometry;
-        return geometry;
+        this.fitWindowToCapture();
+        return this.geometry;
       } catch {
         // Some native launchers replace their initial X11 window after startup.
         // Re-scan instead of treating the cached id as authoritative.
@@ -358,31 +386,46 @@ class LinuxSession {
   }
 
   resizeWindow() {
-    if (!this.windowId || this.launch.resizeWindow === false) return;
-    const viewport = normalizedViewport(this.config);
-    try { this.xdotool(['windowmove', this.windowId, '0', '0']); } catch {}
-    try { this.xdotool(['windowsize', this.windowId, String(viewport.width), String(viewport.height)]); } catch {}
+    this.fitWindowToCapture();
+  }
+
+  fitWindowToCapture() {
+    if (!this.windowId || this.launch.resizeWindow === false) return false;
+    const capture = this.captureGeometry || displayCaptureGeometry(this.config);
+    const geometry = this.geometry;
+    const fitKey = geometry
+      ? `${geometry.id}:${geometry.x},${geometry.y},${geometry.width}x${geometry.height}`
+      : `${this.windowId}:unknown`;
+    if (this.lastFitAttemptKey === fitKey) return false;
+    this.lastFitAttemptKey = fitKey;
+    try { this.xdotool(['windowmove', this.windowId, String(capture.x), String(capture.y)]); } catch {}
+    try { this.xdotool(['windowsize', this.windowId, String(capture.width), String(capture.height)]); } catch {}
+    try {
+      this.geometry = this.windowGeometry(this.windowId);
+      this.lastFitAttemptKey = `${this.geometry.id}:${this.geometry.x},${this.geometry.y},${this.geometry.width}x${this.geometry.height}`;
+    } catch {}
+    return true;
   }
 
   async start() {
     this.timeSync('linux.start.ensure_run_dir', { dir: this.paths.runDir }, () => ensureDir(this.paths.runDir));
+    this.captureGeometry = displayCaptureGeometry(this.config);
+    this.config.viewport = { width: this.captureGeometry.width, height: this.captureGeometry.height };
+    this.config.videoSize = { width: this.captureGeometry.width, height: this.captureGeometry.height };
     this.timeSync('linux.start.launch_process', () => this.startProcess());
     this.geometry = await this.time('linux.start.wait_for_window', () => this.waitForWindow());
     this.windowId = this.geometry.id;
     this.timeSync('linux.start.resize_window', () => this.resizeWindow());
     this.timeSync('linux.start.focus_window', () => this.focusWindow());
     this.geometry = this.timeSync('linux.start.geometry_after_focus', () => this.currentWindowGeometry());
-    this.config.viewport = { width: this.geometry.width, height: this.geometry.height };
-    this.config.videoSize = { width: this.geometry.width, height: this.geometry.height };
 
     if (this.config.record || this.config.recordAudio) {
       this.videoDir = this.timeSync('linux.start.ensure_video_dir', () => ensureDir(path.join(this.paths.runDir, 'video')));
-      const display = process.env.DISPLAY || ':0';
       this.audioRecorder = new AudioVideoRecorder(
         {
           ...this.config,
-          videoSource: this.config.videoSource || `${display}+${this.geometry.x},${this.geometry.y}`,
-          videoSize: { width: this.geometry.width, height: this.geometry.height },
+          videoSource: this.config.videoSource || `${this.captureGeometry.displayName}+${this.captureGeometry.x},${this.captureGeometry.y}`,
+          videoSize: { width: this.captureGeometry.width, height: this.captureGeometry.height },
         },
         this.paths.runDir,
         this.profiler ? this.profiler.child('audio-video-recorder') : null
@@ -396,7 +439,7 @@ class LinuxSession {
   }
 
   screenPoint(point) {
-    const geometry = this.geometry || { x: 0, y: 0 };
+    const geometry = this.captureGeometry || displayCaptureGeometry(this.config);
     return {
       x: Math.round(geometry.x + Number(point.x || 0)),
       y: Math.round(geometry.y + Number(point.y || 0)),
@@ -407,11 +450,11 @@ class LinuxSession {
     const fileName = `${safeName(name || `capture-${timestamp()}`)}.png`;
     const file = path.join(outputDir, fileName);
     ensureDir(outputDir);
-    this.geometry = this.timeSync('linux.screenshot.geometry', () => this.currentWindowGeometry());
+    this.captureGeometry = this.captureGeometry || displayCaptureGeometry(this.config);
     const args = gstScreenshotArgs(
-      { ...this.config, videoSource: `${process.env.DISPLAY || ':0'}+${this.geometry.x},${this.geometry.y}` },
+      { ...this.config, videoSource: `${this.captureGeometry.displayName}+${this.captureGeometry.x},${this.captureGeometry.y}` },
       file,
-      this.geometry,
+      this.captureGeometry,
       process.env
     );
     this.timeSync('linux.screenshot.capture', { file }, () =>
@@ -527,10 +570,18 @@ class LinuxSession {
     }
     return {
       targetKind: 'linux',
-      display: process.env.DISPLAY || null,
-      viewport: geometry
-        ? { width: geometry.width, height: geometry.height }
+      display: this.captureGeometry ? this.captureGeometry.displayName : process.env.DISPLAY || null,
+      viewport: this.captureGeometry
+        ? { width: this.captureGeometry.width, height: this.captureGeometry.height }
         : normalizedViewport(this.config),
+      capture: this.captureGeometry
+        ? {
+            x: this.captureGeometry.x,
+            y: this.captureGeometry.y,
+            width: this.captureGeometry.width,
+            height: this.captureGeometry.height,
+          }
+        : null,
       window: geometry
         ? {
             id: geometry.id,
@@ -577,6 +628,8 @@ class LinuxSession {
 module.exports = {
   LinuxSession,
   buttonToXdotool,
+  displayCaptureEnv,
+  displayCaptureGeometry,
   gstScreenshotArgs,
   keyToXdotool,
   linuxLaunchConfig,
