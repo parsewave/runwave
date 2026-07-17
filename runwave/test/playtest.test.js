@@ -20,7 +20,7 @@ test('playtest agent job inherits mark grid dimensions from the start action', (
     },
   });
 
-  assert.equal(job.targetKind, 'web');
+  assert.equal(Object.prototype.hasOwnProperty.call(job, 'targetKind'), false);
   assert.equal(job.playtestDurationMs, 180000);
   assert.equal(job.agentMinPlaytestMs, 120000);
   assert.deepEqual(job.viewport, { width: 1280, height: 720 });
@@ -30,7 +30,7 @@ test('playtest agent job inherits mark grid dimensions from the start action', (
   assert.equal(job.markGridCols, 24);
 });
 
-test('linux playtests build a native controller start action without a web URL', () => {
+test('playtests pass target kind and game directory only to the controller start action', () => {
   const start = buildStartAction({
     targetKind: 'linux',
     runwaveSessionId: 'linux-session',
@@ -43,9 +43,10 @@ test('linux playtests build a native controller start action without a web URL',
   });
 
   assert.equal(start.kind, 'linux');
-  assert.equal(start.command, 'bash');
-  assert.deepEqual(start.args, ['start.sh']);
-  assert.equal(start.cwd, '/games/native');
+  assert.equal(start.gameDir, '/games/native');
+  assert.equal(start.command, undefined);
+  assert.equal(start.args, undefined);
+  assert.equal(start.cwd, undefined);
   assert.equal(start.windowTitle, 'Native Game');
   assert.equal(start.windowWaitMs, 30000);
   assert.equal(start.url, undefined);

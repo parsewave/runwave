@@ -45,10 +45,13 @@ function displayCaptureEnv(capture) {
 
 function linuxLaunchConfig(config = {}) {
   const launch = config.launch && typeof config.launch === 'object' ? config.launch : {};
+  const explicitCommand = config.command || config.launchCommand || launch.command || null;
+  const command = explicitCommand || (config.gameDir ? 'bash' : null);
+  const rawArgs = config.args ?? config.launchArgs ?? launch.args;
   return {
-    command: config.command || config.launchCommand || launch.command || null,
-    args: parseArgList(config.args ?? config.launchArgs ?? launch.args),
-    cwd: config.cwd || config.launchCwd || launch.cwd || process.cwd(),
+    command,
+    args: rawArgs === undefined && command && !explicitCommand ? ['start.sh'] : parseArgList(rawArgs),
+    cwd: config.cwd || config.launchCwd || launch.cwd || config.gameDir || process.cwd(),
     env: launch.env || config.env || null,
     windowId: config.windowId || config.window_id || null,
     windowTitle: config.windowTitle || config.window_title || null,
@@ -523,25 +526,7 @@ class LinuxSession {
   }
 
   async drag(drag) {
-    const from = this.screenPoint(drag.from);
-    const to = this.screenPoint(drag.to);
-    const button = buttonToXdotool(drag.button);
-    await this.time('linux.mouse.drag', {
-      fromX: drag.from.x,
-      fromY: drag.from.y,
-      toX: drag.to.x,
-      toY: drag.to.y,
-      mode: drag.mode,
-      button,
-      steps: drag.steps,
-    }, async () => {
-      this.focusWindow();
-      this.xdotool(['mousemove', String(from.x), String(from.y)]);
-      this.xdotool(['mousedown', button]);
-      this.xdotool(['mousemove', '--sync', String(to.x), String(to.y)]);
-      this.xdotool(['mouseup', button]);
-    });
-    this.mousePosition = { x: drag.to.x, y: drag.to.y };
+    throw new Error('drag action is not available for this game session');
   }
 
   async moveView(move) {
@@ -569,7 +554,6 @@ class LinuxSession {
       } catch {}
     }
     return {
-      targetKind: 'linux',
       display: this.captureGeometry ? this.captureGeometry.displayName : process.env.DISPLAY || null,
       viewport: this.captureGeometry
         ? { width: this.captureGeometry.width, height: this.captureGeometry.height }

@@ -8,6 +8,7 @@ const {
   chromiumLaunchArgs,
   launchHeadless,
   pageViewportVideoSource,
+  webLaunchConfig,
 } = require('../src/browser-session');
 
 test('chromium launch args leave non-recording runs unchanged', () => {
@@ -40,6 +41,17 @@ test('recording sessions force a visible headed browser', () => {
   assert.equal(launchHeadless({ record: true, headless: true }), false);
   assert.equal(launchHeadless({ record: false }), true);
   assert.equal(launchHeadless({ record: false, headless: false }), false);
+});
+
+test('browser launch config defaults game directories to start.sh', () => {
+  assert.deepEqual(webLaunchConfig({ gameDir: '/tmp/web-game', port: 4123 }), {
+    command: 'bash',
+    args: ['start.sh'],
+    cwd: '/tmp/web-game',
+    env: null,
+    port: 4123,
+    httpTimeoutMs: 60000,
+  });
 });
 
 test('page viewport video source crops past browser chrome', async () => {

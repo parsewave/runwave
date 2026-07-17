@@ -65,10 +65,6 @@ def run_playtest(
     playtest_duration_ms: Optional[int] = None,
     min_playtest_ms: Optional[int] = None,
     model: Optional[str] = None,
-    window_title: Optional[str] = None,
-    window_class: Optional[str] = None,
-    window_id: Optional[str] = None,
-    window_wait_ms: Optional[int] = None,
     verbose: bool = False,
     cli_path: Optional[PathLike] = None,
     env: Optional[Mapping[str, str]] = None,
@@ -146,14 +142,6 @@ def run_playtest(
         args += ["--min-playtest-ms", str(min_playtest_ms)]
     if model:
         args += ["--model", model]
-    if window_title:
-        args += ["--window-title", window_title]
-    if window_class:
-        args += ["--window-class", window_class]
-    if window_id:
-        args += ["--window-id", window_id]
-    if window_wait_ms is not None:
-        args += ["--window-wait-ms", str(window_wait_ms)]
     if verbose:
         args.append("--verbose")
 

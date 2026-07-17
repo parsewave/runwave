@@ -15,7 +15,7 @@ function cellJson(cell) {
   return `{"overlay_row":${cell.overlay_row},"overlay_col":${cell.overlay_col}}`;
 }
 
-function sequenceSchemaGuide(grid = markGridFromConfig({}), targetKind = 'web') {
+function sequenceSchemaGuide(grid = markGridFromConfig({})) {
   const examples = gridExampleCells(grid);
   const rows = [
     'JSON output contract:',
@@ -31,9 +31,6 @@ function sequenceSchemaGuide(grid = markGridFromConfig({}), targetKind = 'web') 
     'Timing rules: use milliseconds; click <=100ms if end is provided; drag/cursor_move <=2000ms if end is provided; key/view_move may be longer; whole sequence must stay under 8000ms.',
     `Click, multi_click, drag, and cursor_move may omit end; RunWave adds a short default. Prefer overlay_row/overlay_col targets from the ${grid.rows}x${grid.cols} overlay over raw x/y.`,
   ];
-  if (targetKind === 'linux') {
-    rows.push('Linux target note: use normal keyboard and mouse actions only; browser-only html5 drag/drop is not available.');
-  }
   return rows.join('\n');
 }
 
@@ -200,19 +197,11 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
   ];
   const warning = repeatedHistoryWarning(history);
   const grid = markGridFromConfig(job || {});
-  const targetKind = String(job.targetKind || 'web').toLowerCase() === 'linux' ? 'linux' : 'web';
-  const playtesterRole = targetKind === 'linux' ? 'native Linux-game playtester' : 'browser-game playtester';
-  const keyRuntime = targetKind === 'linux' ? 'RunWave keys' : 'literal Playwright keys';
-  const dragGuidance = targetKind === 'linux'
-    ? '- Use type "drag" for drag/swipe games with "from" and "to" overlay row/column objects. Use mode "mouse"; browser-native "html5" drag is not available for Linux games.'
-    : '- Use type "drag" for drag/swipe games with "from" and "to" overlay row/column objects. Use mode "mouse" for canvas or pointer games; use mode "html5" for browser-native drag/drop elements such as match-3 candy boards.';
-  const stateLabel = targetKind === 'linux' ? 'Linux game state JSON:' : 'Browser/game state JSON:';
-  const viewportLine = targetKind === 'linux'
-    ? `Viewport: ${viewport.width}x${viewport.height}. The screenshot is the full Linux display capture with a light ${grid.rows}x${grid.cols} red mark grid over it. Overlay column labels are in the top/bottom margins and overlay row labels are in the left/right margins.`
-    : `Viewport: ${viewport.width}x${viewport.height}. The screenshot has a light ${grid.rows}x${grid.cols} red mark grid over the inner game area. Overlay column labels are in the top/bottom margins and overlay row labels are in the left/right margins.`;
+  const dragGuidance = '- Use type "drag" for drag/swipe games with "from" and "to" overlay row/column objects. Use mode "mouse" for pointer/canvas-style dragging; use mode "html5" only when the visible game appears to use browser-native drag/drop elements.';
+  const viewportLine = `Viewport: ${viewport.width}x${viewport.height}. The screenshot has a light ${grid.rows}x${grid.cols} red mark grid over the playable view. Overlay column labels are in the top/bottom margins and overlay row labels are in the left/right margins.`;
 
   return [
-    `You are an agentic ${playtesterRole}. Your job is to create a useful gameplay video, not to judge the game.`,
+    'You are an agentic game playtester. Your job is to create a useful gameplay video, not to judge the game.',
     '',
     'High-level goals:',
     '- If the game is on a menu/title/start screen, get into real gameplay.',
@@ -221,11 +210,11 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '- Try to chain multiple sensible actions in one sequence rather than a single action each time.',
     '- Do not stop early unless the recording already shows enough real gameplay.',
     '',
-    sequenceSchemaGuide(grid, targetKind),
+    sequenceSchemaGuide(grid),
     '',
     `Time remaining: ${secondsLeft}s.`,
     viewportLine,
-    `Available common controls: ${controls.join(', ')}. You may use ${keyRuntime}.`,
+    `Available common controls: ${controls.join(', ')}. You may use normal RunWave key names.`,
     '',
     ...playtestInstructionsSection(job),
     'Sequence guidance:',
@@ -244,9 +233,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     '- Avoid Options, Settings, Credits, Help, Leaderboard, and Multiplayer unless they are the only visible path into gameplay.',
     '- If one menu choice does not enter gameplay, go back or try a different start-like choice on the next step. Do not spend turns only describing or waiting on a menu.',
     '- Common resume/confirm keys are Space, Enter, Escape, and P. Use them when the screen suggests a paused/menu state and clicks are not working.',
-    targetKind === 'web'
-      ? '- If the state JSON reports a canvas, treat that canvas rectangle as the active game area unless the screenshot clearly shows otherwise.'
-      : '- For native Linux games, rely primarily on the screenshot and visible window state; there is no browser DOM or canvas metadata.',
+    '- If the state JSON reports useful game geometry such as a canvas, treat that rectangle as the active game area unless the screenshot clearly shows otherwise. Otherwise rely on the visible screenshot.',
     '- If you die, reset, or return to a map/title screen, re-enter gameplay and change strategy instead of repeating the same failed action.',
     '- If the same thing has failed about 3-5 times with no visible progress, say that in previous_sequence_outcome and try a different target, route, control, or strategy.',
     '- If an action or strategy visibly worked, learn the pattern and try a similar follow-up, but do not blindly repeat the exact same input unless the game clearly needs repetition.',
@@ -257,7 +244,7 @@ function buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history
     'Recent history:',
     compactHistory(history) || 'none',
     '',
-    stateLabel,
+    'Game state JSON:',
     JSON.stringify(state || {}, null, 2).slice(0, 5000),
     '',
     'Return the next JSON sequence now. Every non-stop response must include at least one action. Use an empty actions array only when you are done and set "should_stop": true.',

@@ -189,8 +189,6 @@ class RunPlaytestTests(unittest.TestCase):
                 target_kind="linux",
                 openrouter_api_key="secret-key",
                 viewport={"width": 1280, "height": 720},
-                window_title="Native Game",
-                window_wait_ms=30000,
                 cli_path=cli,
             )
 
@@ -202,8 +200,6 @@ class RunPlaytestTests(unittest.TestCase):
                     "--out-dir", str(out_dir.resolve()),
                     "--kind", "linux",
                     "--viewport", "1280x720",
-                    "--window-title", "Native Game",
-                    "--window-wait-ms", "30000",
                 ],
             )
 

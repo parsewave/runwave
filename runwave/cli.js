@@ -22,10 +22,6 @@ function usage() {
     '',
     'Options:',
     '  --kind <web|linux>           target kind (default web)',
-    '  --window-title <text>        linux mode: title/name hint used to find the game window',
-    '  --window-class <text>        linux mode: X11 class hint used to find the game window',
-    '  --window-id <id>             linux mode: explicit X11 window id',
-    '  --window-wait-ms <n>         linux mode: wait for a visible game window (default 15000)',
     '  --playtest-duration-ms <n>   max playtest wall time in ms (default 150000)',
     '  --min-playtest-ms <n>        floor before the agent may self-stop (default duration - 10000)',
     '  --model <slug>               OpenRouter model slug (sets RUNWAVE_AGENT_MODEL)',
@@ -51,10 +47,6 @@ function parseArgs(argv) {
     if (arg === '--out-dir') { out.outDir = next(); continue; }
     if (arg === '--port') { out.port = Number(next()); continue; }
     if (arg === '--kind') { out.kind = next(); continue; }
-    if (arg === '--window-title') { out.startOverrides.windowTitle = next(); continue; }
-    if (arg === '--window-class') { out.startOverrides.windowClass = next(); continue; }
-    if (arg === '--window-id') { out.startOverrides.windowId = next(); continue; }
-    if (arg === '--window-wait-ms') { out.startOverrides.windowWaitMs = Number(next()); continue; }
     if (arg === '--viewport') { out.viewport = parseViewport(next()); continue; }
     if (arg === '--playtest-duration-ms') { out.playtestDurationMs = Number(next()); continue; }
     if (arg === '--min-playtest-ms') { out.minPlaytestMs = Number(next()); continue; }

@@ -80,20 +80,14 @@ game exits. `--port` is not used:
 runwave --kind linux --game-dir ./linux-game --out-dir ./artifacts --viewport 1280x720
 ```
 
+`--kind` is only a controller routing setting. The agent still receives the same
+screenshot, grid, playtest guide, and generic action schema for every target.
+The controller owns target-specific launch, capture, recording, and input.
 For Linux targets, `--viewport` is the virtual display capture size. Runwave
 records and screenshots that full display area, then focuses the detected game
-window for input. The game window may be smaller than the display; it should not
-be larger than the display or important UI may be cropped. Runwave also moves
-and resizes the detected window toward the capture area when the game allows it.
-`start.sh` receives `RUNWAVE_VIEWPORT_WIDTH` and `RUNWAVE_VIEWPORT_HEIGHT` so
-wrappers can pass engine-specific size flags without hardcoding dimensions.
-
-If the server has multiple visible windows, pass a selector:
-
-```sh
-runwave --kind linux --game-dir ./linux-game --out-dir ./artifacts \
-  --viewport 1280x720 --window-title "A Date with Death"
-```
+window for input. `start.sh` receives `RUNWAVE_VIEWPORT_WIDTH` and
+`RUNWAVE_VIEWPORT_HEIGHT` so wrappers can pass engine-specific size flags
+without hardcoding dimensions.
 
 The package also includes a low-level controller CLI for direct browser actions:
 

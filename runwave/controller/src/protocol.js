@@ -9,7 +9,7 @@ function usage() {
     notes: [
       'Every controller operation must include action_name and session_id.',
       'Use {"action":"sessions"} to list known sessions.',
-      'Use web start with either url or file. Use linux start with kind:"linux" and a command or window selector.',
+      'Use web start with url, file, or a local port. Use linux start with kind:"linux" and a command or window selector.',
       'Each operation writes artifacts to state/output/<action_name>/ by default.',
       'Relative file and output paths resolve from RUNWAVE_WORKSPACE or the current working directory.',
     ],
@@ -63,11 +63,16 @@ function assertSessionId(input) {
 
 function targetUrl(input, options = {}) {
   if (input.url) return String(input.url);
+  if (input.port !== undefined && input.port !== null && input.port !== '') {
+    const port = Number(input.port);
+    if (!Number.isInteger(port) || port <= 0) throw new Error(`invalid web game port: ${input.port}`);
+    return `http://127.0.0.1:${port}/`;
+  }
   if (input.file) {
     const filePath = path.resolve(options.workspaceRoot || workspaceRoot, input.file);
     return pathToFileURL(filePath).href;
   }
-  throw new Error('start/navigate requires either url or file');
+  throw new Error('start/navigate requires url, file, or port');
 }
 
 function normalizeTargetKind(value) {
@@ -130,19 +135,45 @@ function optionalNumber(value, fallback) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function optionalPositiveInteger(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
 function linuxStartConfig(input = {}) {
   const launch = input.launch && typeof input.launch === 'object' ? input.launch : {};
   const launchEnv = input.env ?? launch.env;
+  const explicitCommand = optionalString(input.command ?? input.launchCommand ?? launch.command);
+  const command = explicitCommand || (input.gameDir ? 'bash' : null);
+  const rawArgs = input.args ?? input.launchArgs ?? launch.args;
   return {
-    command: optionalString(input.command ?? input.launchCommand ?? launch.command),
-    args: parseArgList(input.args ?? input.launchArgs ?? launch.args),
-    cwd: optionalString(input.cwd ?? input.launchCwd ?? launch.cwd),
+    command,
+    args: rawArgs === undefined && command && !explicitCommand ? ['start.sh'] : parseArgList(rawArgs),
+    cwd: optionalString(input.cwd ?? input.launchCwd ?? launch.cwd ?? input.gameDir),
     envKeys: Object.keys(sortedObject(launchEnv)),
     windowId: optionalString(input.windowId ?? input.window_id),
     windowTitle: optionalString(input.windowTitle ?? input.window_title),
     windowClass: optionalString(input.windowClass ?? input.window_class),
     windowWaitMs: optionalNumber(input.windowWaitMs ?? input.window_wait_ms, 15000),
     resizeWindow: input.resizeWindow !== false,
+  };
+}
+
+function webStartConfig(input = {}, options = {}) {
+  const launch = input.launch && typeof input.launch === 'object' ? input.launch : {};
+  const launchEnv = input.env ?? launch.env;
+  const explicitCommand = optionalString(input.command ?? input.launchCommand ?? launch.command);
+  const command = explicitCommand || (input.gameDir ? 'bash' : null);
+  const rawArgs = input.args ?? input.launchArgs ?? launch.args;
+  return {
+    launchUrl: targetUrl(input, options),
+    port: optionalPositiveInteger(input.port),
+    command,
+    args: rawArgs === undefined && command && !explicitCommand ? ['start.sh'] : parseArgList(rawArgs),
+    cwd: optionalString(input.cwd ?? input.launchCwd ?? launch.cwd ?? input.gameDir),
+    envKeys: Object.keys(sortedObject(launchEnv)),
+    httpTimeoutMs: optionalNumber(input.httpTimeoutMs ?? input.http_timeout_ms, 60000),
   };
 }
 
@@ -178,9 +209,11 @@ function startSessionConfig(input, options = {}) {
     };
   }
 
+  const web = webStartConfig(input, options);
   return {
     ...common,
-    launchUrl: targetUrl(input, options),
+    launchUrl: web.launchUrl,
+    web,
     browser: {
       headless: record ? false : input.headless !== false,
       channel: optionalString(input.channel),
@@ -225,6 +258,7 @@ module.exports = {
   targetKind,
   normalizeTargetKind,
   linuxStartConfig,
+  webStartConfig,
   parseArgList,
   startSessionConfig,
   diffStartSessionConfig,

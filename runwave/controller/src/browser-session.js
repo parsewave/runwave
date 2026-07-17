@@ -1,5 +1,7 @@
 const fs = require('fs');
+const http = require('http');
 const path = require('path');
+const { spawn } = require('child_process');
 const { chromium } = require('playwright');
 const { AudioVideoRecorder } = require('./audio-recorder');
 const { ensureDir, safeName, sleep, timestamp } = require('./file-utils');
@@ -15,6 +17,9 @@ const DEFAULT_CHROMIUM_ARGS = [
   '--enable-unsafe-swiftshader',
   '--autoplay-policy=no-user-gesture-required',
 ];
+const DEFAULT_HTTP_TIMEOUT_MS = 60000;
+const DEFAULT_PROCESS_STOP_WAIT_MS = 5000;
+const DEFAULT_PROCESS_KILL_WAIT_MS = 5000;
 
 function chromiumArgs(config = {}, env = process.env) {
   const configured = parseArgList(config.chromiumArgs ?? env.RUNWAVE_CHROMIUM_ARGS);
@@ -53,6 +58,76 @@ function chromiumLaunchArgs(config = {}, env = process.env) {
 
 function launchHeadless(config = {}) {
   return isRecording(config) ? false : config.headless !== false;
+}
+
+function webLaunchConfig(config = {}) {
+  const launch = config.launch && typeof config.launch === 'object' ? config.launch : {};
+  const explicitCommand = config.command || config.launchCommand || launch.command || null;
+  const command = explicitCommand || (config.gameDir ? 'bash' : null);
+  const rawArgs = config.args ?? config.launchArgs ?? launch.args;
+  return {
+    command,
+    args: rawArgs === undefined && command && !explicitCommand ? ['start.sh'] : parseArgList(rawArgs),
+    cwd: config.cwd || config.launchCwd || launch.cwd || config.gameDir || process.cwd(),
+    env: launch.env || config.env || null,
+    port: config.port,
+    httpTimeoutMs: Number(config.httpTimeoutMs ?? config.http_timeout_ms ?? DEFAULT_HTTP_TIMEOUT_MS),
+  };
+}
+
+function processHasClosed(child) {
+  return Boolean(child && (child.exitCode !== null || child.signalCode !== null));
+}
+
+function signalProcessGroup(child, signal) {
+  if (!child || !child.pid) return false;
+  const target = process.platform === 'win32' ? child.pid : -child.pid;
+  try {
+    process.kill(target, signal);
+    return true;
+  } catch (error) {
+    if (error && error.code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+async function waitForProcessClose(child, timeoutMs) {
+  if (!child || processHasClosed(child)) return true;
+  return new Promise((resolve) => {
+    let timer = null;
+    const onClose = () => {
+      if (timer) clearTimeout(timer);
+      resolve(true);
+    };
+    child.once('close', onClose);
+    timer = setTimeout(() => {
+      child.off('close', onClose);
+      resolve(processHasClosed(child));
+    }, Math.max(0, timeoutMs));
+  });
+}
+
+function waitForHttp(url, timeoutMs = DEFAULT_HTTP_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve, reject) => {
+    const check = () => {
+      const req = http.get(url, (res) => {
+        res.resume();
+        if (res.statusCode >= 200 && res.statusCode < 500) resolve();
+        else retry();
+      });
+      req.on('error', retry);
+      req.setTimeout(1000, () => {
+        req.destroy();
+        retry();
+      });
+    };
+    const retry = () => {
+      if (Date.now() > deadline) reject(new Error(`timed out waiting for ${url}`));
+      else setTimeout(check, 500);
+    };
+    check();
+  });
 }
 
 async function pageViewportVideoSource(page, env = process.env) {
@@ -119,6 +194,9 @@ class BrowserSession {
     this.context = null;
     this.page = null;
     this.launchUrl = targetUrl(config);
+    this.launch = webLaunchConfig(config);
+    this.process = null;
+    this.processError = null;
     this.stateExpression = config.stateExpression || null;
     this.videoDir = null;
     this.audioDir = undefined;
@@ -140,6 +218,7 @@ class BrowserSession {
 
   async start() {
     this.timeSync('browser.start.ensure_run_dir', { dir: this.paths.runDir }, () => ensureDir(this.paths.runDir));
+    await this.time('browser.start.game_process', () => this.startGameProcess());
     const record = isRecording(this.config);
     if (record) {
       this.videoDir = this.timeSync('browser.start.ensure_video_dir', () => ensureDir(path.join(this.paths.runDir, 'video')));
@@ -189,6 +268,36 @@ class BrowserSession {
       );
       await this.time('browser.start.audio_video_recorder_start', () => this.audioRecorder.start());
     }
+  }
+
+  async startGameProcess() {
+    if (!this.launch.command) return null;
+    const stdout = fs.openSync(path.join(this.paths.runDir, 'web-game.stdout.log'), 'a');
+    const stderr = fs.openSync(path.join(this.paths.runDir, 'web-game.stderr.log'), 'a');
+    this.process = spawn(this.launch.command, this.launch.args, {
+      cwd: this.launch.cwd,
+      env: {
+        ...process.env,
+        ...(this.launch.port ? { PORT: String(this.launch.port) } : {}),
+        ...(this.launch.env || {}),
+      },
+      detached: true,
+      stdio: ['ignore', stdout, stderr],
+    });
+    const closeLogs = () => {
+      try { fs.closeSync(stdout); } catch {}
+      try { fs.closeSync(stderr); } catch {}
+    };
+    this.process.on('error', (error) => {
+      this.processError = error;
+      closeLogs();
+    });
+    this.process.on('close', closeLogs);
+    await this.time('browser.start.wait_for_http', { url: this.launchUrl, timeoutMs: this.launch.httpTimeoutMs }, () =>
+      waitForHttp(this.launchUrl, this.launch.httpTimeoutMs)
+    );
+    if (this.processError) throw new Error(`web game process failed to start: ${this.processError.message}`);
+    return this.process;
   }
 
   async navigate(input) {
@@ -364,13 +473,35 @@ class BrowserSession {
     );
   }
 
+  async stopGameProcess() {
+    if (!this.process || processHasClosed(this.process)) return;
+    await this.time('browser.close.terminate_process', async () => {
+      signalProcessGroup(this.process, 'SIGTERM');
+      if (!(await waitForProcessClose(this.process, DEFAULT_PROCESS_STOP_WAIT_MS))) {
+        signalProcessGroup(this.process, 'SIGKILL');
+        await waitForProcessClose(this.process, DEFAULT_PROCESS_KILL_WAIT_MS);
+      }
+    });
+  }
+
   async close() {
     let audioVideoPath = null;
-    if (this.audioRecorder) {
-      audioVideoPath = await this.time('browser.close.audio_video_stop', () => this.audioRecorder.stop());
+    let closeError = null;
+    try {
+      if (this.audioRecorder) {
+        audioVideoPath = await this.time('browser.close.audio_video_stop', () => this.audioRecorder.stop());
+      }
+      if (this.context) await this.time('browser.close.context_close', () => this.context.close());
+      if (this.browser) await this.time('browser.close.browser_close', () => this.browser.close());
+    } catch (error) {
+      closeError = error;
     }
-    if (this.context) await this.time('browser.close.context_close', () => this.context.close());
-    if (this.browser) await this.time('browser.close.browser_close', () => this.browser.close());
+    try {
+      await this.stopGameProcess();
+    } catch (error) {
+      if (!closeError) closeError = error;
+    }
+    if (closeError) throw closeError;
     return {
       video: audioVideoPath,
       audioVideo: audioVideoPath || undefined,
@@ -385,4 +516,5 @@ module.exports = {
   chromiumLaunchArgs,
   launchHeadless,
   pageViewportVideoSource,
+  webLaunchConfig,
 };

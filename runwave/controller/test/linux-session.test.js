@@ -63,6 +63,25 @@ test('linux launch config reads command, args, cwd, and window selectors', () =>
   );
 });
 
+test('linux launch config defaults game directories to start.sh', () => {
+  assert.deepEqual(
+    linuxLaunchConfig({
+      gameDir: '/tmp/native-game',
+    }),
+    {
+      command: 'bash',
+      args: ['start.sh'],
+      cwd: '/tmp/native-game',
+      env: null,
+      windowId: null,
+      windowTitle: null,
+      windowClass: null,
+      windowWaitMs: 15000,
+      resizeWindow: true,
+    }
+  );
+});
+
 test('linux display capture geometry uses viewport and display origin', () => {
   assert.deepEqual(
     displayCaptureGeometry(
@@ -132,13 +151,24 @@ test('linux state keeps capture viewport separate from focused window geometry',
   session.currentWindowGeometry = () => ({ id: '123', x: 90, y: 51, width: 1099, height: 618 });
 
   assert.deepEqual(await session.state(), {
-    targetKind: 'linux',
     display: ':99',
     viewport: { width: 1280, height: 720 },
     capture: { x: 0, y: 0, width: 1280, height: 720 },
     window: { id: '123', x: 90, y: 51, width: 1099, height: 618 },
     process: null,
   });
+});
+
+test('linux drag reports that drag is unavailable for the session', async () => {
+  const session = new LinuxSession(
+    { viewport: { width: 1280, height: 720 } },
+    { runDir: '/tmp/runwave-test' }
+  );
+
+  await assert.rejects(
+    () => session.drag({ from: { x: 1, y: 2 }, to: { x: 3, y: 4 }, button: 'left' }),
+    /drag action is not available for this game session/
+  );
 });
 
 test('linux gstreamer screenshot args can capture a full display viewport', () => {
