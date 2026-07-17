@@ -260,7 +260,7 @@ class LinuxSession {
       }
     };
 
-    const hasExplicitSelector = Boolean(this.windowId || this.launch.windowTitle || this.launch.windowClass);
+    const hasExplicitSelector = Boolean(this.launch.windowId || this.launch.windowTitle || this.launch.windowClass);
     if (this.windowId) addId(this.windowId);
     if (this.launch.windowTitle) {
       tryAdd(() => this.xdotool(['search', '--onlyvisible', '--name', this.launch.windowTitle]));
@@ -271,8 +271,8 @@ class LinuxSession {
     if (this.process && this.process.pid) {
       tryAdd(() => this.xdotool(['search', '--onlyvisible', '--pid', String(this.process.pid)]));
     }
-    if (!candidates.length && !hasExplicitSelector) {
-      add(this.xdotool(['search', '--onlyvisible', '--name', '.']));
+    if (!hasExplicitSelector) {
+      tryAdd(() => this.xdotool(['search', '--onlyvisible', '--name', '.']));
     }
     return candidates;
   }
@@ -297,6 +297,27 @@ class LinuxSession {
     return best;
   }
 
+  refreshWindow() {
+    const geometry = this.chooseWindow();
+    this.windowId = geometry.id;
+    this.geometry = geometry;
+    return geometry;
+  }
+
+  currentWindowGeometry() {
+    if (this.windowId) {
+      try {
+        const geometry = this.windowGeometry(this.windowId);
+        this.geometry = geometry;
+        return geometry;
+      } catch {
+        // Some native launchers replace their initial X11 window after startup.
+        // Re-scan instead of treating the cached id as authoritative.
+      }
+    }
+    return this.refreshWindow();
+  }
+
   async waitForWindow() {
     const waitMs = Number.isFinite(this.launch.windowWaitMs) && this.launch.windowWaitMs > 0
       ? this.launch.windowWaitMs
@@ -319,11 +340,20 @@ class LinuxSession {
   }
 
   focusWindow() {
-    if (!this.windowId) return;
+    if (!this.windowId) this.refreshWindow();
     try {
       this.xdotool(['windowactivate', '--sync', this.windowId], { timeoutMs: 2000 });
     } catch {
-      this.xdotool(['windowfocus', this.windowId], { timeoutMs: 2000 });
+      try {
+        this.xdotool(['windowfocus', this.windowId], { timeoutMs: 2000 });
+      } catch (error) {
+        this.refreshWindow();
+        try {
+          this.xdotool(['windowactivate', '--sync', this.windowId], { timeoutMs: 2000 });
+        } catch {
+          this.xdotool(['windowfocus', this.windowId], { timeoutMs: 2000 });
+        }
+      }
     }
   }
 
@@ -341,7 +371,7 @@ class LinuxSession {
     this.windowId = this.geometry.id;
     this.timeSync('linux.start.resize_window', () => this.resizeWindow());
     this.timeSync('linux.start.focus_window', () => this.focusWindow());
-    this.geometry = this.timeSync('linux.start.geometry_after_focus', () => this.windowGeometry(this.windowId));
+    this.geometry = this.timeSync('linux.start.geometry_after_focus', () => this.currentWindowGeometry());
     this.config.viewport = { width: this.geometry.width, height: this.geometry.height };
     this.config.videoSize = { width: this.geometry.width, height: this.geometry.height };
 
@@ -377,7 +407,7 @@ class LinuxSession {
     const fileName = `${safeName(name || `capture-${timestamp()}`)}.png`;
     const file = path.join(outputDir, fileName);
     ensureDir(outputDir);
-    this.geometry = this.timeSync('linux.screenshot.geometry', () => this.windowGeometry(this.windowId));
+    this.geometry = this.timeSync('linux.screenshot.geometry', () => this.currentWindowGeometry());
     const args = gstScreenshotArgs(
       { ...this.config, videoSource: `${process.env.DISPLAY || ':0'}+${this.geometry.x},${this.geometry.y}` },
       file,
@@ -491,7 +521,7 @@ class LinuxSession {
     let geometry = this.geometry;
     if (this.windowId) {
       try {
-        geometry = this.timeSync('linux.state.geometry', () => this.windowGeometry(this.windowId));
+        geometry = this.timeSync('linux.state.geometry', () => this.currentWindowGeometry());
         this.geometry = geometry;
       } catch {}
     }

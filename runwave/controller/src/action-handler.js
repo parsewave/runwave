@@ -123,13 +123,26 @@ async function writeStopResponse(runtime, input) {
   const outputDir = runtime.profiler.timeSync('action.stop.action_dir', { action_name: input.action_name }, () =>
     output.actionDir(input.action_name)
   );
-  const finalState = await readState(runtime, input);
-  const screenshot =
-    input.finalScreenshot === false || config.finalScreenshot === false
-      ? null
-      : await runtime.profiler.time('action.stop.screenshot', { action_name: input.action_name }, () =>
-          browser.screenshot(outputDir, '999-final')
-        );
+  let finalState = null;
+  let stateError = null;
+  try {
+    finalState = await readState(runtime, input);
+  } catch (error) {
+    stateError = error.message;
+    runtime.profiler.mark('action.stop.state_error', { action_name: input.action_name, error: stateError });
+  }
+  let screenshot = null;
+  let screenshotError = null;
+  if (input.finalScreenshot !== false && config.finalScreenshot !== false) {
+    try {
+      screenshot = await runtime.profiler.time('action.stop.screenshot', { action_name: input.action_name }, () =>
+        browser.screenshot(outputDir, '999-final')
+      );
+    } catch (error) {
+      screenshotError = error.message;
+      runtime.profiler.mark('action.stop.screenshot_error', { action_name: input.action_name, error: screenshotError });
+    }
+  }
   const recording = await runtime.profiler.time('action.stop.browser_close', { action_name: input.action_name }, () => browser.close());
   const video = typeof recording === 'string' ? recording : recording.video;
 
@@ -149,6 +162,8 @@ async function writeStopResponse(runtime, input) {
     if (recording.audioVideo) payload.audioVideo = recording.audioVideo;
   }
   if (screenshot) payload.screenshot = screenshot;
+  if (stateError) payload.stateError = stateError;
+  if (screenshotError) payload.screenshotError = screenshotError;
   const response = runtime.profiler.timeSync('action.stop.write_response', { action_name: input.action_name }, () =>
     output.response(input.action_name, payload)
   );
