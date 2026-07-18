@@ -87,7 +87,9 @@ For Linux targets, `--viewport` is the virtual display capture size. Runwave
 records and screenshots that full display area, then focuses the detected game
 window for input. `start.sh` receives `RUNWAVE_VIEWPORT_WIDTH` and
 `RUNWAVE_VIEWPORT_HEIGHT` so wrappers can pass engine-specific size flags
-without hardcoding dimensions.
+without hardcoding dimensions. Linux sessions wait 30 seconds after launch
+before the first agent call by default; pass `--launch-settle-ms 0` to disable
+that for fast smoke tests.
 
 The package also includes a low-level controller CLI for direct browser actions:
 

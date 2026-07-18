@@ -68,6 +68,8 @@ Useful `start` options:
 - `windowTitle`, `windowClass`, or `windowId`: optional Linux window selector.
   If omitted, Runwave chooses the largest visible X11 window after launch.
 - `windowWaitMs`: native Linux window wait timeout. Defaults to 15000.
+- `launchSettleMs`: native Linux delay after launch and recording start before
+  the first screenshot/agent call. Defaults to 30000. Use 0 for smoke tests.
 - `viewport`: for native Linux sessions, the full X11 display area to
   screenshot, record, grid, and use for pointer coordinates. The detected game
   window is used for focus and best-effort resizing, not as the capture crop.

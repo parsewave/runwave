@@ -7,6 +7,7 @@ const { drawGridOnScreenshot } = require('./grid-overlay');
 const { parseArgList } = require('./protocol');
 
 const DEFAULT_WINDOW_WAIT_MS = 15000;
+const DEFAULT_LINUX_LAUNCH_SETTLE_MS = 30000;
 const DEFAULT_TOOL_TIMEOUT_MS = 5000;
 const DEFAULT_VIEWPORT = { width: 1024, height: 620 };
 
@@ -48,6 +49,13 @@ function linuxLaunchConfig(config = {}) {
   const explicitCommand = config.command || config.launchCommand || launch.command || null;
   const command = explicitCommand || (config.gameDir ? 'bash' : null);
   const rawArgs = config.args ?? config.launchArgs ?? launch.args;
+  const launchSettleMs = Number(
+    config.launchSettleMs
+    ?? config.launch_settle_ms
+    ?? launch.launchSettleMs
+    ?? launch.launch_settle_ms
+    ?? DEFAULT_LINUX_LAUNCH_SETTLE_MS
+  );
   return {
     command,
     args: rawArgs === undefined && command && !explicitCommand ? ['start.sh'] : parseArgList(rawArgs),
@@ -57,6 +65,7 @@ function linuxLaunchConfig(config = {}) {
     windowTitle: config.windowTitle || config.window_title || null,
     windowClass: config.windowClass || config.window_class || null,
     windowWaitMs: Number(config.windowWaitMs ?? config.window_wait_ms ?? DEFAULT_WINDOW_WAIT_MS),
+    launchSettleMs: Number.isFinite(launchSettleMs) && launchSettleMs >= 0 ? Math.round(launchSettleMs) : DEFAULT_LINUX_LAUNCH_SETTLE_MS,
     resizeWindow: config.resizeWindow !== false,
   };
 }
@@ -434,6 +443,10 @@ class LinuxSession {
         this.profiler ? this.profiler.child('audio-video-recorder') : null
       );
       await this.time('linux.start.audio_video_recorder_start', () => this.audioRecorder.start());
+    }
+
+    if (this.launch.launchSettleMs > 0) {
+      await this.time('linux.start.launch_settle', { delayMs: this.launch.launchSettleMs }, () => sleep(this.launch.launchSettleMs));
     }
   }
 

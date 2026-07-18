@@ -215,6 +215,7 @@ function startOverridesFromJob(job = {}, audioCapture = {}) {
     gridScreenshots: job.gridScreenshots,
     markGridRows: job.markGridRows,
     markGridCols: job.markGridCols,
+    launchSettleMs: job.launchSettleMs,
   };
   if (job.videoSize) overrides.videoSize = job.videoSize;
   return overrides;

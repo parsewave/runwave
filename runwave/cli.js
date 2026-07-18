@@ -24,6 +24,7 @@ function usage() {
     '  --kind <web|linux>           target kind (default web)',
     '  --playtest-duration-ms <n>   max playtest wall time in ms (default 150000)',
     '  --min-playtest-ms <n>        floor before the agent may self-stop (default duration - 10000)',
+    '  --launch-settle-ms <n>       linux only: wait after launch before first agent call (default 30000)',
     '  --model <slug>               OpenRouter model slug (sets RUNWAVE_AGENT_MODEL)',
     '  --verbose, -v                forward verbose flag to the runwave controller',
     '  --help, -h                   show this help',
@@ -50,6 +51,7 @@ function parseArgs(argv) {
     if (arg === '--viewport') { out.viewport = parseViewport(next()); continue; }
     if (arg === '--playtest-duration-ms') { out.playtestDurationMs = Number(next()); continue; }
     if (arg === '--min-playtest-ms') { out.minPlaytestMs = Number(next()); continue; }
+    if (arg === '--launch-settle-ms') { out.startOverrides.launchSettleMs = Number(next()); continue; }
     if (arg === '--model') { out.model = next(); continue; }
     throw new Error(`unknown argument: ${arg}`);
   }

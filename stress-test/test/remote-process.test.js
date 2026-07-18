@@ -128,6 +128,7 @@ test('remote playtest start overrides carry mark grid dimensions', () => {
       markGridCols: 24,
       gridScreenshots: true,
       videoSize: { width: 1280, height: 720 },
+      launchSettleMs: 30000,
     },
     { audioSource: 'pulse.monitor' }
   );
@@ -135,6 +136,7 @@ test('remote playtest start overrides carry mark grid dimensions', () => {
   assert.equal(overrides.markGridRows, 16);
   assert.equal(overrides.markGridCols, 24);
   assert.equal(overrides.gridScreenshots, true);
+  assert.equal(overrides.launchSettleMs, 30000);
   assert.equal(overrides.audioSource, 'pulse.monitor');
   assert.deepEqual(overrides.videoSize, { width: 1280, height: 720 });
 });

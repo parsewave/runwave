@@ -156,6 +156,7 @@ function linuxStartConfig(input = {}) {
     windowTitle: optionalString(input.windowTitle ?? input.window_title),
     windowClass: optionalString(input.windowClass ?? input.window_class),
     windowWaitMs: optionalNumber(input.windowWaitMs ?? input.window_wait_ms, 15000),
+    launchSettleMs: Math.max(0, optionalNumber(input.launchSettleMs ?? input.launch_settle_ms ?? launch.launchSettleMs ?? launch.launch_settle_ms, 30000)),
     resizeWindow: input.resizeWindow !== false,
   };
 }

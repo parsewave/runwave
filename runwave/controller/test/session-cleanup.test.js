@@ -162,6 +162,7 @@ test('linux start configuration does not require a browser URL', () => {
     windowTitle: 'Native Game',
     windowClass: null,
     windowWaitMs: 15000,
+    launchSettleMs: 30000,
     resizeWindow: true,
   });
 });
@@ -187,6 +188,7 @@ test('linux start configuration can launch a game directory with the default scr
     windowTitle: null,
     windowClass: null,
     windowWaitMs: 15000,
+    launchSettleMs: 30000,
     resizeWindow: true,
   });
 });

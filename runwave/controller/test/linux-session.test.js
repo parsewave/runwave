@@ -48,6 +48,7 @@ test('linux launch config reads command, args, cwd, and window selectors', () =>
       windowTitle: 'Game',
       windowClass: 'GameClass',
       windowWaitMs: 25000,
+      launchSettleMs: 12000,
     }),
     {
       command: './game',
@@ -58,6 +59,7 @@ test('linux launch config reads command, args, cwd, and window selectors', () =>
       windowTitle: 'Game',
       windowClass: 'GameClass',
       windowWaitMs: 25000,
+      launchSettleMs: 12000,
       resizeWindow: true,
     }
   );
@@ -77,6 +79,7 @@ test('linux launch config defaults game directories to start.sh', () => {
       windowTitle: null,
       windowClass: null,
       windowWaitMs: 15000,
+      launchSettleMs: 30000,
       resizeWindow: true,
     }
   );

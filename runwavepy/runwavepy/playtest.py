@@ -64,6 +64,7 @@ def run_playtest(
     viewport: Optional[Mapping[str, int]] = None,
     playtest_duration_ms: Optional[int] = None,
     min_playtest_ms: Optional[int] = None,
+    launch_settle_ms: Optional[int] = None,
     model: Optional[str] = None,
     verbose: bool = False,
     cli_path: Optional[PathLike] = None,
@@ -94,6 +95,9 @@ def run_playtest(
         Max playtest wall time. Defaults to 150000 (2m30s) if omitted.
     min_playtest_ms:
         Floor before the agent may self-stop. Defaults to duration - 10000.
+    launch_settle_ms:
+        Native Linux only. Milliseconds to wait after launch before the first
+        agent call. Defaults to RunWave's Linux controller default.
     model:
         OpenRouter model slug. Sets ``RUNWAVE_AGENT_MODEL`` for the CLI.
     verbose:
@@ -140,6 +144,8 @@ def run_playtest(
         args += ["--playtest-duration-ms", str(playtest_duration_ms)]
     if min_playtest_ms is not None:
         args += ["--min-playtest-ms", str(min_playtest_ms)]
+    if launch_settle_ms is not None:
+        args += ["--launch-settle-ms", str(launch_settle_ms)]
     if model:
         args += ["--model", model]
     if verbose:
