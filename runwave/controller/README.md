@@ -1,8 +1,9 @@
 # Runwave Controller
 
-The controller is the low-level browser/session layer behind `runwave-controller`.
-It starts browser sessions, captures state and screenshots, executes timed input
-sequences, records WebM output, and writes per-action artifacts.
+The controller is the low-level session layer behind `runwave-controller`.
+It starts browser or native Linux game sessions, captures state and screenshots,
+executes timed input sequences, records WebM output, and writes per-action
+artifacts.
 
 See the top-level [Requirements](../../README.md#requirements) section for the
 Linux, gstreamer, X server/Xvfb, and PulseAudio setup required by `record: true`.
@@ -40,11 +41,44 @@ runwave-controller '{
 }'
 ```
 
+Start a native Linux game:
+
+```sh
+runwave-controller '{
+  "action": "start",
+  "action_name": "run-start",
+  "session_id": "playtest-001",
+  "kind": "linux",
+  "command": "./game",
+  "args": ["--windowed"],
+  "cwd": "/absolute/path/to/game",
+  "windowTitle": "Native Game",
+  "record": true,
+  "viewport": { "width": 1280, "height": 720 }
+}'
+```
+
 Useful `start` options:
 
-- `url` or `file`: required target.
+- `kind`: `web` by default. Use `linux` for a native Linux/X11 game.
+- `url` or `file`: required target for web sessions.
+- `command`, `args`, `cwd`: native Linux launch command. If `kind` is `linux`
+  and no command is provided, the controller attempts to attach to an existing
+  matching visible window.
+- `windowTitle`, `windowClass`, or `windowId`: optional Linux window selector.
+  If omitted, Runwave chooses the largest visible X11 window after launch.
+- `windowWaitMs`: native Linux window wait timeout. Defaults to 15000.
+- `launchSettleMs`: native Linux delay after launch and recording start before
+  the first screenshot/agent call. Defaults to 30000. Use 0 for smoke tests.
+- `viewport`: for native Linux sessions, the full X11 display area to
+  screenshot, record, grid, and use for pointer coordinates. The detected game
+  window is used for focus and best-effort resizing, not as the capture crop.
+  The launched process also receives `RUNWAVE_VIEWPORT_WIDTH`,
+  `RUNWAVE_VIEWPORT_HEIGHT`, `RUNWAVE_CAPTURE_X`, `RUNWAVE_CAPTURE_Y`,
+  `RUNWAVE_CAPTURE_WIDTH`, and `RUNWAVE_CAPTURE_HEIGHT` environment variables
+  for optional wrapper-side size hints.
 - `session_id`: required session identifier. Reuse it for all actions targeting
-  the same browser session.
+  the same controller session.
 - `record`: enable gstreamer audio+video WebM recording. Requires all the
   prerequisites in the top-level [Requirements](../../README.md#requirements)
   section. Chromium is launched headed with kiosk/fullscreen flags so
@@ -153,8 +187,8 @@ runwave-controller '{
 }'
 ```
 
-Use `mode: "mouse"` for canvas and pointer-based games. Use `mode: "html5"`
-for browser-native draggable/drop elements.
+Use `mode: "mouse"` for canvas, pointer-based games, and native Linux games.
+Use `mode: "html5"` only for browser-native draggable/drop elements.
 Drag endpoints can also use grid cells:
 
 ```json
@@ -183,7 +217,7 @@ runwave-controller '{
 `view_move` actions use relative CSS-pixel deltas. Positive `dx` moves right,
 negative `dx` moves left, positive `dy` moves down, and negative `dy` moves up.
 
-Navigate or reset:
+Navigate or reset web sessions:
 
 ```sh
 runwave-controller '{"action":"reset","action_name":"reset-001","session_id":"playtest-001"}'
@@ -215,6 +249,14 @@ Every response includes generic browser state:
 - Active element summary.
 - Pointer-lock element summary.
 - Canvas positions and sizes.
+
+For native Linux sessions, state includes:
+
+- target kind
+- X11 display
+- viewport/capture dimensions for the full recorded display
+- selected window id and position
+- launched process pid/running status when the controller owns the process
 
 For game-specific state, pass a `stateExpression` on `start` or an individual
 operation:

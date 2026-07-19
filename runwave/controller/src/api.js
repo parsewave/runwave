@@ -13,6 +13,7 @@ const {
   parseCliInput,
   sessionId,
   startSessionConfig,
+  targetKind,
   targetUrl,
   usage,
 } = require('./protocol');
@@ -271,6 +272,7 @@ function sessionSummary(file) {
       port: session.port,
       sessionDir: session.sessionDir,
       outputRoot: session.outputRoot,
+      targetKind: session.targetKind || null,
       launchUrl: session.launchUrl,
       startedAt: session.startedAt,
       sessionFile: file,
@@ -303,7 +305,7 @@ function listSessions() {
 async function start(input, profiler) {
   profiler.timeSync('cli.start.assert_session_id', () => assertSessionId(input));
   const file = inputSessionFile(input);
-  profiler.timeSync('cli.start.target_url', () => targetUrl(input));
+  if (targetKind(input) === 'web') profiler.timeSync('cli.start.target_url', () => targetUrl(input));
   if (input.force) {
     await profiler.time('cli.start.force_stop_existing_session', { sessionFile: file }, () =>
       stopExistingSessionForForce(input, profiler)

@@ -88,7 +88,7 @@ test('start rejects a live session with a different target instead of silently r
           },
         }
       ),
-      /different start configuration \(launchUrl\).*"force": true/
+      /different start configuration \(launchUrl, web\).*"force": true/
     );
 
     assert.deepEqual(posted.map((entry) => entry.payload.action), ['ping']);
@@ -128,7 +128,126 @@ test('start rejects a live session with different viewport or launch options', a
           postJson: async (port, payload) => ({ ok: true, action: payload.action }),
         }
       ),
-      /different start configuration \(browser, context\).*"force": true/
+      /different start configuration \((browser, context|context, browser)\).*"force": true/
+    );
+
+    assert.equal(fs.existsSync(sessionFile), true);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('linux start configuration does not require a browser URL', () => {
+  const config = startSessionConfig({
+    action: 'start',
+    action_name: 'linux-start',
+    kind: 'linux',
+    command: './game',
+    args: ['--windowed'],
+    cwd: '/tmp/game',
+    windowTitle: 'Native Game',
+    viewport: { width: 1280, height: 720 },
+    record: true,
+  });
+
+  assert.equal(config.kind, 'linux');
+  assert.equal(config.launchUrl, undefined);
+  assert.deepEqual(config.context.viewport, { width: 1280, height: 720 });
+  assert.deepEqual(config.linux, {
+    command: './game',
+    args: ['--windowed'],
+    cwd: '/tmp/game',
+    envKeys: [],
+    windowId: null,
+    windowTitle: 'Native Game',
+    windowClass: null,
+    windowWaitMs: 15000,
+    launchSettleMs: 30000,
+    resizeWindow: true,
+  });
+});
+
+test('linux start configuration can launch a game directory with the default script', () => {
+  const config = startSessionConfig({
+    action: 'start',
+    action_name: 'linux-start',
+    kind: 'linux',
+    gameDir: '/tmp/native-game',
+    viewport: { width: 1280, height: 720 },
+    record: true,
+  });
+
+  assert.equal(config.kind, 'linux');
+  assert.equal(config.launchUrl, undefined);
+  assert.deepEqual(config.linux, {
+    command: 'bash',
+    args: ['start.sh'],
+    cwd: '/tmp/native-game',
+    envKeys: [],
+    windowId: null,
+    windowTitle: null,
+    windowClass: null,
+    windowWaitMs: 15000,
+    launchSettleMs: 30000,
+    resizeWindow: true,
+  });
+});
+
+test('web start configuration can launch a game directory through a local port', () => {
+  const config = startSessionConfig({
+    action: 'start',
+    action_name: 'web-start',
+    kind: 'web',
+    gameDir: '/tmp/web-game',
+    port: 4123,
+    viewport: { width: 1280, height: 720 },
+    record: true,
+  });
+
+  assert.equal(config.kind, 'web');
+  assert.equal(config.launchUrl, 'http://127.0.0.1:4123/');
+  assert.deepEqual(config.context.viewport, { width: 1280, height: 720 });
+  assert.equal(config.web.launchUrl, 'http://127.0.0.1:4123/');
+  assert.equal(config.web.port, 4123);
+  assert.equal(config.web.command, 'bash');
+  assert.deepEqual(config.web.args, ['start.sh']);
+  assert.equal(config.web.cwd, '/tmp/web-game');
+  assert.equal(config.web.httpTimeoutMs, 60000);
+});
+
+test('linux start rejects a live session with a different native launch command', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-linux-target-mismatch-'));
+  const originalStart = {
+    action: 'start',
+    action_name: 'old-linux-start',
+    kind: 'linux',
+    command: './game',
+    args: ['--windowed'],
+    cwd: '/tmp/game',
+    windowTitle: 'Native Game',
+    viewport: { width: 1280, height: 720 },
+  };
+  const sessionFile = writeSession(tmpDir, {
+    pid: 12345,
+    port: 43210,
+    startConfig: startSessionConfig(originalStart),
+  });
+
+  try {
+    await assert.rejects(
+      existingSessionStart(
+        {
+          ...originalStart,
+          action_name: 'new-linux-start',
+          command: './other-game',
+        },
+        profiler(),
+        {
+          sessionFilePath: sessionFile,
+          postJson: async (port, payload) => ({ ok: true, action: payload.action }),
+        }
+      ),
+      /different start configuration \(linux\).*"force": true/
     );
 
     assert.equal(fs.existsSync(sessionFile), true);

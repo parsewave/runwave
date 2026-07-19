@@ -1,14 +1,11 @@
 'use strict';
 
 const fs = require('fs');
-const http = require('http');
 const path = require('path');
 const { spawn } = require('child_process');
+const { normalizeTargetKind } = require('./controller/src/protocol');
 
 const DEFAULT_PLAYTEST_DURATION_MS = 150000;
-const DEFAULT_PROCESS_STOP_WAIT_MS = 5000;
-const DEFAULT_PROCESS_KILL_WAIT_MS = 5000;
-const DEFAULT_HTTP_TIMEOUT_MS = 60000;
 
 function defaultLog(event, fields = {}) {
   process.stdout.write(`${JSON.stringify({ ts: new Date().toISOString(), event, ...fields })}\n`);
@@ -16,10 +13,6 @@ function defaultLog(event, fields = {}) {
 
 function mkdirp(dir) {
   fs.mkdirSync(dir, { recursive: true });
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
 
 function assertGameDir(gameDir) {
@@ -70,93 +63,6 @@ function run(command, args, options = {}, log = defaultLog) {
   });
 }
 
-function spawnLong(command, args, options = {}, log = defaultLog) {
-  log('process.start', { command, args, cwd: options.cwd });
-  const child = spawn(command, args, {
-    cwd: options.cwd,
-    env: options.env || process.env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: options.detached !== false,
-  });
-  child.stdout.on('data', (chunk) => process.stdout.write(chunk));
-  child.stderr.on('data', (chunk) => process.stderr.write(chunk));
-  child.on('close', (code) => log('process.end', { command, code }));
-  return child;
-}
-
-function processHasClosed(child) {
-  return Boolean(child && (child.exitCode !== null || child.signalCode !== null));
-}
-
-function signalLongProcess(child, signal) {
-  if (!child || !child.pid) return false;
-  const target = process.platform === 'win32' ? child.pid : -child.pid;
-  try {
-    process.kill(target, signal);
-    return true;
-  } catch (error) {
-    if (error && error.code === 'ESRCH') return false;
-    throw error;
-  }
-}
-
-function waitForProcessClose(child, timeoutMs) {
-  if (!child || processHasClosed(child)) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    let timer = null;
-    const onClose = () => {
-      if (timer) clearTimeout(timer);
-      resolve(true);
-    };
-    child.once('close', onClose);
-    timer = setTimeout(() => {
-      child.off('close', onClose);
-      resolve(processHasClosed(child));
-    }, Math.max(0, timeoutMs));
-  });
-}
-
-async function stopLongProcess(child, options = {}, log = defaultLog) {
-  if (!child || processHasClosed(child)) return { stopped: true, reason: 'already-closed' };
-  const termWaitMs = Math.max(0, Number(options.termWaitMs ?? DEFAULT_PROCESS_STOP_WAIT_MS));
-  const killWaitMs = Math.max(0, Number(options.killWaitMs ?? DEFAULT_PROCESS_KILL_WAIT_MS));
-  const label = options.label || 'process';
-  log('process.stop.start', { label, pid: child.pid, termWaitMs, killWaitMs });
-  if (!signalLongProcess(child, 'SIGTERM')) return { stopped: true, reason: 'not-running' };
-  if (await waitForProcessClose(child, termWaitMs)) {
-    log('process.stop.end', { label, pid: child.pid, escalated: false });
-    return { stopped: true, reason: 'terminated' };
-  }
-  log('process.stop.escalate', { label, pid: child.pid });
-  signalLongProcess(child, 'SIGKILL');
-  const stopped = await waitForProcessClose(child, killWaitMs);
-  log('process.stop.end', { label, pid: child.pid, escalated: true, stopped });
-  return { stopped, reason: stopped ? 'killed' : 'kill-timeout' };
-}
-
-function waitForHttp(url, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  return new Promise((resolve, reject) => {
-    const check = () => {
-      const req = http.get(url, (res) => {
-        res.resume();
-        if (res.statusCode >= 200 && res.statusCode < 500) resolve();
-        else retry();
-      });
-      req.on('error', retry);
-      req.setTimeout(1000, () => {
-        req.destroy();
-        retry();
-      });
-    };
-    const retry = () => {
-      if (Date.now() > deadline) reject(new Error(`timed out waiting for ${url}`));
-      else setTimeout(check, 500);
-    };
-    check();
-  });
-}
-
 function parseActionResponse(result, action) {
   let response;
   try {
@@ -199,6 +105,52 @@ function buildAgentJob({ playtestDurationMs, minPlaytestMs, viewport, playtestIn
   };
 }
 
+function responseState(response) {
+  return (response && response.output && response.output.state) || (response && response.state) || null;
+}
+
+function effectiveViewport(response, fallback) {
+  const state = responseState(response);
+  const viewport = state && state.viewport;
+  if (
+    viewport
+    && Number.isFinite(Number(viewport.width))
+    && Number(viewport.width) > 0
+    && Number.isFinite(Number(viewport.height))
+    && Number(viewport.height) > 0
+  ) {
+    return { width: Math.round(Number(viewport.width)), height: Math.round(Number(viewport.height)) };
+  }
+  return fallback;
+}
+
+function buildStartAction({
+  targetKind,
+  runwaveSessionId,
+  viewport,
+  startOverrides = {},
+  absoluteGameDir,
+  port,
+}) {
+  return {
+    ...startOverrides,
+    action: 'start',
+    action_name: 'start',
+    session_id: runwaveSessionId,
+    kind: targetKind,
+    gameDir: absoluteGameDir,
+    ...(port ? { port } : {}),
+    record: true,
+    viewport,
+    videoSize: startOverrides.videoSize || viewport,
+    outputRoot: 'state/output',
+    outDir: 'recordings/session',
+    initialScreenshot: true,
+    force: true,
+    sessionWaitMs: 120000,
+  };
+}
+
 function controllerArgs(controllerBin, action, verbose) {
   const args = [controllerBin];
   if (verbose) args.push('-v');
@@ -218,18 +170,19 @@ async function runPlaytest(options) {
     verbose = false,
     onLog,
     sessionId,
-    httpTimeoutMs = DEFAULT_HTTP_TIMEOUT_MS,
-    processStopWaitMs = DEFAULT_PROCESS_STOP_WAIT_MS,
-    processKillWaitMs = DEFAULT_PROCESS_KILL_WAIT_MS,
     viewport,
     startOverrides = {},
     env: envOverrides = {},
     onInitialResponse,
+    kind,
+    targetKind: requestedTargetKind,
+    gameKind,
   } = options || {};
 
+  const targetKind = normalizeTargetKind(kind ?? requestedTargetKind ?? gameKind ?? startOverrides.kind ?? startOverrides.targetKind);
   if (!gameDir) throw new Error('runPlaytest: gameDir is required');
   if (!outDir) throw new Error('runPlaytest: outDir is required');
-  if (!port) throw new Error('runPlaytest: port is required');
+  if (targetKind === 'web' && !port) throw new Error('runPlaytest: port is required for web games');
   if (!openRouterApiKey) throw new Error('runPlaytest: openRouterApiKey is required');
   if (!viewport || !Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) || viewport.width <= 0 || viewport.height <= 0) {
     throw new Error('runPlaytest: viewport {width,height} is required');
@@ -261,7 +214,8 @@ async function runPlaytest(options) {
   const summary = {
     gameDir: absoluteGameDir,
     outDir: absoluteOutDir,
-    port,
+    targetKind,
+    ...(targetKind === 'web' ? { port } : {}),
     playtestDurationMs,
     minPlaytestMs: minPlaytestMs ?? Math.max(0, playtestDurationMs - 10000),
     model: model || env.RUNWAVE_AGENT_MODEL || env.OPENROUTER_MODEL || null,
@@ -273,7 +227,6 @@ async function runPlaytest(options) {
   const summaryPath = path.join(absoluteOutDir, 'summary.json');
   fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2));
 
-  let gameProcess = null;
   let controllerStarted = false;
   let failure = null;
 
@@ -284,33 +237,16 @@ async function runPlaytest(options) {
   };
 
   try {
-    log('playtest.start', { gameDir: absoluteGameDir, port, playtestDurationMs });
+    log('playtest.start', { gameDir: absoluteGameDir, targetKind, port: targetKind === 'web' ? port : undefined, playtestDurationMs });
 
-    gameProcess = spawnLong('bash', ['start.sh'], {
-      cwd: absoluteGameDir,
-      env: { ...env, PORT: String(port) },
-    }, log);
-
-    const url = `http://127.0.0.1:${port}/`;
-    await waitForHttp(url, httpTimeoutMs);
-    log('game.ready', { url });
-
-    const start = {
-      ...startOverrides,
-      action: 'start',
-      action_name: 'start',
-      session_id: runwaveSessionId,
-      url,
-      record: true,
-      headless: false,
+    const start = buildStartAction({
+      targetKind,
+      runwaveSessionId,
       viewport,
-      videoSize: startOverrides.videoSize || viewport,
-      outputRoot: 'state/output',
-      outDir: 'recordings/session',
-      initialScreenshot: true,
-      force: true,
-      sessionWaitMs: 120000,
-    };
+      startOverrides,
+      absoluteGameDir,
+      port,
+    });
 
     const initialResponse = await runControllerAction(start);
     controllerStarted = true;
@@ -321,7 +257,7 @@ async function runPlaytest(options) {
 
     const job = buildAgentJob({
       playtestDurationMs,
-      viewport,
+      viewport: effectiveViewport(initialResponse, viewport),
       playtestInstructions,
       start,
       minPlaytestMs,
@@ -342,7 +278,7 @@ async function runPlaytest(options) {
       stoppedByAgent: playtest.stoppedByAgent,
       outputDir: playtest.outputDir,
     };
-    summary.viewport = viewport;
+    summary.viewport = job.viewport;
     summary.status = 'passed';
   } catch (error) {
     failure = error;
@@ -363,16 +299,6 @@ async function runPlaytest(options) {
         log('controller.stop.error', { error: error.message });
       }
     }
-    if (gameProcess) {
-      summary.gameProcessCleanup = await stopLongProcess(gameProcess, {
-        label: 'game',
-        termWaitMs: processStopWaitMs,
-        killWaitMs: processKillWaitMs,
-      }, log).catch((error) => {
-        log('game.stop.error', { error: error.message });
-        return { stopped: false, reason: 'error', error: error.message };
-      });
-    }
     summary.finishedAt = new Date().toISOString();
     fs.writeFileSync(summaryPath, JSON.stringify(summary, null, 2));
     log('playtest.end', { status: summary.status });
@@ -384,6 +310,8 @@ async function runPlaytest(options) {
 
 module.exports = {
   buildAgentJob,
+  buildStartAction,
+  effectiveViewport,
   runPlaytest,
   validateRecordingArtifact,
 };

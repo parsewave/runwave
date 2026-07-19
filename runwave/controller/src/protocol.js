@@ -7,20 +7,23 @@ function usage() {
   return {
     usage: `runwave '<json>'`,
     notes: [
-      'Every browser operation must include action_name and session_id.',
+      'Every controller operation must include action_name and session_id.',
       'Use {"action":"sessions"} to list known sessions.',
-      'Use start with either url or file.',
+      'Use web start with url, file, or a local port. Use linux start with kind:"linux" and a command or window selector.',
       'Each operation writes artifacts to state/output/<action_name>/ by default.',
       'Relative file and output paths resolve from RUNWAVE_WORKSPACE or the current working directory.',
     ],
     examples: [
       {
         action: 'start',
-        action_name: 'start-run',
-        session_id: 'playtest-001',
-        file: 'sunnyland-platformer/index.html',
+        action_name: 'start-linux-run',
+        session_id: 'playtest-002',
+        kind: 'linux',
+        command: './game',
+        args: ['--windowed'],
+        cwd: '/absolute/path/to/game',
+        windowTitle: 'Native Game',
         record: true,
-        keyAliases: { right: 'd', left: 'a', jump: 'w' },
       },
       {
         action: 'step',
@@ -50,7 +53,7 @@ function assertActionName(input) {
 function sessionId(input) {
   const value = input && (input.session_id ?? input.sessionId);
   const text = String(value ?? '').trim();
-  if (!text) throw new Error('session_id is required for start, stop, and browser actions');
+  if (!text) throw new Error('session_id is required for start, stop, and controller actions');
   return text;
 }
 
@@ -60,11 +63,27 @@ function assertSessionId(input) {
 
 function targetUrl(input, options = {}) {
   if (input.url) return String(input.url);
+  if (input.port !== undefined && input.port !== null && input.port !== '') {
+    const port = Number(input.port);
+    if (!Number.isInteger(port) || port <= 0) throw new Error(`invalid web game port: ${input.port}`);
+    return `http://127.0.0.1:${port}/`;
+  }
   if (input.file) {
     const filePath = path.resolve(options.workspaceRoot || workspaceRoot, input.file);
     return pathToFileURL(filePath).href;
   }
-  throw new Error('start/navigate requires either url or file');
+  throw new Error('start/navigate requires url, file, or port');
+}
+
+function normalizeTargetKind(value) {
+  const text = String(value || 'web').trim().toLowerCase();
+  if (!text || text === 'web' || text === 'browser' || text === 'chromium') return 'web';
+  if (text === 'linux' || text === 'native') return 'linux';
+  throw new Error(`unsupported runwave target kind: ${value}`);
+}
+
+function targetKind(input) {
+  return normalizeTargetKind(input && (input.kind ?? input.targetKind ?? input.sessionKind));
 }
 
 function parseArgList(value) {
@@ -116,27 +135,60 @@ function optionalNumber(value, fallback) {
   return Number.isFinite(number) ? number : fallback;
 }
 
-function startSessionConfig(input, options = {}) {
-  const viewport = normalizeSize(input.viewport, { width: 1024, height: 620 });
-  const record = Boolean(input.record || input.recordAudio);
+function optionalPositiveInteger(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+function linuxStartConfig(input = {}) {
+  const launch = input.launch && typeof input.launch === 'object' ? input.launch : {};
+  const launchEnv = input.env ?? launch.env;
+  const explicitCommand = optionalString(input.command ?? input.launchCommand ?? launch.command);
+  const command = explicitCommand || (input.gameDir ? 'bash' : null);
+  const rawArgs = input.args ?? input.launchArgs ?? launch.args;
+  return {
+    command,
+    args: rawArgs === undefined && command && !explicitCommand ? ['start.sh'] : parseArgList(rawArgs),
+    cwd: optionalString(input.cwd ?? input.launchCwd ?? launch.cwd ?? input.gameDir),
+    envKeys: Object.keys(sortedObject(launchEnv)),
+    windowId: optionalString(input.windowId ?? input.window_id),
+    windowTitle: optionalString(input.windowTitle ?? input.window_title),
+    windowClass: optionalString(input.windowClass ?? input.window_class),
+    windowWaitMs: optionalNumber(input.windowWaitMs ?? input.window_wait_ms, 15000),
+    launchSettleMs: Math.max(0, optionalNumber(input.launchSettleMs ?? input.launch_settle_ms ?? launch.launchSettleMs ?? launch.launch_settle_ms, 30000)),
+    resizeWindow: input.resizeWindow !== false,
+  };
+}
+
+function webStartConfig(input = {}, options = {}) {
+  const launch = input.launch && typeof input.launch === 'object' ? input.launch : {};
+  const launchEnv = input.env ?? launch.env;
+  const explicitCommand = optionalString(input.command ?? input.launchCommand ?? launch.command);
+  const command = explicitCommand || (input.gameDir ? 'bash' : null);
+  const rawArgs = input.args ?? input.launchArgs ?? launch.args;
   return {
     launchUrl: targetUrl(input, options),
-    browser: {
-      headless: record ? false : input.headless !== false,
-      channel: optionalString(input.channel),
-      executablePath: optionalString(input.executablePath),
-      chromiumArgsMode: String(input.chromiumArgsMode || process.env.RUNWAVE_CHROMIUM_ARGS_MODE || 'append').toLowerCase(),
-      chromiumArgs: parseArgList(input.chromiumArgs ?? process.env.RUNWAVE_CHROMIUM_ARGS),
-    },
+    port: optionalPositiveInteger(input.port),
+    command,
+    args: rawArgs === undefined && command && !explicitCommand ? ['start.sh'] : parseArgList(rawArgs),
+    cwd: optionalString(input.cwd ?? input.launchCwd ?? launch.cwd ?? input.gameDir),
+    envKeys: Object.keys(sortedObject(launchEnv)),
+    httpTimeoutMs: optionalNumber(input.httpTimeoutMs ?? input.http_timeout_ms, 60000),
+  };
+}
+
+function startSessionConfig(input, options = {}) {
+  const kind = targetKind(input);
+  const viewport = normalizeSize(input.viewport, { width: 1024, height: 620 });
+  const record = Boolean(input.record || input.recordAudio);
+  const common = {
+    kind,
     context: {
       viewport,
       deviceScaleFactor: optionalNumber(input.deviceScaleFactor, 1),
       record,
       videoSize: record ? normalizeSize(input.videoSize || input.viewport, viewport) : null,
-    },
-    navigation: {
-      waitUntil: String(input.waitUntil || 'load'),
-      waitAfterLoad: optionalNumber(input.waitAfterLoad, 700),
     },
     defaults: {
       keyAliases: sortedObject(input.keyAliases),
@@ -148,6 +200,31 @@ function startSessionConfig(input, options = {}) {
       gridScreenshots: input.gridScreenshots !== false,
       markGridRows: optionalNumber(input.markGridRows ?? input.gridRows, DEFAULT_MARK_GRID.rows),
       markGridCols: optionalNumber(input.markGridCols ?? input.gridCols, DEFAULT_MARK_GRID.cols),
+    },
+  };
+
+  if (kind === 'linux') {
+    return {
+      ...common,
+      linux: linuxStartConfig(input),
+    };
+  }
+
+  const web = webStartConfig(input, options);
+  return {
+    ...common,
+    launchUrl: web.launchUrl,
+    web,
+    browser: {
+      headless: record ? false : input.headless !== false,
+      channel: optionalString(input.channel),
+      executablePath: optionalString(input.executablePath),
+      chromiumArgsMode: String(input.chromiumArgsMode || process.env.RUNWAVE_CHROMIUM_ARGS_MODE || 'append').toLowerCase(),
+      chromiumArgs: parseArgList(input.chromiumArgs ?? process.env.RUNWAVE_CHROMIUM_ARGS),
+    },
+    navigation: {
+      waitUntil: String(input.waitUntil || 'load'),
+      waitAfterLoad: optionalNumber(input.waitAfterLoad, 700),
     },
   };
 }
@@ -179,6 +256,10 @@ module.exports = {
   assertSessionId,
   sessionId,
   targetUrl,
+  targetKind,
+  normalizeTargetKind,
+  linuxStartConfig,
+  webStartConfig,
   parseArgList,
   startSessionConfig,
   diffStartSessionConfig,

@@ -479,7 +479,7 @@ test('agent playtest loop calls model and executes returned sequence', async () 
   assert.equal(promptLog.length, 1);
   assert.equal(promptLog[0].step, 1);
   assert.equal(promptLog[0].screenshot, screenshot);
-  assert.match(promptLog[0].prompt, /You are an agentic browser-game playtester/);
+  assert.match(promptLog[0].prompt, /You are an agentic game playtester/);
   assert.equal(fs.existsSync(path.join(dir, 'agent', 'agent-summary.json')), true);
 });
 
@@ -972,6 +972,26 @@ test('sequence schema guide uses configured overlay row and column grid examples
   assert.match(guide, /"cell":\{"overlay_row":8,"overlay_col":8\}/);
   assert.match(guide, /"from":\{"overlay_row":8,"overlay_col":8\}/);
   assert.match(guide, /"to":\{"overlay_row":8,"overlay_col":9\}/);
+});
+
+test('playtester prompt stays platform-neutral even if the job has a target kind', () => {
+  const prompt = buildPlaytesterPrompt({
+    job: { targetKind: 'linux' },
+    elapsedMs: 10000,
+    maxMs: 120000,
+    viewport: { width: 1280, height: 720 },
+    state: { targetKind: 'linux', window: { width: 1280, height: 720 } },
+    history: [],
+  });
+
+  assert.match(prompt, /agentic game playtester/);
+  assert.match(prompt, /Game state JSON/);
+  assert.match(prompt, /playable view/);
+  assert.match(prompt, /normal RunWave key names/);
+  assert.doesNotMatch(prompt, /native Linux/);
+  assert.doesNotMatch(prompt, /browser-game/);
+  assert.doesNotMatch(prompt, /Playwright/);
+  assert.doesNotMatch(prompt, /xdotool/);
 });
 
 test('playtester prompt includes game-specific playtest instructions', () => {

@@ -8,14 +8,18 @@ It includes remote stress testing code (`./stress-test`) as a first class compon
 
 ![Runwave playing 12 games](/assets/12-games.gif)
 
-All games are run via chromium inside docker containers.
+Runwave supports two target types:
+
+- browser games served to Chromium
+- native Linux games that open an X11 window
 
 ## Limitations
 
-Runwave can only play games that:
-- run in the chromium browser
-- do not need a GPU
-- do not involve a lit of precise clicks
+Runwave is still best suited to games that:
+
+- can run in a browser or in a normal Linux/X11 window
+- can run on the available server graphics stack
+- do not involve a lot of precise clicks
 - do not require reaction speeds of < 2 seconds
 
 Currently the agent can only use openrouter as its model provider.
@@ -29,12 +33,14 @@ Runwave's recording pipeline is **gstreamer-only** as other methods lead to audi
   `webmmux`, and `filesink` available on `PATH` as `gst-launch-1.0` (override
   via the `RUNWAVE_GSTREAMER` env var or the `gstreamerPath` start option).
 - **An X server or Xvfb.** `DISPLAY` must be set to a display that Chromium
-  can render into and that `ximagesrc` can read.
+  or a native Linux game can render into and that `ximagesrc` can read.
 - **PulseAudio running.** `pactl info` must succeed. Chromium's audio must be
   routed to a sink whose `.monitor` source is captured by `pulsesrc`. On
   headless servers, load a null-sink (e.g. `runwave_sink`) and set
   `PULSE_SINK` before starting Chromium; pass `audioSource: "runwave_sink.monitor"`
   (or `RUNWAVE_AUDIO_SOURCE`) to the start action.
+- **`xdotool` for native Linux games.** Runwave uses it to find/focus the game
+  window and send keyboard/mouse input.
 
 The controller checks these prerequisites before spawning gstreamer and fails
 fast with a message naming the missing piece.
@@ -55,7 +61,7 @@ From a private GitHub repo in a task Dockerfile:
 RUN apt-get update && apt-get install -y \
     gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-ugly gstreamer1.0-x gstreamer1.0-pulseaudio \
-    pulseaudio xvfb
+    pulseaudio xvfb xdotool
 RUN npm install -g https://github.com/parsewave/runwave.git
 RUN npx playwright install --with-deps chromium
 ```
@@ -65,6 +71,25 @@ The public CLI runs an end-to-end playtest:
 ```sh
 runwave --game-dir ./game --out-dir ./artifacts --port 3000 --viewport 1280x720
 ```
+
+For a native Linux game, put a `start.sh` beside `playtest.md`. The script
+should launch the game in the current X11 display and keep running until the
+game exits. `--port` is not used:
+
+```sh
+runwave --kind linux --game-dir ./linux-game --out-dir ./artifacts --viewport 1280x720
+```
+
+`--kind` is only a controller routing setting. The agent still receives the same
+screenshot, grid, playtest guide, and generic action schema for every target.
+The controller owns target-specific launch, capture, recording, and input.
+For Linux targets, `--viewport` is the virtual display capture size. Runwave
+records and screenshots that full display area, then focuses the detected game
+window for input. `start.sh` receives `RUNWAVE_VIEWPORT_WIDTH` and
+`RUNWAVE_VIEWPORT_HEIGHT` so wrappers can pass engine-specific size flags
+without hardcoding dimensions. Linux sessions wait 30 seconds after launch
+before the first agent call by default; pass `--launch-settle-ms 0` to disable
+that for fast smoke tests.
 
 The package also includes a low-level controller CLI for direct browser actions:
 
