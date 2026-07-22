@@ -1,0 +1,14 @@
+{
+  "jobId": "local-agent-radius-raid",
+  "runId": "local-agent-smoke",
+  "game": "radius-raid",
+  "attempt": 1,
+  "port": 9311,
+  "runwaveRepo": "https://github.com/parsewave/runwave",
+  "runwaveRef": "runwave-agentic-player",
+  "skipPlaywrightInstall": true,
+  "channel": "chrome",
+  "playMode": "agent",
+  "playtestDurationMs": 30000,
+  "agentMinPlaytestMs": 15000
+}

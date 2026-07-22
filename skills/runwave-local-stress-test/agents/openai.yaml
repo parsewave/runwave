@@ -1,0 +1,4 @@
+interface:
+  display_name: "Runwave Local Stress Test"
+  short_description: "Run one local runwave game smoke"
+  default_prompt: "Use $runwave-local-stress-test to run one local runwave stress-test game."

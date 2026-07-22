@@ -1,33 +1,50 @@
 # Runwave
 
-Runwave is a reusable Playwright CLI for browser games and canvas apps.
+Runwave is an agentic harness which allows a VLM to play video games
 
-This package is the task-neutral version of the PR145 browser runner. It only
-provides browser control and artifact capture. It does not include a VLM
-playtester, frame picker, or judge.
+![](/assets/architecture.png)
+
+It includes remote stress testing code (`./stress-test`) as a first class component to prevent regression and enable quick development cycles. It can scale horizontally to play hundreds of games at once.
+
+![Runwave playing 12 games](/assets/12-games.gif)
+
+Runwave supports two target types:
+
+- browser games served to Chromium
+- native Linux games that open an X11 window
+
+## Limitations
+
+Runwave is still best suited to games that:
+
+- can run in a browser or in a normal Linux/X11 window
+- can run on the available server graphics stack
+- do not involve a lot of precise clicks
+- do not require reaction speeds of < 2 seconds
+
+Currently the agent can only use openrouter as its model provider.
 
 ## Requirements
 
-Runwave's recording pipeline is **gstreamer-only**. There is no silent-video
-fallback. Any run that sets `record: true` requires all of:
+Runwave's recording pipeline is **gstreamer-only** as other methods lead to audio/video mismatches. This entails:
 
 - **Linux.** gstreamer's `ximagesrc` and `pulsesrc` elements only work on Linux.
 - **gstreamer 1.x** with `ximagesrc`, `pulsesrc`, `vp8enc`, `opusenc`,
   `webmmux`, and `filesink` available on `PATH` as `gst-launch-1.0` (override
   via the `RUNWAVE_GSTREAMER` env var or the `gstreamerPath` start option).
 - **An X server or Xvfb.** `DISPLAY` must be set to a display that Chromium
-  can render into and that `ximagesrc` can read.
+  or a native Linux game can render into and that `ximagesrc` can read.
 - **PulseAudio running.** `pactl info` must succeed. Chromium's audio must be
   routed to a sink whose `.monitor` source is captured by `pulsesrc`. On
   headless servers, load a null-sink (e.g. `runwave_sink`) and set
   `PULSE_SINK` before starting Chromium; pass `audioSource: "runwave_sink.monitor"`
   (or `RUNWAVE_AUDIO_SOURCE`) to the start action.
+- **`xdotool` for native Linux games.** Runwave uses it to find/focus the game
+  window and send keyboard/mouse input.
 
-The harness checks these prerequisites before spawning gstreamer and fails
+The controller checks these prerequisites before spawning gstreamer and fails
 fast with a message naming the missing piece.
 
-Non-recording usage (screenshots, state, keyboard/mouse) has no such
-requirements and runs on macOS/Windows/Linux.
 
 ## Install
 
@@ -43,293 +60,59 @@ From a private GitHub repo in a task Dockerfile:
 ```dockerfile
 RUN apt-get update && apt-get install -y \
     gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
-    gstreamer1.0-plugins-ugly gstreamer1.0-x pulseaudio xvfb
+    gstreamer1.0-plugins-ugly gstreamer1.0-x gstreamer1.0-pulseaudio \
+    pulseaudio xvfb xdotool
 RUN npm install -g https://github.com/parsewave/runwave.git
 RUN npx playwright install --with-deps chromium
 ```
 
-The installed CLI is:
+The public CLI runs an end-to-end playtest:
 
 ```sh
-runwave '<json>'
+runwave --game-dir ./game --out-dir ./artifacts --port 3000 --viewport 1280x720
 ```
 
-Use verbose mode to create profiling logs:
+For a native Linux game, put a `start.sh` beside `playtest.md`. The script
+should launch the game in the current X11 display and keep running until the
+game exits. `--port` is not used:
 
 ```sh
-runwave -v '{"action":"start","action_name":"run-start","file":"game/index.html"}'
-runwave -v '{"action":"state","action_name":"turn-001-state"}'
+runwave --kind linux --game-dir ./linux-game --out-dir ./artifacts --viewport 1280x720
 ```
 
-Verbose mode writes newline-delimited JSON timing events to
+`--kind` is only a controller routing setting. The agent still receives the same
+screenshot, grid, playtest guide, and generic action schema for every target.
+The controller owns target-specific launch, capture, recording, and input.
+For Linux targets, `--viewport` is the virtual display capture size. Runwave
+records and screenshots that full display area, then focuses the detected game
+window for input. `start.sh` receives `RUNWAVE_VIEWPORT_WIDTH` and
+`RUNWAVE_VIEWPORT_HEIGHT` so wrappers can pass engine-specific size flags
+without hardcoding dimensions. Linux sessions wait 30 seconds after launch
+before the first agent call by default; pass `--launch-settle-ms 0` to disable
+that for fast smoke tests.
+
+The package also includes a low-level controller CLI for direct browser actions:
+
+```sh
+runwave-controller '<json>'
+```
+
+Detailed controller action docs are in [runwave/controller/README.md](runwave/controller/README.md).
+
+Use controller verbose mode to create profiling logs:
+
+```sh
+runwave-controller -v '{"action":"start","action_name":"run-start","file":"game/index.html"}'
+runwave-controller -v '{"action":"state","action_name":"turn-001-state"}'
+```
+
+Controller verbose mode writes newline-delimited JSON timing events to
 `<sessionDir>/runwave-verbose.ndjson` and includes that path as `verboseLog` in
 verbose operation responses. The log records CLI, daemon, browser, output writing,
 state, screenshot, navigation, step timeline, input-event, capture, and cleanup
 timings.
 
-## Workspace And Outputs
 
-Relative `file`, `outputRoot`, and `outDir` paths resolve from:
+## Test Locally
 
-1. `RUNWAVE_WORKSPACE`, when set.
-2. The current working directory.
-
-Useful environment variables:
-
-- `RUNWAVE_WORKSPACE`: base directory for relative paths.
-- `RUNWAVE_SESSION_DIR`: directory for session JSON files. Defaults to
-  `<workspace>/.runwave-sessions`.
-- `RUNWAVE_SESSION_WAIT_MS`: startup wait for the daemon session file.
-  Defaults to `60000`.
-
-Each browser operation must include `action_name` and `session_id`. Use the same
-`session_id` for `start`, subsequent actions, and `stop`. By default, operation
-artifacts are written under:
-
-```text
-state/output/<action_name>/
-```
-
-## Start
-
-Start from a local file:
-
-```sh
-runwave '{
-  "action": "start",
-  "action_name": "run-start",
-  "session_id": "playtest-001",
-  "file": "game/index.html",
-  "record": true,
-  "viewport": { "width": 1024, "height": 620 },
-  "videoSize": { "width": 1024, "height": 620 },
-  "keyAliases": {
-    "left": "a",
-    "right": "d",
-    "jump": "w"
-  }
-}'
-```
-
-Start from a URL:
-
-```sh
-runwave '{
-  "action": "start",
-  "action_name": "run-start",
-  "session_id": "playtest-001",
-  "url": "http://localhost:3000",
-  "record": true
-}'
-```
-
-Useful `start` options:
-
-- `url` or `file`: required target.
-- `session_id`: required session identifier. Reuse it for all actions targeting
-  the same browser session.
-- `record`: enable gstreamer audio+video WebM recording. Requires all the
-  prerequisites in the [Requirements](#requirements) section. Chromium is
-  launched headed with kiosk/fullscreen flags so gstreamer's `ximagesrc` can
-  capture the rendered viewport. Override capture sources with `videoSource`
-  and `audioSource`. (`recordAudio` is accepted as a legacy alias for `record`;
-  they mean the same thing — audio is always captured when recording.)
-- `repeatedFrameRemoval`: when `record` is enabled, post-process the final WebM
-  to remove repeated-frame runs before returning the stop response. Pass `true`
-  for defaults, or an options object such as
-  `{ "similarityThreshold": 0.98, "edgeFrameCount": 10 }`. The raw capture is
-  renamed with a `_raw` suffix.
-- `headless`: defaults to `true`; set `false` to watch the browser.
-- `channel`: optional Playwright browser channel, such as `chrome` or `msedge`.
-- `executablePath`: optional explicit browser executable path.
-- `viewport`: defaults to `{ "width": 1024, "height": 620 }`.
-- `videoSize`: defaults to the viewport.
-- `keyAliases`: maps semantic names used in steps to real Playwright keys.
-- `stateExpression`: optional JavaScript expression evaluated in the page.
-- `outputRoot`: defaults to `state/output`.
-- `outDir`: defaults to `recordings/runwave-run-<timestamp>`.
-- `sessionWaitMs`: overrides daemon startup wait for this start operation.
-
-## Sequences And Actions
-
-Inspect state:
-
-```sh
-runwave '{"action":"state","action_name":"turn-001-state","session_id":"playtest-001"}'
-```
-
-Capture a screenshot:
-
-```sh
-runwave '{"action":"screenshot","action_name":"turn-001-screen","session_id":"playtest-001","name":"screen"}'
-```
-
-Execute timed keyboard controls:
-
-```sh
-runwave '{
-  "action": "step",
-  "action_name": "turn-002-jump-right",
-  "session_id": "playtest-001",
-  "actions": [
-    { "type": "key", "start": 0, "end": 900, "key": "right" },
-    { "type": "key", "start": 150, "end": 230, "key": "jump" }
-  ],
-  "captures": [900],
-  "autoCaptures": false
-}'
-```
-
-For `step`, the payload is a sequence. The sequence duration is inferred from
-the latest action `end`, or from `start` for instant actions.
-
-Click:
-
-```sh
-runwave '{
-  "action": "step",
-  "action_name": "turn-003-click-start",
-  "session_id": "playtest-001",
-  "actions": [
-    { "type": "click", "start": 100, "end": 500, "x": 512, "y": 310 }
-  ]
-}'
-```
-
-Screenshots include an 8x8 red mark grid by default. Pointer actions may use
-up to 4 grid cell IDs instead of exact pixels. Cell IDs run row-major from `0`
-at the top-left to `63` at the bottom-right.
-
-Single grid-cell click:
-
-```sh
-runwave '{
-  "action": "step",
-  "action_name": "turn-003-click-start-cell",
-  "session_id": "playtest-001",
-  "actions": [
-    { "type": "click", "start": 100, "end": 500, "cells": [27] }
-  ]
-}'
-```
-
-Multi-click sends quick clicks at random points inside the selected cells:
-
-```sh
-runwave '{
-  "action": "step",
-  "action_name": "turn-003-multi-click",
-  "session_id": "playtest-001",
-  "actions": [
-    { "type": "multi_click", "start": 100, "cells": [27, 28], "count": 10 }
-  ]
-}'
-```
-
-Drag:
-
-```sh
-runwave '{
-  "action": "step",
-  "action_name": "turn-004-drag",
-  "session_id": "playtest-001",
-  "actions": [
-    { "type": "drag", "start": 100, "end": 700, "from": { "x": 420, "y": 300 }, "to": { "x": 500, "y": 300 }, "mode": "mouse", "steps": 12 }
-  ]
-}'
-```
-
-Use `mode: "mouse"` for canvas and pointer-based games. Use `mode: "html5"`
-for browser-native draggable/drop elements.
-Drag endpoints can also use grid cells:
-
-```json
-{ "type": "drag", "start": 100, "from_cells": [34], "to_cells": [35], "mode": "mouse" }
-```
-
-Move the cursor without clicking:
-
-```json
-{ "action": "step", "action_name": "turn-005-hover", "session_id": "playtest-001", "actions": [{ "type": "cursor_move", "start": 100, "end": 500, "cells": [27] }] }
-```
-
-Move the mouse without clicking for camera control:
-
-```sh
-runwave '{
-  "action": "step",
-  "action_name": "turn-005-look-around",
-  "session_id": "playtest-001",
-  "actions": [
-    { "type": "view_move", "start": 200, "end": 900, "dx": 260, "dy": -40, "steps": 16 }
-  ]
-}'
-```
-
-`view_move` actions use relative CSS-pixel deltas. Positive `dx` moves right,
-negative `dx` moves left, positive `dy` moves down, and negative `dy` moves up.
-
-Navigate or reset:
-
-```sh
-runwave '{"action":"reset","action_name":"reset-001","session_id":"playtest-001"}'
-```
-
-Stop and finalize the recording:
-
-```sh
-runwave '{"action":"stop","action_name":"run-stop","session_id":"playtest-001"}'
-```
-
-List known sessions:
-
-```sh
-runwave '{"action":"sessions"}'
-```
-
-When `record: true` is set, `stop` returns `video` and `audioVideo` pointing at
-the same recorded audio/video WebM. All recording goes through gstreamer — see
-the [Requirements](#requirements) section for the mandatory environment
-(Linux, gstreamer, X server/Xvfb, PulseAudio).
-
-When `repeatedFrameRemoval` was set on `start`, `video` and `audioVideo`
-point at the cut WebM at the normal recording path. The original uncut capture
-is preserved as `rawVideo` / `rawAudioVideo`, typically
-`video/000-runwave-with-audio_raw.webm`, and `repeatedFrameRemoval` reports the
-removed frame ranges.
-
-## State
-
-Every response includes generic browser state:
-
-- URL and title.
-- Viewport dimensions.
-- Active element summary.
-- Pointer-lock element summary.
-- Canvas positions and sizes.
-
-For game-specific state, pass a `stateExpression` on `start` or an individual
-operation:
-
-```json
-{
-  "stateExpression": "() => ({ score: window.score, lives: window.lives })"
-}
-```
-
-If the expression throws, the response still includes generic state plus
-`customError`.
-
-## Output Layout
-
-Each turn writes:
-
-- `response.json`: the main CLI response.
-- `*.png`: screenshots captured during that operation.
-- `NNN-<action_name>.json`: detailed sequence log for `step` operations.
-- `video/000-runwave-with-audio.webm`: final gstreamer audio+video recording.
-- `video/000-runwave-with-audio_raw.webm`: original recording when repeated
-  frame cutting was enabled.
-
-Active sessions are tracked as JSON files in `.runwave-sessions/` by default.
-The matching session file is removed by `stop`.
+A good first step is to run a single playtest using the example game. This will create a local recording. See the skill `skills/runwave-local-stress-test` for more details.
