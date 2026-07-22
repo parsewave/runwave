@@ -213,6 +213,7 @@ function startOverridesFromJob(job = {}, audioCapture = {}) {
     chromiumArgsMode: job.chromiumArgsMode,
     keyAliases: job.keyAliases,
     gridScreenshots: job.gridScreenshots,
+    repeatedFrameRemoval: job.repeatedFrameRemoval,
     markGridRows: job.markGridRows,
     markGridCols: job.markGridCols,
     launchSettleMs: job.launchSettleMs,

@@ -6,7 +6,8 @@ executes timed input sequences, records WebM output, and writes per-action
 artifacts.
 
 See the top-level [Requirements](../../README.md#requirements) section for the
-Linux, gstreamer, X server/Xvfb, and PulseAudio setup required by `record: true`.
+Linux, gstreamer, ffmpeg/ffprobe, X server/Xvfb, and PulseAudio setup required
+by `record: true`.
 
 ## Start
 
@@ -86,6 +87,10 @@ Useful `start` options:
   sources with `videoSource` and `audioSource`. (`recordAudio` is accepted as a
   legacy alias for `record`; they mean the same thing - audio is always captured
   when recording.)
+- `repeatedFrameRemoval`: when `record` is enabled, post-process the final WebM
+  by default to remove repeated-frame runs before returning the stop response.
+  Pass `false` to keep only the raw recording. When enabled, the raw capture is
+  renamed with a `_raw` suffix.
 - `headless`: defaults to `true`; set `false` to watch the browser.
 - `channel`: optional Playwright browser channel, such as `chrome` or `msedge`.
 - `executablePath`: optional explicit browser executable path.
@@ -238,7 +243,15 @@ runwave-controller '{"action":"sessions"}'
 When `record: true` is set, `stop` returns `video` and `audioVideo` pointing at
 the same recorded audio/video WebM. All recording goes through gstreamer - see
 the top-level [Requirements](../../README.md#requirements) section for the
-mandatory environment (Linux, gstreamer, X server/Xvfb, PulseAudio).
+mandatory environment (Linux, gstreamer, ffmpeg/ffprobe, X server/Xvfb,
+PulseAudio).
+
+By default, `video` and `audioVideo` point at the shorter WebM at the normal
+recording path after repeated-frame runs are removed. The original uncut capture
+is preserved as `rawVideo` / `rawAudioVideo`, typically
+`video/000-runwave-with-audio_raw.webm`, and `repeatedFrameRemoval` reports the
+removed frame ranges. Pass `repeatedFrameRemoval: false` on `start` to return
+the raw recording path without post-processing.
 
 ## State
 
@@ -277,7 +290,11 @@ Each turn writes:
 - `response.json`: the main CLI response.
 - `*.png`: screenshots captured during that operation.
 - `NNN-<action_name>.json`: detailed sequence log for `step` operations.
-- `video/000-runwave-with-audio.webm`: final gstreamer audio+video recording.
+- `video/000-runwave-with-audio.webm`: final shorter audio/video recording when
+  repeated-frame removal is enabled, or the raw gstreamer recording when it is
+  disabled.
+- `video/000-runwave-with-audio_raw.webm`: original recording when repeated
+  frame removal is enabled.
 
 Active sessions are tracked as JSON files in `.runwave-sessions/` by default.
 The matching session file is removed by `stop`.

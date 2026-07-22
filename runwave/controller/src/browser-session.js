@@ -7,6 +7,11 @@ const { AudioVideoRecorder } = require('./audio-recorder');
 const { ensureDir, safeName, sleep, timestamp } = require('./file-utils');
 const { drawGridOnScreenshot } = require('./grid-overlay');
 const { parseArgList, targetUrl } = require('./protocol');
+const {
+  isRepeatedFrameRemovalEnabled,
+  removeRepeatedFramesInPlace,
+  repeatedFrameRemovalOptions,
+} = require('./repeated-frame-remover');
 const { readPageState } = require('./state-reader');
 
 const DEFAULT_CHROMIUM_ARGS = [
@@ -484,17 +489,43 @@ class BrowserSession {
     });
   }
 
-  async close() {
+  async close(overrides = {}) {
+    const hasRepeatedFrameRemovalOverride = Object.prototype.hasOwnProperty.call(overrides, 'repeatedFrameRemoval');
+    const closeConfig = {
+      ...this.config,
+      ...overrides,
+      repeatedFrameRemoval: hasRepeatedFrameRemovalOverride
+        ? overrides.repeatedFrameRemoval
+        : this.config.repeatedFrameRemoval,
+    };
     let audioVideoPath = null;
+    let rawVideoPath = null;
+    let repeatedFrameRemoval = null;
     let closeError = null;
     try {
       if (this.audioRecorder) {
         audioVideoPath = await this.time('browser.close.audio_video_stop', () => this.audioRecorder.stop());
       }
-      if (this.context) await this.time('browser.close.context_close', () => this.context.close());
-      if (this.browser) await this.time('browser.close.browser_close', () => this.browser.close());
+      if (audioVideoPath && isRepeatedFrameRemovalEnabled(closeConfig)) {
+        const processed = await this.time('browser.close.remove_repeated_frames', { video: audioVideoPath }, () =>
+          removeRepeatedFramesInPlace(audioVideoPath, repeatedFrameRemovalOptions())
+        );
+        audioVideoPath = processed.video;
+        rawVideoPath = processed.rawVideo;
+        repeatedFrameRemoval = processed.repeatedFrameRemoval;
+      }
     } catch (error) {
       closeError = error;
+    }
+    try {
+      if (this.context) await this.time('browser.close.context_close', () => this.context.close());
+    } catch (error) {
+      if (!closeError) closeError = error;
+    }
+    try {
+      if (this.browser) await this.time('browser.close.browser_close', () => this.browser.close());
+    } catch (error) {
+      if (!closeError) closeError = error;
     }
     try {
       await this.stopGameProcess();
@@ -505,6 +536,9 @@ class BrowserSession {
     return {
       video: audioVideoPath,
       audioVideo: audioVideoPath || undefined,
+      rawVideo: rawVideoPath || undefined,
+      rawAudioVideo: rawVideoPath || undefined,
+      repeatedFrameRemoval: repeatedFrameRemoval || undefined,
     };
   }
 }

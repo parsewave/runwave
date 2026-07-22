@@ -69,8 +69,10 @@ one GStreamer process to record the cropped X display plus `runwave_sink.monitor
 into `video/000-runwave-with-audio.webm`. This keeps audio from concurrent games
 on the same worker out of each other's recordings and avoids post-mux sync
 offsets.
-Recorded fleet jobs use this GStreamer path; there is no Playwright video-only
-fallback for production playtests.
+Recorded fleet jobs use this GStreamer path and post-process it by default to
+remove repeated frames, leaving the shorter video at the normal path and the raw
+capture with a `_raw` suffix. There is no Playwright video-only fallback for
+production playtests.
 
 The default game source is `s3://pw-cruft/games`. Override it with:
 

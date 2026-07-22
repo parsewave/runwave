@@ -5,6 +5,11 @@ const { AudioVideoRecorder, defaultVideoSource, parseX11VideoSource } = require(
 const { ensureDir, safeName, sleep, timestamp } = require('./file-utils');
 const { drawGridOnScreenshot } = require('./grid-overlay');
 const { parseArgList } = require('./protocol');
+const {
+  isRepeatedFrameRemovalEnabled,
+  removeRepeatedFramesInPlace,
+  repeatedFrameRemovalOptions,
+} = require('./repeated-frame-remover');
 
 const DEFAULT_WINDOW_WAIT_MS = 15000;
 const DEFAULT_LINUX_LAUNCH_SETTLE_MS = 30000;
@@ -597,27 +602,58 @@ class LinuxSession {
     };
   }
 
-  async close() {
+  async close(overrides = {}) {
+    const hasRepeatedFrameRemovalOverride = Object.prototype.hasOwnProperty.call(overrides, 'repeatedFrameRemoval');
+    const closeConfig = {
+      ...this.config,
+      ...overrides,
+      repeatedFrameRemoval: hasRepeatedFrameRemovalOverride
+        ? overrides.repeatedFrameRemoval
+        : this.config.repeatedFrameRemoval,
+    };
     let audioVideoPath = null;
-    if (this.audioRecorder) {
-      audioVideoPath = await this.time('linux.close.audio_video_stop', () => this.audioRecorder.stop());
+    let rawVideoPath = null;
+    let repeatedFrameRemoval = null;
+    let closeError = null;
+    try {
+      if (this.audioRecorder) {
+        audioVideoPath = await this.time('linux.close.audio_video_stop', () => this.audioRecorder.stop());
+      }
+      if (audioVideoPath && isRepeatedFrameRemovalEnabled(closeConfig)) {
+        const processed = await this.time('linux.close.remove_repeated_frames', { video: audioVideoPath }, () =>
+          removeRepeatedFramesInPlace(audioVideoPath, repeatedFrameRemovalOptions())
+        );
+        audioVideoPath = processed.video;
+        rawVideoPath = processed.rawVideo;
+        repeatedFrameRemoval = processed.repeatedFrameRemoval;
+      }
+    } catch (error) {
+      closeError = error;
     }
-    if (this.process && !processHasClosed(this.process)) {
-      await this.time('linux.close.terminate_process', async () => {
-        signalProcessGroup(this.process, 'SIGTERM');
-        if (!(await waitForProcessClose(this.process, 5000))) {
-          signalProcessGroup(this.process, 'SIGKILL');
-          await waitForProcessClose(this.process, 5000);
-        }
-      });
-    } else if (this.windowId) {
-      try {
-        this.timeSync('linux.close.window_close', () => this.xdotool(['windowclose', this.windowId], { timeoutMs: 1000 }));
-      } catch {}
+    try {
+      if (this.process && !processHasClosed(this.process)) {
+        await this.time('linux.close.terminate_process', async () => {
+          signalProcessGroup(this.process, 'SIGTERM');
+          if (!(await waitForProcessClose(this.process, 5000))) {
+            signalProcessGroup(this.process, 'SIGKILL');
+            await waitForProcessClose(this.process, 5000);
+          }
+        });
+      } else if (this.windowId) {
+        try {
+          this.timeSync('linux.close.window_close', () => this.xdotool(['windowclose', this.windowId], { timeoutMs: 1000 }));
+        } catch {}
+      }
+    } catch (error) {
+      if (!closeError) closeError = error;
     }
+    if (closeError) throw closeError;
     return {
       video: audioVideoPath,
       audioVideo: audioVideoPath || undefined,
+      rawVideo: rawVideoPath || undefined,
+      rawAudioVideo: rawVideoPath || undefined,
+      repeatedFrameRemoval: repeatedFrameRemoval || undefined,
     };
   }
 }

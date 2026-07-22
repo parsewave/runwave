@@ -24,6 +24,8 @@ function usage() {
         cwd: '/absolute/path/to/game',
         windowTitle: 'Native Game',
         record: true,
+        repeatedFrameRemoval: true,
+        keyAliases: { right: 'd', left: 'a', jump: 'w' },
       },
       {
         action: 'step',
@@ -141,6 +143,16 @@ function optionalPositiveInteger(value) {
   return Number.isInteger(number) && number > 0 ? number : null;
 }
 
+function repeatedFrameRemovalEnabled(input) {
+  return Boolean(input.record || input.recordAudio) && input.repeatedFrameRemoval !== false;
+}
+
+function repeatedFrameRemovalConfig(input) {
+  return {
+    enabled: repeatedFrameRemovalEnabled(input),
+  };
+}
+
 function linuxStartConfig(input = {}) {
   const launch = input.launch && typeof input.launch === 'object' ? input.launch : {};
   const launchEnv = input.env ?? launch.env;
@@ -189,6 +201,7 @@ function startSessionConfig(input, options = {}) {
       deviceScaleFactor: optionalNumber(input.deviceScaleFactor, 1),
       record,
       videoSize: record ? normalizeSize(input.videoSize || input.viewport, viewport) : null,
+      repeatedFrameRemoval: record ? repeatedFrameRemovalConfig(input) : { enabled: false },
     },
     defaults: {
       keyAliases: sortedObject(input.keyAliases),
@@ -261,6 +274,8 @@ module.exports = {
   linuxStartConfig,
   webStartConfig,
   parseArgList,
+  repeatedFrameRemovalConfig,
+  repeatedFrameRemovalEnabled,
   startSessionConfig,
   diffStartSessionConfig,
   isListSessionsAction,
