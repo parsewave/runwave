@@ -19,6 +19,7 @@ function usage() {
         session_id: 'playtest-001',
         file: 'sunnyland-platformer/index.html',
         record: true,
+        repeatedFrameRemoval: true,
         keyAliases: { right: 'd', left: 'a', jump: 'w' },
       },
       {
@@ -115,6 +116,23 @@ function optionalNumber(value, fallback) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+function repeatedFrameRemovalEnabled(input) {
+  return Boolean(input.repeatedFrameRemoval);
+}
+
+function repeatedFrameRemovalConfig(input) {
+  const options = input.repeatedFrameRemoval && typeof input.repeatedFrameRemoval === 'object'
+    ? input.repeatedFrameRemoval
+    : {};
+  return {
+    enabled: repeatedFrameRemovalEnabled(input),
+    edgeFrameCount: optionalNumber(options.edgeFrameCount, 10),
+    similarityThreshold: optionalNumber(options.similarityThreshold, 0.98),
+    pixelTolerance: optionalNumber(options.pixelTolerance, 3),
+    comparisonWidth: optionalNumber(options.comparisonWidth, 160),
+  };
+}
+
 function startSessionConfig(input, options = {}) {
   const viewport = normalizeSize(input.viewport, { width: 1024, height: 620 });
   const record = Boolean(input.record || input.recordAudio);
@@ -132,6 +150,7 @@ function startSessionConfig(input, options = {}) {
       deviceScaleFactor: optionalNumber(input.deviceScaleFactor, 1),
       record,
       videoSize: record ? normalizeSize(input.videoSize || input.viewport, viewport) : null,
+      repeatedFrameRemoval: record ? repeatedFrameRemovalConfig(input) : { enabled: false },
     },
     navigation: {
       waitUntil: String(input.waitUntil || 'load'),
@@ -179,6 +198,8 @@ module.exports = {
   sessionId,
   targetUrl,
   parseArgList,
+  repeatedFrameRemovalConfig,
+  repeatedFrameRemovalEnabled,
   startSessionConfig,
   diffStartSessionConfig,
   isListSessionsAction,

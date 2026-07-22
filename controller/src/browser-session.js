@@ -5,6 +5,7 @@ const { AudioVideoRecorder } = require('./audio-recorder');
 const { ensureDir, safeName, sleep, timestamp } = require('./file-utils');
 const { drawGridOnScreenshot } = require('./grid-overlay');
 const { parseArgList, targetUrl } = require('./protocol');
+const { removeRepeatedFramesInPlace } = require('./repeated-frame-remover');
 const { readPageState } = require('./state-reader');
 
 const DEFAULT_CHROMIUM_ARGS = ['--no-sandbox', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'];
@@ -28,6 +29,24 @@ function videoSize(config = {}) {
 
 function isRecording(config = {}) {
   return Boolean(config.record || config.recordAudio);
+}
+
+function isRepeatedFrameRemovalEnabled(config = {}) {
+  return Boolean(config.repeatedFrameRemoval);
+}
+
+function repeatedFrameRemovalOptions(config = {}) {
+  const options = config.repeatedFrameRemoval && typeof config.repeatedFrameRemoval === 'object'
+    ? config.repeatedFrameRemoval
+    : {};
+  return {
+    edgeFrameCount: options.edgeFrameCount,
+    similarityThreshold: options.similarityThreshold,
+    pixelTolerance: options.pixelTolerance,
+    comparisonWidth: options.comparisonWidth,
+    ffmpegPath: options.ffmpegPath || config.ffmpegPath,
+    ffprobePath: options.ffprobePath || config.ffprobePath,
+  };
 }
 
 function chromiumLaunchArgs(config = {}, env = process.env) {
@@ -327,16 +346,37 @@ class BrowserSession {
     );
   }
 
-  async close() {
+  async close(overrides = {}) {
+    const hasRepeatedFrameRemovalOverride = Object.prototype.hasOwnProperty.call(overrides, 'repeatedFrameRemoval');
+    const closeConfig = {
+      ...this.config,
+      ...overrides,
+      repeatedFrameRemoval: hasRepeatedFrameRemovalOverride
+        ? overrides.repeatedFrameRemoval
+        : this.config.repeatedFrameRemoval,
+    };
     let audioVideoPath = null;
+    let rawVideoPath = null;
+    let repeatedFrameRemoval = null;
     if (this.audioRecorder) {
       audioVideoPath = await this.time('browser.close.audio_video_stop', () => this.audioRecorder.stop());
+    }
+    if (audioVideoPath && isRepeatedFrameRemovalEnabled(closeConfig)) {
+      const processed = await this.time('browser.close.remove_repeated_frames', { video: audioVideoPath }, () =>
+        removeRepeatedFramesInPlace(audioVideoPath, repeatedFrameRemovalOptions(closeConfig))
+      );
+      audioVideoPath = processed.video;
+      rawVideoPath = processed.rawVideo;
+      repeatedFrameRemoval = processed.repeatedFrameRemoval;
     }
     if (this.context) await this.time('browser.close.context_close', () => this.context.close());
     if (this.browser) await this.time('browser.close.browser_close', () => this.browser.close());
     return {
       video: audioVideoPath,
       audioVideo: audioVideoPath || undefined,
+      rawVideo: rawVideoPath || undefined,
+      rawAudioVideo: rawVideoPath || undefined,
+      repeatedFrameRemoval: repeatedFrameRemoval || undefined,
     };
   }
 }
@@ -346,4 +386,6 @@ module.exports = {
   browserViewportStabilizerScript,
   chromiumArgs,
   chromiumLaunchArgs,
+  isRepeatedFrameRemovalEnabled,
+  repeatedFrameRemovalOptions,
 };

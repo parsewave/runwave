@@ -134,6 +134,11 @@ Useful `start` options:
   capture the rendered viewport. Override capture sources with `videoSource`
   and `audioSource`. (`recordAudio` is accepted as a legacy alias for `record`;
   they mean the same thing — audio is always captured when recording.)
+- `repeatedFrameRemoval`: when `record` is enabled, post-process the final WebM
+  to remove repeated-frame runs before returning the stop response. Pass `true`
+  for defaults, or an options object such as
+  `{ "similarityThreshold": 0.98, "edgeFrameCount": 10 }`. The raw capture is
+  renamed with a `_raw` suffix.
 - `headless`: defaults to `true`; set `false` to watch the browser.
 - `channel`: optional Playwright browser channel, such as `chrome` or `msedge`.
 - `executablePath`: optional explicit browser executable path.
@@ -287,6 +292,12 @@ the same recorded audio/video WebM. All recording goes through gstreamer — see
 the [Requirements](#requirements) section for the mandatory environment
 (Linux, gstreamer, X server/Xvfb, PulseAudio).
 
+When `repeatedFrameRemoval` was set on `start`, `video` and `audioVideo`
+point at the cut WebM at the normal recording path. The original uncut capture
+is preserved as `rawVideo` / `rawAudioVideo`, typically
+`video/000-runwave-with-audio_raw.webm`, and `repeatedFrameRemoval` reports the
+removed frame ranges.
+
 ## State
 
 Every response includes generic browser state:
@@ -317,6 +328,8 @@ Each turn writes:
 - `*.png`: screenshots captured during that operation.
 - `NNN-<action_name>.json`: detailed sequence log for `step` operations.
 - `video/000-runwave-with-audio.webm`: final gstreamer audio+video recording.
+- `video/000-runwave-with-audio_raw.webm`: original recording when repeated
+  frame cutting was enabled.
 
 Active sessions are tracked as JSON files in `.runwave-sessions/` by default.
 The matching session file is removed by `stop`.

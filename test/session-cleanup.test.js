@@ -56,6 +56,29 @@ test('start reuses a live session only when the start configuration matches', as
   }
 });
 
+test('start configuration records repeated frame removal settings', () => {
+  const config = startSessionConfig({
+    action: 'start',
+    action_name: 'start-cut-video',
+    url: 'http://127.0.0.1:3000/',
+    record: true,
+    repeatedFrameRemoval: {
+      edgeFrameCount: 10,
+      similarityThreshold: 0.98,
+      pixelTolerance: 3,
+      comparisonWidth: 160,
+    },
+  });
+
+  assert.deepEqual(config.context.repeatedFrameRemoval, {
+    enabled: true,
+    edgeFrameCount: 10,
+    similarityThreshold: 0.98,
+    pixelTolerance: 3,
+    comparisonWidth: 160,
+  });
+});
+
 test('start rejects a live session with a different target instead of silently reusing it', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runwave-target-mismatch-'));
   const originalStart = {

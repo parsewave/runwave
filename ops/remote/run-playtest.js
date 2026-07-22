@@ -583,6 +583,7 @@ async function main() {
         chromiumArgsMode: job.chromiumArgsMode,
         keyAliases: job.keyAliases,
         gridScreenshots: job.gridScreenshots,
+        repeatedFrameRemoval: job.repeatedFrameRemoval,
       };
       if (job.videoSize) startOverrides.videoSize = job.videoSize;
 
