@@ -32,6 +32,10 @@ Runwave's recording pipeline is **gstreamer-only** as other methods lead to audi
 - **gstreamer 1.x** with `ximagesrc`, `pulsesrc`, `vp8enc`, `opusenc`,
   `webmmux`, and `filesink` available on `PATH` as `gst-launch-1.0` (override
   via the `RUNWAVE_GSTREAMER` env var or the `gstreamerPath` start option).
+- **ffmpeg and ffprobe** available on `PATH` for the default repeated-frame
+  removal pass that produces the shorter final recording. Pass
+  `repeatedFrameRemoval: false` to keep the raw gstreamer recording without
+  post-processing.
 - **An X server or Xvfb.** `DISPLAY` must be set to a display that Chromium
   or a native Linux game can render into and that `ximagesrc` can read.
 - **PulseAudio running.** `pactl info` must succeed. Chromium's audio must be
@@ -61,7 +65,7 @@ From a private GitHub repo in a task Dockerfile:
 RUN apt-get update && apt-get install -y \
     gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-ugly gstreamer1.0-x gstreamer1.0-pulseaudio \
-    pulseaudio xvfb xdotool
+    ffmpeg pulseaudio xvfb xdotool
 RUN npm install -g https://github.com/parsewave/runwave.git
 RUN npx playwright install --with-deps chromium
 ```

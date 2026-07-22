@@ -62,21 +62,33 @@ test('start configuration records repeated frame removal settings', () => {
     action_name: 'start-cut-video',
     url: 'http://127.0.0.1:3000/',
     record: true,
-    repeatedFrameRemoval: {
-      edgeFrameCount: 10,
-      similarityThreshold: 0.98,
-      pixelTolerance: 3,
-      comparisonWidth: 160,
-    },
+    repeatedFrameRemoval: true,
   });
 
-  assert.deepEqual(config.context.repeatedFrameRemoval, {
-    enabled: true,
-    edgeFrameCount: 10,
-    similarityThreshold: 0.98,
-    pixelTolerance: 3,
-    comparisonWidth: 160,
+  assert.deepEqual(config.context.repeatedFrameRemoval, { enabled: true });
+});
+
+test('start configuration enables repeated frame removal by default for recordings', () => {
+  const config = startSessionConfig({
+    action: 'start',
+    action_name: 'start-short-video',
+    url: 'http://127.0.0.1:3000/',
+    record: true,
   });
+
+  assert.deepEqual(config.context.repeatedFrameRemoval, { enabled: true });
+});
+
+test('start configuration can disable repeated frame removal', () => {
+  const config = startSessionConfig({
+    action: 'start',
+    action_name: 'start-raw-video',
+    url: 'http://127.0.0.1:3000/',
+    record: true,
+    repeatedFrameRemoval: false,
+  });
+
+  assert.deepEqual(config.context.repeatedFrameRemoval, { enabled: false });
 });
 
 test('start rejects a live session with a different target instead of silently reusing it', async () => {

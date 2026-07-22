@@ -6,6 +6,19 @@ const DEFAULT_EDGE_FRAME_COUNT = 10;
 const DEFAULT_SIMILARITY_THRESHOLD = 0.98;
 const DEFAULT_PIXEL_TOLERANCE = 3;
 
+function isRepeatedFrameRemovalEnabled(config = {}) {
+  return Boolean(config.record || config.recordAudio) && config.repeatedFrameRemoval !== false;
+}
+
+function repeatedFrameRemovalOptions() {
+  return {
+    edgeFrameCount: DEFAULT_EDGE_FRAME_COUNT,
+    similarityThreshold: DEFAULT_SIMILARITY_THRESHOLD,
+    pixelTolerance: DEFAULT_PIXEL_TOLERANCE,
+    comparisonWidth: 160,
+  };
+}
+
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
   return dir;
@@ -563,7 +576,7 @@ async function removeRepeatedFramesInPlace(videoPath, options = {}) {
 }
 
 function printUsage() {
-  console.error('Usage: node runwave/controller/bin/remove-repeated-frames.js <input-video> <output-video> [--edge-frames 10] [--similarity-threshold 0.98] [--pixel-tolerance 3] [--comparison-width 160]');
+  console.error('Usage: node runwave/controller/bin/remove-repeated-frames.js <input-video> <output-video>');
 }
 
 async function main(argv) {
@@ -576,23 +589,11 @@ async function main(argv) {
     return;
   }
 
-  const options = {};
-  while (args.length) {
-    const arg = args.shift();
-    if (arg === '--edge-frames') {
-      options.edgeFrameCount = Number(args.shift());
-    } else if (arg === '--similarity-threshold') {
-      options.similarityThreshold = Number(args.shift());
-    } else if (arg === '--pixel-tolerance') {
-      options.pixelTolerance = Number(args.shift());
-    } else if (arg === '--comparison-width') {
-      options.comparisonWidth = Number(args.shift());
-    } else {
-      throw new Error(`unknown argument: ${arg}`);
-    }
+  if (args.length) {
+    throw new Error(`unknown argument: ${args[0]}`);
   }
 
-  const summary = await removeRepeatedFrames(inputPath, outputPath, options);
+  const summary = await removeRepeatedFrames(inputPath, outputPath, repeatedFrameRemovalOptions());
   console.log(JSON.stringify(summary, null, 2));
 }
 
@@ -614,11 +615,13 @@ module.exports = {
   findRepeatedFrameRemovalRanges,
   findSimilarFrameRemovalRanges,
   frameSimilarity,
+  isRepeatedFrameRemovalEnabled,
   main,
   parseFrameMd5Line,
   rawVideoPath,
   readMediaInfo,
   readVideoFps,
+  repeatedFrameRemovalOptions,
   removeRepeatedFrames,
   removeRepeatedFramesInPlace,
 };

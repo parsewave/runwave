@@ -7,7 +7,11 @@ const { AudioVideoRecorder } = require('./audio-recorder');
 const { ensureDir, safeName, sleep, timestamp } = require('./file-utils');
 const { drawGridOnScreenshot } = require('./grid-overlay');
 const { parseArgList, targetUrl } = require('./protocol');
-const { removeRepeatedFramesInPlace } = require('./repeated-frame-remover');
+const {
+  isRepeatedFrameRemovalEnabled,
+  removeRepeatedFramesInPlace,
+  repeatedFrameRemovalOptions,
+} = require('./repeated-frame-remover');
 const { readPageState } = require('./state-reader');
 
 const DEFAULT_CHROMIUM_ARGS = [
@@ -41,24 +45,6 @@ function videoSize(config = {}) {
 
 function isRecording(config = {}) {
   return Boolean(config.record || config.recordAudio);
-}
-
-function isRepeatedFrameRemovalEnabled(config = {}) {
-  return Boolean(config.repeatedFrameRemoval);
-}
-
-function repeatedFrameRemovalOptions(config = {}) {
-  const options = config.repeatedFrameRemoval && typeof config.repeatedFrameRemoval === 'object'
-    ? config.repeatedFrameRemoval
-    : {};
-  return {
-    edgeFrameCount: options.edgeFrameCount,
-    similarityThreshold: options.similarityThreshold,
-    pixelTolerance: options.pixelTolerance,
-    comparisonWidth: options.comparisonWidth,
-    ffmpegPath: options.ffmpegPath || config.ffmpegPath,
-    ffprobePath: options.ffprobePath || config.ffprobePath,
-  };
 }
 
 function chromiumLaunchArgs(config = {}, env = process.env) {
@@ -522,7 +508,7 @@ class BrowserSession {
       }
       if (audioVideoPath && isRepeatedFrameRemovalEnabled(closeConfig)) {
         const processed = await this.time('browser.close.remove_repeated_frames', { video: audioVideoPath }, () =>
-          removeRepeatedFramesInPlace(audioVideoPath, repeatedFrameRemovalOptions(closeConfig))
+          removeRepeatedFramesInPlace(audioVideoPath, repeatedFrameRemovalOptions())
         );
         audioVideoPath = processed.video;
         rawVideoPath = processed.rawVideo;
@@ -562,8 +548,6 @@ module.exports = {
   browserViewportStabilizerScript,
   chromiumArgs,
   chromiumLaunchArgs,
-  isRepeatedFrameRemovalEnabled,
-  repeatedFrameRemovalOptions,
   launchHeadless,
   pageViewportVideoSource,
   webLaunchConfig,

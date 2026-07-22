@@ -144,19 +144,12 @@ function optionalPositiveInteger(value) {
 }
 
 function repeatedFrameRemovalEnabled(input) {
-  return Boolean(input.repeatedFrameRemoval);
+  return Boolean(input.record || input.recordAudio) && input.repeatedFrameRemoval !== false;
 }
 
 function repeatedFrameRemovalConfig(input) {
-  const options = input.repeatedFrameRemoval && typeof input.repeatedFrameRemoval === 'object'
-    ? input.repeatedFrameRemoval
-    : {};
   return {
     enabled: repeatedFrameRemovalEnabled(input),
-    edgeFrameCount: optionalNumber(options.edgeFrameCount, 10),
-    similarityThreshold: optionalNumber(options.similarityThreshold, 0.98),
-    pixelTolerance: optionalNumber(options.pixelTolerance, 3),
-    comparisonWidth: optionalNumber(options.comparisonWidth, 160),
   };
 }
 
