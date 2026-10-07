@@ -184,7 +184,7 @@ class SteppedBrowserSession extends BrowserSession {
       await this.gate.assertPaused();
     } catch (error) {
       this.fault = error;
-      try { this.gate.forcePause(); } catch {}
+      try { await this.gate.forcePause(); } catch {}
       throw error;
     }
     const start = performance.now();
@@ -207,6 +207,7 @@ class SteppedBrowserSession extends BrowserSession {
     } catch (error) {
       failure = error;
       this.fault = error;
+      actionEndedAt = performance.now();
     } finally {
       if (failure) {
         try { await this.gate?.forcePause(); } catch (pauseError) { failure ||= pauseError; this.fault ||= pauseError; }
@@ -249,6 +250,10 @@ class SteppedBrowserSession extends BrowserSession {
     let recording = { video: null };
     let error = null;
     try {
+      // Detach the screencast listener before killing a faulted browser. A
+      // late frame ACK rejection must not turn preserved failure evidence into
+      // a secondary "Browser closed" shutdown error.
+      if (this.fault) this.recorder?.detach();
       if (this.fault && this.browserServer) await this.browserServer.kill().catch(() => {});
       const pending = [this.pendingOperation, this.pendingFreeze].filter(Boolean);
       if (pending.length) {

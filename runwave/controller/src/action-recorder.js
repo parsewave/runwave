@@ -17,6 +17,7 @@ class ActionRecorder {
     this.current = null;
     this.error = null;
     this.pending = Promise.resolve();
+    this.stopping = false;
   }
 
   async start() {
@@ -24,7 +25,9 @@ class ActionRecorder {
     fs.mkdirSync(this.directory, { recursive: true });
     this.listener = (event) => {
       // ACK even discarded frames, otherwise Chromium stops the stream.
-      this.cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch((error) => { this.error ||= error; });
+      this.cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch((error) => {
+        if (!this.stopping) this.error ||= error;
+      });
       const segment = this.current;
       if (!segment) return;
       // Use the same host monotonic clock for compositor-frame delivery and
@@ -79,10 +82,11 @@ class ActionRecorder {
   }
 
   async stop({ skipCdpStop = false } = {}) {
+    this.stopping = true;
     let stopError = null;
     try { if (!skipCdpStop) await this.cdp.send('Page.stopScreencast'); }
     catch (error) { stopError = error; }
-    finally { this.cdp.off('Page.screencastFrame', this.listener); }
+    finally { this.detach(); }
     await this.pending;
     const timeline = path.join(this.directory, 'timeline.json');
     fs.writeFileSync(timeline, JSON.stringify({
@@ -115,6 +119,11 @@ class ActionRecorder {
       video, timeline, audio: false, durationMs: this.durationMs,
       ...(stopError ? { warning: stopError.message } : {}),
     };
+  }
+
+  detach() {
+    this.stopping = true;
+    if (this.listener) this.cdp.off('Page.screencastFrame', this.listener);
   }
 }
 

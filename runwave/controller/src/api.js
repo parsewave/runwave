@@ -120,6 +120,19 @@ async function waitForSession(pid, timeoutMs = DEFAULT_SESSION_WAIT_MS, file) {
   throw new Error('timed out waiting for runwave session');
 }
 
+async function terminateSpawnedDaemon(child, timeoutMs) {
+  const pid = Number(child?.pid);
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  const signalGroup = (signal) => {
+    try { process.kill(-pid, signal); }
+    catch (error) { if (error?.code !== 'ESRCH') throw error; }
+  };
+  signalGroup('SIGTERM');
+  if (await waitForPidExit(pid, timeoutMs)) return;
+  signalGroup('SIGKILL');
+  await waitForPidExit(pid, timeoutMs);
+}
+
 async function stopExistingSessionForForce(input, profiler, options = {}) {
   const file = options.sessionFilePath || inputSessionFile(input);
   const exists = options.existsSync || fs.existsSync;
@@ -325,9 +338,18 @@ async function start(input, profiler) {
   child.unref();
 
   const waitMs = sessionWaitMs(input);
-  const session = await profiler.time('cli.start.wait_for_session', { pid: child.pid, timeoutMs: waitMs, sessionFile: file }, () =>
-    waitForSession(child.pid, waitMs, file)
-  );
+  let session;
+  try {
+    session = await profiler.time('cli.start.wait_for_session', { pid: child.pid, timeoutMs: waitMs, sessionFile: file }, () =>
+      waitForSession(child.pid, waitMs, file)
+    );
+  } catch (error) {
+    await terminateSpawnedDaemon(child, forceStopWaitMs(input)).catch((cleanupError) => {
+      error.cleanupError = cleanupError.message;
+    });
+    removeFileIfExists(file);
+    throw error;
+  }
   if (session.verboseLogPath) profiler.setLogPath(session.verboseLogPath);
   profiler.mark('cli.start.session_ready', { sessionFile: file, sessionDir: session.sessionDir });
   const output = profiler.timeSync('cli.start.read_initial_response', { path: session.initialResponsePath }, () =>

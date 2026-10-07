@@ -125,5 +125,9 @@ test('clean-only screenshots and failed actions still preserve recording evidenc
   }), /synthetic action failure/);
   const recording = await session.close();
   assert.ok(fs.statSync(recording.video).size > 1000);
+  const timeline = JSON.parse(fs.readFileSync(recording.timeline));
   assert.ok(fs.existsSync(recording.timeline));
+  assert.equal(timeline.segments.length, 1);
+  assert.ok(timeline.segments[0].error.includes('synthetic action failure'));
+  assert.ok(timeline.segments[0].endMs < 500, `failed action included forced-pause cleanup: ${timeline.segments[0].endMs}ms`);
 });
