@@ -18,7 +18,6 @@ class SteppedBrowserSession extends BrowserSession {
     this.gate = null;
     this.cached = null;
     this.recorder = null;
-    this.pendingFreeze = null;
     this.fault = null;
     this.startedAt = performance.now();
     this.gameplayTimeMs = 0;
@@ -113,15 +112,8 @@ class SteppedBrowserSession extends BrowserSession {
   }
 
   async freezeWithDeadline(label) {
-    const pending = this.freeze();
-    this.pendingFreeze = pending;
-    pending.then(() => {
-      if (this.pendingFreeze === pending) this.pendingFreeze = null;
-    }, () => {
-      if (this.pendingFreeze === pending) this.pendingFreeze = null;
-    });
     try {
-      return await withDeadline(() => pending, 15000, label);
+      return await withDeadline(() => this.freeze(), 15000, label);
     } catch (error) {
       // The timed operation cannot be cancelled. Stop the browser process
       // group before returning so it cannot continue acting after failure.
@@ -210,9 +202,6 @@ class SteppedBrowserSession extends BrowserSession {
     let error = null;
     try {
       if (this.gate?.paused) await this.gate.resume();
-      if (this.pendingFreeze) {
-        await withDeadline(() => this.pendingFreeze, 15000, 'pending observation cleanup');
-      }
       if (this.recorder && this.cached) {
         if (!this.recorder.frames.length) {
           this.recorder.begin('initial-observation', this.cached.jpeg);

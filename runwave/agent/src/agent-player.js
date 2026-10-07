@@ -216,6 +216,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     let modelElapsedMs;
     let rawText;
     let usage;
+    let decisionFailed = false;
     const decisionStart = Date.now();
     try {
       ({ sequence, model, modelElapsedMs, rawText, usage } = await decideNextSequence({
@@ -236,6 +237,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
         break;
       }
       if (!isRecoverableModelSequenceError(error)) throw error;
+      decisionFailed = true;
       modelErrorCount += 1;
       consecutiveModelErrors += 1;
       log('agent.model_sequence_error', {
@@ -260,13 +262,14 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     thinkingTimeMs += Date.now() - decisionStart;
     if (stepped && Date.now() - startedAt >= wallLimit) { terminationReason = 'wall-timeout'; break; }
     const prematureStop = sequence.shouldStop && !sequence.actions.length && budgetElapsed() < minMs;
-    if (!prematureStop) consecutiveModelErrors = 0;
+    if (!decisionFailed && !prematureStop) consecutiveModelErrors = 0;
     if (sequence.shouldStop && !sequence.actions.length && budgetElapsed() >= minMs) {
       stoppedByAgent = true;
       terminationReason = 'agent-stop';
       break;
     }
     if (prematureStop) {
+      decisionFailed = true;
       modelErrorCount += 1;
       consecutiveModelErrors += 1;
       sequence = failedActionAfterInvalidJson({ error: new Error('minimum gameplay time not reached; choose an action or wait') });
@@ -293,6 +296,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
         });
         sequence = failedActionAfterInvalidJson({ error });
         model = 'failed-action-after-invalid-model-sequence';
+        decisionFailed = true;
       }
     }
     step += 1;
