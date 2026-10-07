@@ -14,8 +14,9 @@ running high-concurrency browser-game playtests across Hetzner servers.
 - Runner: installed at `/opt/runwave/bin/run-playtest.js`.
 - Per playtest: start a dedicated Docker container, clone the requested runwave
   repo/ref inside it, install dependencies, run a browser playtest in an
-  isolated workspace for 2 minutes by default, capture video plus browser audio,
-  then upload the full workspace to S3.
+  isolated workspace for 2 minutes by default, capture active-only browser
+  video plus the action timeline, then upload the full workspace to S3.
+  GStreamer audio/video capture is used only for explicit realtime/native runs.
 - SSH: set `RUNWAVE_SSH_KEY` to the local private key used for workers. During
   provisioning, set `RUNWAVE_SSH_KEY_NAME` if the Hetzner key name cannot be
   inferred from the matching local public key.
@@ -63,14 +64,11 @@ written under `cruft/playtests/_bootstrap-logs/<batch>/`.
 Bootstrap installs Docker and builds the `runwave-playtest-runner:latest` image.
 The host runner re-execs each job in its own container, mounting the game cache,
 job workspace root, job JSON, runner script, and `/etc/runwave-runner.env`.
-Inside that container, the runner creates a PulseAudio null sink named
-`runwave_sink`, launches Chromium with that sink as the default output, and uses
-one GStreamer process to record the cropped X display plus `runwave_sink.monitor`
-into `video/000-runwave-with-audio.webm`. This keeps audio from concurrent games
-on the same worker out of each other's recordings and avoids post-mux sync
-offsets.
-Recorded fleet jobs use this GStreamer path; there is no Playwright video-only
-fallback for production playtests.
+For explicit realtime/native jobs, the container creates a PulseAudio null sink
+named `runwave_sink`, launches the target with that sink as the default output,
+and uses GStreamer to record the display plus the sink monitor. Browser stepped
+jobs do not require PulseAudio or Xvfb: the controller records the same browser
+session with CDP and FFmpeg, without audio.
 
 The default game source is `s3://pw-cruft/games`. Override it with:
 
