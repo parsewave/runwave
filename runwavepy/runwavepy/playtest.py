@@ -68,6 +68,7 @@ def run_playtest(
     min_playtest_ms: Optional[int] = None,
     wall_timeout_ms: Optional[int] = None,
     execution_mode: Optional[str] = None,
+    max_steps: Optional[int] = None,
     launch_settle_ms: Optional[int] = None,
     model: Optional[str] = None,
     verbose: bool = False,
@@ -167,6 +168,8 @@ def run_playtest(
         args += ["--wall-timeout-ms", str(wall_timeout_ms)]
     if execution_mode is not None:
         args += ["--execution-mode", execution_mode]
+    if max_steps is not None:
+        args += ["--max-steps", str(max_steps)]
     if launch_settle_ms is not None:
         args += ["--launch-settle-ms", str(launch_settle_ms)]
     if base_url:
