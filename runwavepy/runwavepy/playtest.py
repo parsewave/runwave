@@ -1,8 +1,8 @@
 """Python wrapper around the runwave Node CLI.
 
-Shells out to ``runwave`` from the runwave repo. All the same requirements apply: recording needs a Linux host
-with gstreamer, an X server or Xvfb, and PulseAudio. See the runwave README
-for details.
+Shells out to ``runwave`` from the runwave repo. Browser stepped recording
+uses Chromium and FFmpeg; realtime browser and native Linux recording also
+requires GStreamer, X11/Xvfb, and PulseAudio. See the runwave README.
 """
 
 from __future__ import annotations
@@ -112,6 +112,8 @@ def run_playtest(
     execution_mode:
         ``"stepped"`` (browser default) or ``"realtime"``. Stepped recording is
         video-only and requires ffmpeg plus Linux/macOS process signals.
+    max_steps:
+        Maximum number of agent decisions before the playtest stops.
     min_playtest_ms:
         Floor before the agent may self-stop. Defaults to duration - 10000.
     launch_settle_ms:
