@@ -73,6 +73,15 @@ class ActionRecorder {
     this.current = null;
     const elapsed = Number(endAtMs) - segment.startedAt;
     this.durationMs = segment.startMs + Math.max(0, Number.isFinite(elapsed) ? elapsed : 0);
+    // Observation capture can deliver compositor frames after the action has
+    // logically ended. They belong to neither this segment nor the next one.
+    const discarded = this.frames.filter((frame) => frame.atMs > this.durationMs);
+    this.frames = this.frames.filter((frame) => frame.atMs <= this.durationMs);
+    if (discarded.length) {
+      this.pending = this.pending.then(async () => {
+        await Promise.all(discarded.map((frame) => fs.promises.unlink(path.join(this.directory, frame.file)).catch(() => {})));
+      });
+    }
     this.append(finalImage, this.durationMs, 'jpg', { boundary: true });
     this.segments.push({
       action: segment.action, startMs: segment.startMs, endMs: this.durationMs,

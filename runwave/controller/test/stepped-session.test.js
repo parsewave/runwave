@@ -130,4 +130,5 @@ test('clean-only screenshots and failed actions still preserve recording evidenc
   assert.equal(timeline.segments.length, 1);
   assert.ok(timeline.segments[0].error.includes('synthetic action failure'));
   assert.ok(timeline.segments[0].endMs < 500, `failed action included forced-pause cleanup: ${timeline.segments[0].endMs}ms`);
+  assert.ok(timeline.frames.every((frame) => frame.atMs <= timeline.segments[0].endMs));
 });
