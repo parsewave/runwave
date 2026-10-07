@@ -44,6 +44,21 @@ async function main() {
   const controller = profiler.timeSync('daemon.controller_session_create', { kind }, () =>
     createSession(config, paths, profiler.child(`${kind}-session`))
   );
+  let server = null;
+  let queue = Promise.resolve();
+  let shutdownStarted = false;
+  const shutdown = async () => {
+    if (shutdownStarted) return;
+    shutdownStarted = true;
+    if (server) server.close();
+    await queue.catch(() => {});
+    await controller.close().catch(() => {});
+    process.exit(0);
+  };
+  // Install these before browser/game startup so a signal cannot orphan a
+  // partially initialized session.
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
   try { await profiler.time('daemon.controller_start', { kind }, () => controller.start()); }
   catch (error) { await controller.close().catch(() => {}); throw error; }
 
@@ -58,8 +73,7 @@ async function main() {
     stepIndex: 0,
   };
 
-  let queue = Promise.resolve();
-  const server = http.createServer(async (req, res) => {
+  server = http.createServer(async (req, res) => {
     try {
       const requestStartedAt = Date.now();
       if (req.method !== 'POST') {
@@ -88,15 +102,6 @@ async function main() {
       return writeResponse(res, 500, { ok: false, error: error.message, stack: error.stack });
     }
   });
-
-  const shutdown = async () => {
-    server.close();
-    await queue;
-    await controller.close().catch(() => {});
-    process.exit(0);
-  };
-  process.once('SIGTERM', shutdown);
-  process.once('SIGINT', shutdown);
 
   server.listen(0, '127.0.0.1', () => { (async () => {
     const { port } = server.address();

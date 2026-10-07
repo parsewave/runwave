@@ -32,6 +32,7 @@ function usage() {
     '  --playtest-duration-ms <n>   max action time in stepped mode; wall time in realtime mode',
     '  --wall-timeout-ms <n>        hard agent wall-time budget, separate from action time',
     '  --execution-mode <mode>     stepped (browser default) or realtime',
+    '  --max-steps <n>             maximum agent decisions',
     '  --min-playtest-ms <n>        floor before the agent may self-stop (default duration - 10000)',
     '  --launch-settle-ms <n>       linux only: wait after launch before first agent call (default 30000)',
     '  --base-url <url>             OpenAI-compatible endpoint override',
@@ -63,6 +64,7 @@ function parseArgs(argv) {
     if (arg === '--min-playtest-ms') { out.minPlaytestMs = Number(next()); continue; }
     if (arg === '--wall-timeout-ms') { out.wallTimeoutMs = Number(next()); continue; }
     if (arg === '--execution-mode') { out.executionMode = next(); continue; }
+    if (arg === '--max-steps') { out.maxSteps = Number(next()); continue; }
     if (arg === '--launch-settle-ms') { out.startOverrides.launchSettleMs = Number(next()); continue; }
     if (arg === '--base-url') { out.baseUrl = next(); continue; }
     if (arg === '--model') { out.model = next(); continue; }
@@ -103,6 +105,7 @@ async function main() {
     minPlaytestMs: args.minPlaytestMs,
     wallTimeoutMs: args.wallTimeoutMs,
     executionMode: args.executionMode,
+    maxSteps: args.maxSteps,
     model: args.model,
     verbose: args.verbose,
     startOverrides: args.startOverrides,

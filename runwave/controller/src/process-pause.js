@@ -29,6 +29,7 @@ class ProcessPause {
   constructor(child) {
     this.child = child;
     this.paused = false;
+    this.lastTree = [];
   }
 
   async tree() {
@@ -40,7 +41,8 @@ class ProcessPause {
     if (!root || root.group !== root.pid || root.pid === process.pid) {
       throw new Error('browser must have its own isolated process group');
     }
-    return descendants(table, root.pid);
+    this.lastTree = descendants(table, root.pid);
+    return this.lastTree;
   }
 
   async signal(signal) {
@@ -56,7 +58,12 @@ class ProcessPause {
   // process-table snapshot could itself be blocked by the timed operation.
   forcePause() {
     if (!this.child?.pid) throw new Error('browser process has no pid');
-    process.kill(-this.child.pid, 'SIGSTOP');
+    try { process.kill(-this.child.pid, 'SIGSTOP'); }
+    catch (error) { if (error.code !== 'ESRCH') throw error; }
+    for (const item of this.lastTree) {
+      if (item.group === this.child.pid) continue;
+      try { process.kill(item.pid, 'SIGSTOP'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+    }
     this.paused = true;
   }
 

@@ -19,6 +19,7 @@ class SteppedBrowserSession extends BrowserSession {
     this.cached = null;
     this.recorder = null;
     this.fault = null;
+    this.closing = false;
     this.startedAt = performance.now();
     this.gameplayTimeMs = 0;
     this.activeWallTimeMs = 0;
@@ -107,7 +108,7 @@ class SteppedBrowserSession extends BrowserSession {
       const replay = this.recorder ? await this.cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 80, captureBeyondViewport: false }) : null;
       this.cached = { state, png: Buffer.from(screenshot.data, 'base64'), jpeg: replay ? Buffer.from(replay.data, 'base64') : null };
     } finally {
-      await this.gate.pause();
+      if (!this.closing) await this.gate.pause();
     }
   }
 
@@ -166,11 +167,15 @@ class SteppedBrowserSession extends BrowserSession {
       failure = error;
       this.fault = error;
     } finally {
-      try {
-        await this.freezeWithDeadline('action observation');
-      } catch (error) {
-        failure ||= error;
-        this.fault ||= error;
+      if (failure) {
+        try { this.gate?.forcePause(); } catch (pauseError) { failure ||= pauseError; this.fault ||= pauseError; }
+      } else {
+        try {
+          await this.freezeWithDeadline('action observation');
+        } catch (error) {
+          failure ||= error;
+          this.fault ||= error;
+        }
       }
       this.activeWallTimeMs += performance.now() - start;
       if (!failure) this.gameplayTimeMs += Number(result?.duration ?? 0) + this.settleMs;
@@ -198,11 +203,12 @@ class SteppedBrowserSession extends BrowserSession {
   }
 
   async finishClose() {
+    this.closing = true;
     let recording = { video: null };
     let error = null;
     try {
-      if (this.gate?.paused) await this.gate.resume();
-      if (this.recorder && this.cached) {
+      if (!this.fault && this.gate?.paused) await this.gate.resume();
+      if (!this.fault && this.recorder && this.cached) {
         if (!this.recorder.frames.length) {
           this.recorder.begin('initial-observation', this.cached.jpeg);
           this.recorder.end(this.cached.jpeg);
@@ -211,7 +217,10 @@ class SteppedBrowserSession extends BrowserSession {
       }
     } catch (failure) { error = failure; }
     try {
-      if (this.browserServer) await withDeadline(() => this.browserServer.close(), 5000, 'browser close');
+      if (this.browserServer) {
+        if (this.fault) await this.browserServer.kill().catch(() => {});
+        else await withDeadline(() => this.browserServer.close(), 5000, 'browser close');
+      }
     } catch (failure) {
       error ||= failure;
       await this.browserServer.kill().catch(() => {});

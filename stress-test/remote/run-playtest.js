@@ -629,9 +629,15 @@ async function main() {
     log('job.start', { jobId, game: job.game, port, viewport: job.viewport });
     await checkoutRunwave(job, dirs.runwave, runnerEnv);
 
-    const audioCapture = await prepareAudioCaptureEnv(runnerEnv, job);
+    const needsRealtimeCapture = job.executionMode === 'realtime'
+      || ['linux', 'native'].includes(String(job.kind || job.targetKind || '').toLowerCase());
+    const audioCapture = needsRealtimeCapture
+      ? await prepareAudioCaptureEnv(runnerEnv, job)
+      : { env: runnerEnv, audioSource: undefined };
     let playtestEnv = audioCapture.env;
-    const xvfbSession = await startXvfbForAudio(job, playtestEnv);
+    const xvfbSession = needsRealtimeCapture
+      ? await startXvfbForAudio(job, playtestEnv)
+      : { env: playtestEnv, process: null, display: playtestEnv.DISPLAY || null };
     playtestEnv = xvfbSession.env;
     xvfb = xvfbSession.process;
     if (xvfbSession.display) log('xvfb.ready', { display: xvfbSession.display });
