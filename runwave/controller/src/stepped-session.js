@@ -35,6 +35,7 @@ class SteppedBrowserSession extends BrowserSession {
     ensureDir(this.paths.runDir);
     try {
       await this.startGameProcess();
+      this.throwIfClosing();
       this.browserServer = await chromium.launchServer({
         headless: this.config.headless !== false,
         handleSIGINT: false,
@@ -44,9 +45,11 @@ class SteppedBrowserSession extends BrowserSession {
         ...(this.config.channel ? { channel: this.config.channel } : {}),
         ...(this.config.executablePath ? { executablePath: this.config.executablePath } : {}),
       });
+      this.throwIfClosing();
       this.gate = new ProcessPause(this.browserServer.process());
       await this.gate.tree();
       this.browser = await chromium.connect(this.browserServer.wsEndpoint());
+      this.throwIfClosing();
       this.context = await this.browser.newContext({
         viewport: this.config.viewport || { width: 1280, height: 720 }, deviceScaleFactor: 1,
       });
@@ -59,6 +62,7 @@ class SteppedBrowserSession extends BrowserSession {
       this.page.on('console', (message) => fs.appendFileSync(path.join(this.paths.runDir, 'browser-console.log'), `${message.type()} ${message.text()}\n`));
       this.cdp = await this.context.newCDPSession(this.page);
       await super.navigate({ url: this.launchUrl });
+      this.throwIfClosing();
       if (this.config.readySelector) await this.page.locator(this.config.readySelector).first().waitFor({ timeout: this.config.readyTimeoutMs || 120000 });
       if (this.config.readyCheckScript) await this.page.waitForFunction(this.config.readyCheckScript, null, { timeout: this.config.readyTimeoutMs || 120000 });
       await sleep(this.config.readySettleMs ?? 0);
@@ -72,8 +76,20 @@ class SteppedBrowserSession extends BrowserSession {
       this.startedAt = performance.now();
     } catch (error) {
       await this.close().catch(() => {});
+      // A signal can close the session while an awaited Playwright launch is
+      // still resolving. Kill anything created after that close began.
+      await this.abortStartedResources();
       throw error;
     }
+  }
+
+  throwIfClosing() {
+    if (this.closing) throw new Error('browser session is shutting down');
+  }
+
+  async abortStartedResources() {
+    if (this.browserServer) await this.browserServer.kill().catch(() => {});
+    await this.stopGameProcess().catch(() => {});
   }
 
   timing() {
