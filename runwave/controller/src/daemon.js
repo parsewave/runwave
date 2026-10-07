@@ -46,6 +46,7 @@ async function main() {
   );
   let server = null;
   let queue = Promise.resolve();
+  let startupPromise = null;
   let shutdownStarted = false;
   const shutdown = async () => {
     if (shutdownStarted) return;
@@ -53,13 +54,19 @@ async function main() {
     if (server) server.close();
     await queue.catch(() => {});
     await controller.close().catch(() => {});
+    // If launchServer or the game readiness probe was already in flight, let
+    // start() observe the shutdown flag and clean up resources created after
+    // the first close attempt before exiting the daemon.
+    await startupPromise?.catch(() => {});
     process.exit(0);
   };
   // Install these before browser/game startup so a signal cannot orphan a
   // partially initialized session.
   process.once('SIGTERM', shutdown);
   process.once('SIGINT', shutdown);
-  try { await profiler.time('daemon.controller_start', { kind }, () => controller.start()); }
+  process.once('SIGHUP', shutdown);
+  startupPromise = profiler.time('daemon.controller_start', { kind }, () => controller.start());
+  try { await startupPromise; }
   catch (error) { await controller.close().catch(() => {}); throw error; }
 
   const runtime = {

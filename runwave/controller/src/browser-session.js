@@ -107,10 +107,14 @@ async function waitForProcessClose(child, timeoutMs) {
   });
 }
 
-function waitForHttp(url, timeoutMs = DEFAULT_HTTP_TIMEOUT_MS) {
+function waitForHttp(url, timeoutMs = DEFAULT_HTTP_TIMEOUT_MS, shouldStop = () => false) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     const check = () => {
+      if (shouldStop()) {
+        reject(new Error(`stopped waiting for ${url}`));
+        return;
+      }
       const req = http.get(url, (res) => {
         res.resume();
         if (res.statusCode >= 200 && res.statusCode < 500) resolve();
@@ -123,7 +127,8 @@ function waitForHttp(url, timeoutMs = DEFAULT_HTTP_TIMEOUT_MS) {
       });
     };
     const retry = () => {
-      if (Date.now() > deadline) reject(new Error(`timed out waiting for ${url}`));
+      if (shouldStop()) reject(new Error(`stopped waiting for ${url}`));
+      else if (Date.now() > deadline) reject(new Error(`timed out waiting for ${url}`));
       else setTimeout(check, 500);
     };
     check();
@@ -314,7 +319,7 @@ class BrowserSession {
     });
     this.process.on('close', closeLogs);
     await this.time('browser.start.wait_for_http', { url: this.launchUrl, timeoutMs: this.launch.httpTimeoutMs }, () =>
-      waitForHttp(this.launchUrl, this.launch.httpTimeoutMs)
+      waitForHttp(this.launchUrl, this.launch.httpTimeoutMs, () => this.closing)
     );
     if (this.processError) throw new Error(`web game process failed to start: ${this.processError.message}`);
     return this.process;

@@ -169,7 +169,13 @@ class SteppedBrowserSession extends BrowserSession {
 
   async runActive(input, operation) {
     if (this.fault) throw new Error(`session faulted: ${this.fault.message}`);
-    await this.gate.assertPaused();
+    try {
+      await this.gate.assertPaused();
+    } catch (error) {
+      this.fault = error;
+      try { this.gate.forcePause(); } catch {}
+      throw error;
+    }
     const start = performance.now();
     let result;
     let failure;
