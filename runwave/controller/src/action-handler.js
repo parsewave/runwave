@@ -116,12 +116,19 @@ async function writeStepResponse(runtime, input) {
   const result = browser.stepped ? await browser.runActive(input, perform) : await perform();
   if (browser.stepped) {
     const screenshot = await browser.screenshot(outputDir, 'frozen-after-action');
-    const state = await browser.state();
-    result.endState = state;
+    const frozenState = await browser.state();
+    // Preserve a per-step stateExpression evaluated around the live action.
+    // Add the frozen timing/control metadata without replacing that result.
+    result.endState = {
+      ...result.endState,
+      ...(frozenState.timing ? { timing: frozenState.timing } : {}),
+      ...(frozenState.publicControls ? { publicControls: frozenState.publicControls } : {}),
+    };
+    result.frozenState = frozenState;
     result.screenshot = screenshot;
     result.cleanScreenshot = screenshot.replace(/\.grid\.png$/, '.png');
-    result.captures = [{ at: result.duration, path: screenshot, cleanPath: result.cleanScreenshot, state }];
-    result.timing = browser.timing();
+    result.captures = [{ at: result.duration, path: screenshot, cleanPath: result.cleanScreenshot, state: frozenState }];
+    result.timing = frozenState.timing || browser.timing();
     writeJson(result.resultPath, result);
   }
 

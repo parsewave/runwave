@@ -275,10 +275,16 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       sequence = failedActionAfterInvalidJson({ error: new Error('minimum gameplay time not reached; choose an action or wait') });
     }
     const freshRemainingMs = stepped ? Math.min(remainingMs, wallLimit - (Date.now() - startedAt)) : maxMs - (Date.now() - startedAt) - STOP_RESERVE_MS;
-    if (freshRemainingMs <= 0) break;
+    if (freshRemainingMs <= 0) {
+      terminationReason = 'action-budget-exhausted';
+      break;
+    }
     const settleMs = stepped ? Number(state?.timing?.postActionSettleMs ?? job.postActionSettleMs ?? 0) : 0;
     const actionBudget = freshRemainingMs - Math.max(0, settleMs);
-    if (stepped && actionBudget <= 0) break;
+    if (stepped && actionBudget <= 0) {
+      terminationReason = 'action-budget-exhausted';
+      break;
+    }
     const duration = Math.min(actionBudget, Math.max(1, sequence.durationMs));
     let stepActions = [];
     if (!sequence.failedAction) {
@@ -453,7 +459,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     history,
   };
   recorder.summary(summary);
-  if (stepped && ['wall-timeout', 'step-limit', 'invalid-model-output'].includes(terminationReason) && gameplayTimeMs < minMs) {
+  if (stepped && gameplayTimeMs < minMs) {
     throw new Error(`playtest stopped before minimum gameplay time: ${terminationReason} (${gameplayTimeMs}/${minMs}ms)`);
   }
   return {

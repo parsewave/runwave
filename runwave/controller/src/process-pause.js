@@ -54,13 +54,13 @@ class ProcessPause {
     }
   }
 
-  // Timeout handling must stop the browser immediately; taking another
-  // process-table snapshot could itself be blocked by the timed operation.
-  forcePause() {
-    if (!this.child?.pid) throw new Error('browser process has no pid');
-    try { process.kill(-this.child.pid, 'SIGSTOP'); }
-    catch (error) { if (error.code !== 'ESRCH') throw error; }
-    for (const item of this.lastTree) {
+  // Timeout handling still validates the process group before signalling. A
+  // stale PID must never be treated as permission to stop an unrelated group.
+  async forcePause() {
+    const tree = await this.tree();
+    if (!tree.length) throw new Error('browser process disappeared before forced pause');
+    process.kill(-this.child.pid, 'SIGSTOP');
+    for (const item of tree) {
       if (item.group === this.child.pid) continue;
       try { process.kill(item.pid, 'SIGSTOP'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
     }

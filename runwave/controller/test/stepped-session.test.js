@@ -44,8 +44,10 @@ test('browser remains frozen across thinking; inputs, clocks and clean observati
   assert.deepEqual(frozen.custom, initial.custom);
   const again = await session.screenshot(root, 'after-thinking');
   assert.deepEqual(fs.readFileSync(image), fs.readFileSync(again));
-  const input = { action_name: 'move', duration: 300, actions: [{ type: 'key', start: 0, end: 250, key: 'ArrowRight' }] };
-  await session.runActive(input, () => runStep({ input, config, browser: session, outputDir: root, nextStepIndex: 1, actionName: 'move' }));
+  const input = { action_name: 'move', duration: 300, stateExpression: 'window.probe', actions: [{ type: 'key', start: 0, end: 250, key: 'ArrowRight' }] };
+  const stepResult = await session.runActive(input, () => runStep({ input, config, browser: session, outputDir: root, nextStepIndex: 1, actionName: 'move' }));
+  assert.equal(stepResult.startState.custom.keyHeld, false);
+  assert.equal(stepResult.endState.custom.keyHeld, false);
   const final = await session.state();
   assert.equal(final.timing.paused, true);
   assert.equal(final.timing.gameplayTimeMs, 350);
@@ -100,11 +102,12 @@ test('same-session active recording excludes thinking and contains the action ti
   assert.ok(fs.statSync(result.video).size > 1000);
   const media = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_format', '-show_streams', '-of', 'json', result.video], { encoding: 'utf8' }));
   const duration = Number(media.format.duration) * 1000;
-  assert.ok(Math.abs(duration - result.durationMs) < 250, `video=${duration} timeline=${result.durationMs}`);
+  assert.ok(Math.abs(duration - result.durationMs) < 100, `video=${duration} timeline=${result.durationMs}`);
   assert.ok(duration < 2300, `thinking leaked into ${duration}ms video`);
   assert.equal(media.streams.length, 1);
   assert.equal(media.streams[0].width, 640);
   const timeline = JSON.parse(fs.readFileSync(result.timeline));
+  assert.equal(timeline.timebase, 'host_monotonic_ms');
   assert.equal(timeline.segments.length, 2);
   assert.equal(timeline.segments[0].events[0].type, 'click');
   assert.ok(timeline.frames.length > 4);

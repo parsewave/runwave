@@ -20,6 +20,8 @@ class SteppedBrowserSession extends BrowserSession {
     this.recorder = null;
     this.fault = null;
     this.closing = false;
+    this.pendingOperation = null;
+    this.pendingFreeze = null;
     this.startedAt = performance.now();
     this.gameplayTimeMs = 0;
     this.activeWallTimeMs = 0;
@@ -129,12 +131,18 @@ class SteppedBrowserSession extends BrowserSession {
   }
 
   async freezeWithDeadline(label) {
+    const operation = Promise.resolve().then(() => this.freeze());
+    this.pendingFreeze = operation;
+    operation.then(
+      () => { if (this.pendingFreeze === operation) this.pendingFreeze = null; },
+      () => { if (this.pendingFreeze === operation) this.pendingFreeze = null; },
+    );
     try {
-      return await withDeadline(() => this.freeze(), 15000, label);
+      return await withDeadline(() => operation, 15000, label);
     } catch (error) {
       // The timed operation cannot be cancelled. Stop the browser process
       // group before returning so it cannot continue acting after failure.
-      try { this.gate?.forcePause(); } catch (pauseError) { error.pauseError = pauseError; }
+      try { await this.gate?.forcePause(); } catch (pauseError) { error.pauseError = pauseError; }
       this.fault ||= error;
       throw error;
     }
@@ -143,7 +151,9 @@ class SteppedBrowserSession extends BrowserSession {
   async state(expression) {
     if (this.gate?.paused) {
       await this.gate.assertPaused();
-      if (expression) throw new Error('custom state expressions are unavailable at frozen observations');
+      if (expression && expression !== this.stateExpression) {
+        throw new Error('custom state expressions must match the configured stepped-session expression');
+      }
       return { ...this.cached?.state, timing: this.timing() };
     }
     return super.state(expression);
@@ -180,18 +190,26 @@ class SteppedBrowserSession extends BrowserSession {
     const start = performance.now();
     let result;
     let failure;
+    let actionEndedAt = null;
     try {
       await this.gate.resume();
       this.recorder?.begin(input.action_name, this.cached.jpeg);
       await this.pageClock('resume');
-      result = await withDeadline(operation, 20000, 'action execution');
+      const operationPromise = Promise.resolve().then(operation);
+      this.pendingOperation = operationPromise;
+      operationPromise.then(
+        () => { if (this.pendingOperation === operationPromise) this.pendingOperation = null; },
+        () => { if (this.pendingOperation === operationPromise) this.pendingOperation = null; },
+      );
+      result = await withDeadline(() => operationPromise, 20000, 'action execution');
       await sleep(this.settleMs);
+      actionEndedAt = performance.now();
     } catch (error) {
       failure = error;
       this.fault = error;
     } finally {
       if (failure) {
-        try { this.gate?.forcePause(); } catch (pauseError) { failure ||= pauseError; this.fault ||= pauseError; }
+        try { await this.gate?.forcePause(); } catch (pauseError) { failure ||= pauseError; this.fault ||= pauseError; }
       } else {
         try {
           await this.freezeWithDeadline('action observation');
@@ -200,10 +218,11 @@ class SteppedBrowserSession extends BrowserSession {
           this.fault ||= error;
         }
       }
-      this.activeWallTimeMs += performance.now() - start;
+      const activeEnd = actionEndedAt ?? performance.now();
+      this.activeWallTimeMs += activeEnd - start;
       if (!failure) this.gameplayTimeMs += Number(result?.duration ?? 0) + this.settleMs;
       this.steps += 1;
-      this.recorder?.end(this.cached.jpeg, failure);
+      this.recorder?.end(this.cached?.jpeg, failure, activeEnd);
     }
     if (failure) throw failure;
     return result;
@@ -230,6 +249,14 @@ class SteppedBrowserSession extends BrowserSession {
     let recording = { video: null };
     let error = null;
     try {
+      if (this.fault && this.browserServer) await this.browserServer.kill().catch(() => {});
+      const pending = [this.pendingOperation, this.pendingFreeze].filter(Boolean);
+      if (pending.length) {
+        await Promise.race([
+          Promise.allSettled(pending),
+          sleep(this.fault ? 1000 : 5000),
+        ]);
+      }
       if (!this.fault && this.gate?.paused) await this.gate.resume();
       if (this.recorder && this.cached) {
         if (!this.recorder.frames.length) {

@@ -98,8 +98,9 @@ Useful `start` options:
 - `viewport`: defaults to `{ "width": 1024, "height": 620 }`.
 - `videoSize`: defaults to the viewport.
 - `keyAliases`: maps semantic names used in steps to real Playwright keys.
-- `stateExpression`: optional task-authored expression evaluated during live
-  boundaries; stepped reads return cached state, not new arbitrary expressions.
+- `stateExpression`: optional task-authored expression evaluated at live
+  boundaries; stepped reads reuse the cached result for that configured
+  expression. A different per-operation expression is rejected while frozen.
 - `outputRoot`: defaults to `state/output`.
 - `outDir`: defaults to `recordings/runwave-run-<timestamp>`.
 - `sessionWaitMs`: overrides daemon startup wait for this start operation.

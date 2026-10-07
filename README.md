@@ -48,9 +48,10 @@ Recordings come from **this same session**, not a replay of inputs in a new game
 CDP compositor frames are retained only during active steps and FFmpeg encodes
 them into `active-recording/gameplay.webm`. This mode is **video-only**; audio
 requests are rejected. `timeline.json` records active-time segments and actual
-input dispatch/completion times. These are host/compositor measurements, not a
-claim of frame-perfect engine synchronization. Encoding at 30 FPS does not
-create game frames that a slow renderer never produced.
+input dispatch/completion times on one host-monotonic timebase. This synchronizes
+the controller evidence, but is not a claim of frame-perfect engine timing.
+Encoding at 30 FPS does not create game frames that a slow renderer never
+produced.
 
 Each observation has a clean `.png` for judging and a `.grid.png` for the player.
 Controller replies retain `screenshot` as the player image and expose

@@ -27,6 +27,7 @@ const STEP_FIELDS = new Set([
   'autoCaptures',
   'captureIntervalMs',
   'duration',
+  'stateExpression',
   '__runwaveVerbose',
 ]);
 

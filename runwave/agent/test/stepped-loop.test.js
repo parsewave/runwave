@@ -82,7 +82,19 @@ test('wall timeout does not dispatch a late decision or silently pass a short pl
     job: { executionMode: 'stepped', playtestDurationMs: 200, agentMinPlaytestMs: 200, wallTimeoutMs: 20 },
     modelClient: async () => { await delay(50); return { json: { actions: [{ type: 'wait', start: 0, end: 100 }] } }; },
     runAction: async () => assert.fail('must not dispatch after wall timeout'),
-  }), /before minimum gameplay time: wall-timeout/);
+}), /before minimum gameplay time: wall-timeout/);
+});
+
+test('settle time exhaustion cannot silently pass below the minimum', async (t) => {
+  const options = setup(t);
+  await assert.rejects(runAgenticPlaytest({ ...options,
+    job: {
+      executionMode: 'stepped', playtestDurationMs: 40, agentMinPlaytestMs: 40,
+      postActionSettleMs: 50, wallTimeoutMs: 2000,
+    },
+    modelClient: async () => ({ json: { actions: [{ type: 'wait', start: 0, end: 1 }] } }),
+    runAction: async () => assert.fail('no action fits after reserving settle time'),
+  }), /before minimum gameplay time: action-budget-exhausted/);
 });
 
 test('stepped prompt describes freezing, explicit waits, public controls and short actions', () => {
