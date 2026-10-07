@@ -30,8 +30,11 @@ async function captureAt({ browser, outputDir, prefix, stateExpression, at, prof
 
 async function releasePressedKeys(browser, pressed, profiler) {
   for (const key of pressed) {
+    const event = { type: 'up', at: null, action: { key } };
+    browser.recordInput?.({ phase: 'dispatch', cleanup: true, ...event });
     if (profiler) await profiler.time('timeline.cleanup.key_up', { key }, () => browser.keyUp(key));
     else await browser.keyUp(key);
+    browser.recordInput?.({ phase: 'completed', cleanup: true, ...event });
   }
 }
 

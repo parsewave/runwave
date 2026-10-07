@@ -59,6 +59,32 @@ test('browser remains frozen across thinking; inputs, clocks and clean observati
   assert.ok(PNG.sync.read(fs.readFileSync(marked)).width > 640);
 });
 
+test('active clock preserves browser callback receivers and event timebase', { timeout: 30000 }, async (t) => {
+  const { session } = await setup(t);
+  await delay(900);
+  await session.runActive({ action_name: 'clock-probe', duration: 50 }, async () => {
+    const probe = await session.page.evaluate(() => new Promise((resolve) => {
+      const result = { timerThis: false, frameThis: false, eventAge: null };
+      window.setTimeout(function checkTimer() {
+        result.timerThis = this === window;
+        window.requestAnimationFrame(function checkFrame() {
+          result.frameThis = this === window;
+          const event = new Event('runwave-clock-probe');
+          window.addEventListener('runwave-clock-probe', (received) => {
+            result.eventAge = performance.now() - received.timeStamp;
+            resolve(result);
+          }, { once: true });
+          window.dispatchEvent(event);
+        });
+      }, 1);
+    }));
+    assert.equal(probe.timerThis, true);
+    assert.equal(probe.frameThis, true);
+    assert.ok(probe.eventAge >= -5 && probe.eventAge < 100, `event age was ${probe.eventAge}ms`);
+    return { duration: 50 };
+  });
+});
+
 test('same-session active recording excludes thinking and contains the action timeline', { timeout: 30000 }, async (t) => {
   const { session } = await setup(t, true);
   await delay(1200);

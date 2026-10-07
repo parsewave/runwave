@@ -18,6 +18,7 @@ class SteppedBrowserSession extends BrowserSession {
     this.gate = null;
     this.cached = null;
     this.recorder = null;
+    this.pendingFreeze = null;
     this.fault = null;
     this.startedAt = performance.now();
     this.gameplayTimeMs = 0;
@@ -36,6 +37,9 @@ class SteppedBrowserSession extends BrowserSession {
       await this.startGameProcess();
       this.browserServer = await chromium.launchServer({
         headless: this.config.headless !== false,
+        handleSIGINT: false,
+        handleSIGTERM: false,
+        handleSIGHUP: false,
         args: chromiumArgs(this.config),
         ...(this.config.channel ? { channel: this.config.channel } : {}),
         ...(this.config.executablePath ? { executablePath: this.config.executablePath } : {}),
@@ -64,7 +68,7 @@ class SteppedBrowserSession extends BrowserSession {
         await this.recorder.start();
         this.videoDir = this.recorder.directory;
       }
-      await withDeadline(() => this.freeze(), 15000, 'initial observation');
+      await this.freezeWithDeadline('initial observation');
       this.startedAt = performance.now();
     } catch (error) {
       await this.close().catch(() => {});
@@ -105,6 +109,25 @@ class SteppedBrowserSession extends BrowserSession {
       this.cached = { state, png: Buffer.from(screenshot.data, 'base64'), jpeg: replay ? Buffer.from(replay.data, 'base64') : null };
     } finally {
       await this.gate.pause();
+    }
+  }
+
+  async freezeWithDeadline(label) {
+    const pending = this.freeze();
+    this.pendingFreeze = pending;
+    pending.then(() => {
+      if (this.pendingFreeze === pending) this.pendingFreeze = null;
+    }, () => {
+      if (this.pendingFreeze === pending) this.pendingFreeze = null;
+    });
+    try {
+      return await withDeadline(() => pending, 15000, label);
+    } catch (error) {
+      // The timed operation cannot be cancelled. Stop the browser process
+      // group before returning so it cannot continue acting after failure.
+      try { this.gate?.forcePause(); } catch (pauseError) { error.pauseError = pauseError; }
+      this.fault ||= error;
+      throw error;
     }
   }
 
@@ -152,7 +175,7 @@ class SteppedBrowserSession extends BrowserSession {
       this.fault = error;
     } finally {
       try {
-        await withDeadline(() => this.freeze(), 15000, 'action observation');
+        await this.freezeWithDeadline('action observation');
       } catch (error) {
         failure ||= error;
         this.fault ||= error;
@@ -187,6 +210,9 @@ class SteppedBrowserSession extends BrowserSession {
     let error = null;
     try {
       if (this.gate?.paused) await this.gate.resume();
+      if (this.pendingFreeze) {
+        await withDeadline(() => this.pendingFreeze, 15000, 'pending observation cleanup');
+      }
       if (this.recorder && this.cached) {
         if (!this.recorder.frames.length) {
           this.recorder.begin('initial-observation', this.cached.jpeg);

@@ -387,22 +387,25 @@ async function chatCompletion({
       headers['X-Title'] = 'Runwave agentic web-application tester';
     }
 
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      signal: controller.signal,
-      headers,
-      body: JSON.stringify({
-        model,
-        messages: requestMessages,
-        temperature: attempt === 1 ? temperature : 0,
-        max_tokens: maxTokens,
-        stream: false,
-        response_format: { type: 'json_object' },
-      }),
-    }).finally(() => clearTimeout(timeout));
-
-    const body = await response.text();
+    let response;
+    let body = '';
     try {
+      response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers,
+        body: JSON.stringify({
+          model,
+          messages: requestMessages,
+          temperature: attempt === 1 ? temperature : 0,
+          max_tokens: maxTokens,
+          stream: false,
+          response_format: { type: 'json_object' },
+        }),
+      });
+      // Keep the same abort signal active while reading the body. A provider
+      // can send headers and then stall indefinitely on the response stream.
+      body = await response.text();
       if (!response.ok) {
         throw new Error(`${endpointErrorLabel(baseUrl)} HTTP ${response.status}: ${body.slice(0, 1200)}`);
       }
@@ -421,6 +424,7 @@ async function chatCompletion({
         raw: payload,
       };
     } catch (error) {
+      clearTimeout(timeout);
       lastError = error;
       const retryable = attempt < attemptCount;
       if (!retryable) {
@@ -440,6 +444,8 @@ async function chatCompletion({
         ];
       }
       await new Promise((resolve) => setTimeout(resolve, Math.min(1500 * attempt, 5000)));
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

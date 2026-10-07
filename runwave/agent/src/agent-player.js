@@ -89,7 +89,10 @@ async function decideNextSequence({ job, screenshot, state, history, elapsedMs, 
       },
     ],
     maxTokens: Number(job.agentMaxTokens || 2400),
-    timeoutMs: Math.min(Number(job.agentTimeoutMs || 120000), timeoutMs ?? Infinity),
+    timeoutMs: Math.min(
+      Number(job.agentTimeoutMs || 120000),
+      job.executionMode === 'stepped' ? (timeoutMs ?? Infinity) : Infinity,
+    ),
     attempts: job.executionMode === 'stepped' ? 1 : undefined,
     temperature: Number(job.agentTemperature ?? 0.2),
   });
@@ -227,8 +230,11 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
         promptStep: step + 1,
         onPrompt: (payload) => recorder.prompt(payload),
       }));
-      consecutiveModelErrors = 0;
     } catch (error) {
+      if (stepped && Date.now() - startedAt >= wallLimit) {
+        terminationReason = 'wall-timeout';
+        break;
+      }
       if (!isRecoverableModelSequenceError(error)) throw error;
       modelErrorCount += 1;
       consecutiveModelErrors += 1;
@@ -253,18 +259,24 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
 
     thinkingTimeMs += Date.now() - decisionStart;
     if (stepped && Date.now() - startedAt >= wallLimit) { terminationReason = 'wall-timeout'; break; }
+    const prematureStop = sequence.shouldStop && !sequence.actions.length && budgetElapsed() < minMs;
+    if (!prematureStop) consecutiveModelErrors = 0;
     if (sequence.shouldStop && !sequence.actions.length && budgetElapsed() >= minMs) {
       stoppedByAgent = true;
       terminationReason = 'agent-stop';
       break;
     }
-    if (stepped && sequence.shouldStop && !sequence.actions.length) {
-      sequence = failedActionAfterInvalidJson({ error: new Error('minimum gameplay time not reached; choose an action or wait') });
+    if (prematureStop) {
+      modelErrorCount += 1;
       consecutiveModelErrors += 1;
+      sequence = failedActionAfterInvalidJson({ error: new Error('minimum gameplay time not reached; choose an action or wait') });
     }
     const freshRemainingMs = stepped ? Math.min(remainingMs, wallLimit - (Date.now() - startedAt)) : maxMs - (Date.now() - startedAt) - STOP_RESERVE_MS;
     if (freshRemainingMs <= 0) break;
-    const duration = Math.min(freshRemainingMs, Math.max(100, sequence.durationMs));
+    const settleMs = stepped ? Number(state?.timing?.postActionSettleMs ?? job.postActionSettleMs ?? 0) : 0;
+    const actionBudget = freshRemainingMs - Math.max(0, settleMs);
+    if (stepped && actionBudget <= 0) break;
+    const duration = Math.min(actionBudget, Math.max(1, sequence.durationMs));
     let stepActions = [];
     if (!sequence.failedAction) {
       stepActions = actionsWithinDuration(sequence.actions, duration);

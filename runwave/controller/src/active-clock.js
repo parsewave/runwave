@@ -34,7 +34,7 @@ function installActiveClock() {
       if (!timers.has(record.id)) return;
       if (!record.repeat) timers.delete(record.id);
       try {
-        if (typeof record.callback === 'function') record.callback(...record.args);
+        if (typeof record.callback === 'function') record.callback.call(window, ...record.args);
         else (0, eval)(String(record.callback));
       } finally {
         if (record.repeat && timers.has(record.id)) {
@@ -62,7 +62,7 @@ function installActiveClock() {
     if (pausedAt !== null) return;
     record.native = raf(() => {
       if (!frames.delete(record.id)) return;
-      record.callback(logicalNow());
+      record.callback.call(window, logicalNow());
     });
   }
   window.requestAnimationFrame = (callback) => {
@@ -76,6 +76,14 @@ function installActiveClock() {
     if (frames.has(id)) caf(frames.get(id).native);
     frames.delete(id);
   };
+
+  const nativeEventTimestamp = Object.getOwnPropertyDescriptor(Event.prototype, 'timeStamp');
+  if (nativeEventTimestamp?.get && nativeEventTimestamp.configurable) {
+    Object.defineProperty(Event.prototype, 'timeStamp', {
+      configurable: true,
+      get() { return nativeEventTimestamp.get.call(this) - offset; },
+    });
+  }
   window.__runwaveActiveClock = {
     pause() {
       if (pausedAt !== null) return;

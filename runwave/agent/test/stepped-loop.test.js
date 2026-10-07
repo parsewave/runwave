@@ -48,6 +48,20 @@ test('invalid outputs retry on the frozen observation without fallback inputs', 
   assert.equal(result.history[0].failedAction, true);
 });
 
+test('repeated stop requests before the minimum count as failed model decisions', async (t) => {
+  const options = setup(t);
+  let calls = 0;
+  await assert.rejects(runAgenticPlaytest({ ...options,
+    job: {
+      executionMode: 'stepped', playtestDurationMs: 200, agentMinPlaytestMs: 200,
+      wallTimeoutMs: 2000, agentMaxModelFallbacks: 3,
+    },
+    modelClient: async () => { calls += 1; return { json: { actions: [], should_stop: true } }; },
+    runAction: async () => assert.fail('stop requests must not dispatch input'),
+  }), /before minimum gameplay time: invalid-model-output/);
+  assert.equal(calls, 3);
+});
+
 test('wall timeout does not dispatch a late decision or silently pass a short playtest', async (t) => {
   const options = setup(t);
   await assert.rejects(runAgenticPlaytest({ ...options,

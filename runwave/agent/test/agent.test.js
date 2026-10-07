@@ -1187,6 +1187,33 @@ test('chat completion honors explicit retry attempts for malformed JSON', async 
   }
 });
 
+test('model timeout also aborts a response body that stalls after headers', async () => {
+  const originalFetch = global.fetch;
+  const originalKey = process.env.OPENROUTER_API_KEY;
+  process.env.OPENROUTER_API_KEY = 'test-key';
+  global.fetch = async (_url, options) => ({
+    ok: true,
+    text: () => new Promise((resolve, reject) => {
+      const abort = () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+      if (options.signal.aborted) abort();
+      else options.signal.addEventListener('abort', abort, { once: true });
+    }),
+  });
+  try {
+    const started = Date.now();
+    await assert.rejects(chatCompletion({
+      messages: [{ role: 'user', content: 'return JSON' }],
+      attempts: 1,
+      timeoutMs: 20,
+    }), /aborted/);
+    assert.ok(Date.now() - started < 500);
+  } finally {
+    global.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = originalKey;
+  }
+});
+
 test('model client keeps OpenRouter as the default provider', () => {
   assert.equal(resolveBaseUrl({}), 'https://openrouter.ai/api/v1');
   assert.equal(resolveApiKey({ OPENROUTER_API_KEY: 'router-key' }), 'router-key');

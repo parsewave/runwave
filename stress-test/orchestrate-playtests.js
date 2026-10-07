@@ -32,9 +32,12 @@ function parseArgs(argv) {
     basePort: 8900,
     playtestDurationMs: 120000,
     agentMinPlaytestMs: null,
+    wallTimeoutMs: null,
+    maxSteps: null,
+    executionMode: null,
     markGridRows: null,
     markGridCols: null,
-    playMode: 'scripted',
+    playMode: 'agent',
     skipPlaywrightInstall: false,
     webglChromiumArgs: [...WEBGL_CHROMIUM_ARGS],
     runId: `run-${new Date().toISOString().replace(/[:.]/g, '-')}`,
@@ -58,6 +61,9 @@ function parseArgs(argv) {
     else if (arg === '--base-port') args.basePort = Number(next());
     else if (arg === '--playtest-duration-ms') args.playtestDurationMs = Number(next());
     else if (arg === '--agent-min-playtest-ms') args.agentMinPlaytestMs = Number(next());
+    else if (arg === '--wall-timeout-ms') args.wallTimeoutMs = Number(next());
+    else if (arg === '--max-steps') args.maxSteps = Number(next());
+    else if (arg === '--execution-mode') args.executionMode = next();
     else if (arg === '--mark-grid-rows') args.markGridRows = Number(next());
     else if (arg === '--mark-grid-cols') args.markGridCols = Number(next());
     else if (arg === '--play-mode') args.playMode = next();
@@ -90,6 +96,9 @@ function usage() {
     '  --base-port N',
     '  --playtest-duration-ms N',
     '  --agent-min-playtest-ms N',
+    '  --wall-timeout-ms N',
+    '  --max-steps N',
+    '  --execution-mode stepped|realtime',
     '  --mark-grid-rows N',
     '  --mark-grid-cols N',
     '  --play-mode agent|scripted  (scripted is local/debug only)',
@@ -259,6 +268,9 @@ function buildJobs(args, games) {
       playMode: args.playMode,
       skipPlaywrightInstall: args.skipPlaywrightInstall,
       playtestDurationMs: args.playtestDurationMs,
+      ...(Number.isFinite(args.wallTimeoutMs) ? { wallTimeoutMs: args.wallTimeoutMs } : {}),
+      ...(Number.isFinite(args.maxSteps) ? { maxSteps: args.maxSteps } : {}),
+      ...(args.executionMode ? { executionMode: args.executionMode } : {}),
       chromiumArgs: [...args.webglChromiumArgs],
       chromiumArgsMode: 'replace',
       s3Uri: `${args.s3Uri.replace(/\/+$/, '')}/${args.runId}/${game}/attempt-${String(attempt).padStart(3, '0')}`,

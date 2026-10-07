@@ -179,6 +179,7 @@ async function writeStopResponse(runtime, input) {
     if (recording.timeline) payload.timeline = recording.timeline;
     if (typeof recording.audio === 'boolean') payload.audio = recording.audio;
     if (Number.isFinite(recording.durationMs)) payload.videoDurationMs = recording.durationMs;
+    if (recording.warning) payload.recordingWarning = recording.warning;
   }
   if (screenshot) payload.screenshot = screenshot;
   if (stateError) payload.stateError = stateError;

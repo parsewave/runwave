@@ -665,6 +665,7 @@ async function main() {
         playtestDurationMs: job.playtestDurationMs,
         minPlaytestMs: job.agentMinPlaytestMs,
         wallTimeoutMs: job.wallTimeoutMs,
+        maxSteps: job.maxSteps,
         executionMode: job.executionMode,
         verbose: job.verboseRunwave || runnerEnv.RUNWAVE_VERBOSE === '1',
         sessionId: job.runwaveSessionId || job.sessionId || job.jobId,

@@ -52,6 +52,14 @@ class ProcessPause {
     }
   }
 
+  // Timeout handling must stop the browser immediately; taking another
+  // process-table snapshot could itself be blocked by the timed operation.
+  forcePause() {
+    if (!this.child?.pid) throw new Error('browser process has no pid');
+    process.kill(-this.child.pid, 'SIGSTOP');
+    this.paused = true;
+  }
+
   async verify(stopped, timeoutMs = 1500) {
     const deadline = performance.now() + timeoutMs;
     do {
@@ -63,12 +71,14 @@ class ProcessPause {
   }
 
   async pause() {
+    if (this.paused) return this.verify(true);
     await this.signal('SIGSTOP');
     this.paused = true;
     await this.verify(true);
   }
 
   async resume() {
+    if (!this.paused) return this.verify(false);
     await this.signal('SIGCONT');
     this.paused = false;
     await this.verify(false);

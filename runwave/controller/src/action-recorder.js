@@ -27,9 +27,10 @@ class ActionRecorder {
       this.cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch((error) => { this.error ||= error; });
       const segment = this.current;
       if (!segment) return;
-      const timestamp = event.metadata?.timestamp * 1000;
-      if (!Number.isFinite(timestamp) || timestamp < segment.wallStartedAt) return;
-      const elapsed = Math.min(performance.now() - segment.startedAt, timestamp - segment.wallStartedAt);
+      // CDP's metadata timestamp is on Chromium's monotonic clock, while
+      // this segment starts on Node's monotonic clock. Use the latter for the
+      // shared action timeline instead of comparing unrelated epochs.
+      const elapsed = Math.max(0, performance.now() - segment.startedAt);
       this.append(Buffer.from(event.data, 'base64'), segment.startMs + Math.max(0, elapsed), 'jpg');
     };
     this.cdp.on('Page.screencastFrame', this.listener);
@@ -67,16 +68,19 @@ class ActionRecorder {
   }
 
   async stop() {
-    await this.cdp.send('Page.stopScreencast');
-    this.cdp.off('Page.screencastFrame', this.listener);
+    let stopError = null;
+    try { await this.cdp.send('Page.stopScreencast'); }
+    catch (error) { stopError = error; }
+    finally { this.cdp.off('Page.screencastFrame', this.listener); }
     await this.pending;
     const timeline = path.join(this.directory, 'timeline.json');
     fs.writeFileSync(timeline, JSON.stringify({
       schema: 'runwave/active-timeline/1', timebase: 'active_wall_ms', audio: false,
       timestampNote: 'Same-session compositor timestamps and host input dispatch times; not engine simulation ticks.',
       durationMs: this.durationMs, segments: this.segments, frames: this.frames,
+      ...(stopError ? { warning: `screencast stop failed: ${stopError.message}` } : {}),
     }, null, 2));
-    if (this.error) throw this.error;
+    const recordingError = this.error;
     if (!this.frames.length) throw new Error('no active recording frames');
     const ordered = this.frames.slice().sort((a, b) => a.atMs - b.atMs);
     const lines = ['ffconcat version 1.0'];
@@ -90,10 +94,15 @@ class ActionRecorder {
     const video = path.join(this.directory, 'gameplay.webm');
     await exec(this.ffmpeg, [
       '-y', '-v', 'error', '-f', 'concat', '-safe', '1', '-i', 'frames.ffconcat',
-      '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2,fps=30', '-c:v', 'libvpx', '-deadline', 'realtime',
+      '-vf', 'scale=in_range=full:out_range=tv,pad=ceil(iw/2)*2:ceil(ih/2)*2',
+      '-fps_mode', 'vfr', '-c:v', 'libvpx', '-deadline', 'realtime',
       '-cpu-used', '4', '-b:v', '2M', '-an', video,
     ], { cwd: this.directory, timeout: 120000, maxBuffer: 1024 * 1024 });
-    return { video, timeline, audio: false, durationMs: this.durationMs };
+    if (recordingError) throw recordingError;
+    return {
+      video, timeline, audio: false, durationMs: this.durationMs,
+      ...(stopError ? { warning: stopError.message } : {}),
+    };
   }
 }
 
