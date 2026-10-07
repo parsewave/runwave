@@ -109,3 +109,18 @@ test('same-session active recording excludes thinking and contains the action ti
   assert.equal(timeline.segments[0].events[0].type, 'click');
   assert.ok(timeline.frames.length > 4);
 });
+
+test('clean-only screenshots and failed actions still preserve recording evidence', { timeout: 30000 }, async (t) => {
+  const { root, session } = await setup(t, true);
+  session.config.gridScreenshots = false;
+  const initial = await session.screenshot(root, 'clean-only');
+  assert.match(initial, /clean-only\.png$/);
+  assert.equal(fs.existsSync(initial.replace(/\.png$/, '.grid.png')), false);
+  await assert.rejects(session.runActive({ action_name: 'failed', duration: 50 }, async () => {
+    await session.click({ x: 100, y: 100, start: 0, end: 50, button: 'left' });
+    throw new Error('synthetic action failure');
+  }), /synthetic action failure/);
+  const recording = await session.close();
+  assert.ok(fs.statSync(recording.video).size > 1000);
+  assert.ok(fs.existsSync(recording.timeline));
+});

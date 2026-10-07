@@ -161,6 +161,7 @@ class SteppedBrowserSession extends BrowserSession {
     ensureDir(outputDir);
     const file = path.join(outputDir, `${safeName(name || 'observation')}.png`);
     fs.writeFileSync(file, png);
+    if (this.config.gridScreenshots === false) return file;
     const marked = file.replace(/\.png$/, '.grid.png');
     fs.copyFileSync(file, marked);
     drawGridOnScreenshot(marked, this.config);
@@ -230,12 +231,12 @@ class SteppedBrowserSession extends BrowserSession {
     let error = null;
     try {
       if (!this.fault && this.gate?.paused) await this.gate.resume();
-      if (!this.fault && this.recorder && this.cached) {
+      if (this.recorder && this.cached) {
         if (!this.recorder.frames.length) {
           this.recorder.begin('initial-observation', this.cached.jpeg);
           this.recorder.end(this.cached.jpeg);
         }
-        recording = await withDeadline(() => this.recorder.stop(), 135000, 'recording finalization');
+        recording = await withDeadline(() => this.recorder.stop({ skipCdpStop: Boolean(this.fault) }), 135000, 'recording finalization');
       }
     } catch (failure) { error = failure; }
     try {

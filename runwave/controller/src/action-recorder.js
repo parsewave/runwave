@@ -17,6 +17,7 @@ class ActionRecorder {
     this.current = null;
     this.error = null;
     this.pending = Promise.resolve();
+    this.lastCdpTimestampMs = null;
   }
 
   async start() {
@@ -25,12 +26,18 @@ class ActionRecorder {
     this.listener = (event) => {
       // ACK even discarded frames, otherwise Chromium stops the stream.
       this.cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch((error) => { this.error ||= error; });
+      const cdpTimestampMs = Number(event.metadata?.timestamp) * 1000;
       const segment = this.current;
+      if (Number.isFinite(cdpTimestampMs)) this.lastCdpTimestampMs = cdpTimestampMs;
       if (!segment) return;
-      // CDP's metadata timestamp is on Chromium's monotonic clock, while
-      // this segment starts on Node's monotonic clock. Use the latter for the
-      // shared action timeline instead of comparing unrelated epochs.
-      const elapsed = Math.max(0, performance.now() - segment.startedAt);
+      // CDP's timestamp is a compositor monotonic clock. Anchor it at the
+      // active segment boundary so frame times remain tied to this session.
+      let elapsed = performance.now() - segment.startedAt;
+      if (Number.isFinite(cdpTimestampMs)) {
+        if (!Number.isFinite(segment.cdpStartedAtMs)) segment.cdpStartedAtMs = cdpTimestampMs;
+        elapsed = cdpTimestampMs - segment.cdpStartedAtMs;
+      }
+      if (elapsed < 0) return;
       this.append(Buffer.from(event.data, 'base64'), segment.startMs + Math.max(0, elapsed), 'jpg');
     };
     this.cdp.on('Page.screencastFrame', this.listener);
@@ -46,7 +53,13 @@ class ActionRecorder {
 
   begin(action, initialImage) {
     if (this.current) throw new Error('recording action already active');
-    this.current = { action, startMs: this.durationMs, startedAt: performance.now(), wallStartedAt: Date.now(), events: [] };
+    this.current = {
+      action, startMs: this.durationMs, startedAt: performance.now(), wallStartedAt: Date.now(),
+      // The first compositor frame after resume establishes this active
+      // segment's CDP time origin; using a pre-resume timestamp would include
+      // the model-thinking gap.
+      cdpStartedAtMs: Number.NaN, events: [],
+    };
     this.append(initialImage, this.durationMs, 'jpg');
   }
 
@@ -67,16 +80,16 @@ class ActionRecorder {
     });
   }
 
-  async stop() {
+  async stop({ skipCdpStop = false } = {}) {
     let stopError = null;
-    try { await this.cdp.send('Page.stopScreencast'); }
+    try { if (!skipCdpStop) await this.cdp.send('Page.stopScreencast'); }
     catch (error) { stopError = error; }
     finally { this.cdp.off('Page.screencastFrame', this.listener); }
     await this.pending;
     const timeline = path.join(this.directory, 'timeline.json');
     fs.writeFileSync(timeline, JSON.stringify({
-      schema: 'runwave/active-timeline/1', timebase: 'active_wall_ms', audio: false,
-      timestampNote: 'Same-session compositor timestamps and host input dispatch times; not engine simulation ticks.',
+      schema: 'runwave/active-timeline/1', timebase: 'active_cdp_monotonic_ms', audio: false,
+      timestampNote: 'Same-session CDP compositor frame deltas and host input dispatch times; not engine simulation ticks.',
       durationMs: this.durationMs, segments: this.segments, frames: this.frames,
       ...(stopError ? { warning: `screencast stop failed: ${stopError.message}` } : {}),
     }, null, 2));
