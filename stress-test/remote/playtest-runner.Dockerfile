@@ -10,6 +10,8 @@ RUN apt-get update \
     ca-certificates \
     curl \
     git \
+    ffmpeg \
+    procps \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
     gstreamer1.0-pulseaudio \

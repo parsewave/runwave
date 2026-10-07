@@ -64,7 +64,7 @@ function postSequenceResult(response, beforeScreenshot) {
   return result;
 }
 
-async function decideNextSequence({ job, screenshot, state, history, elapsedMs, maxMs, modelClient, promptStep = null, onPrompt = null }) {
+async function decideNextSequence({ job, screenshot, state, history, elapsedMs, maxMs, modelClient, timeoutMs, promptStep = null, onPrompt = null }) {
   if (!screenshot) throw new Error('agent cannot decide without a screenshot');
   const viewport = viewportFor(job);
   const prompt = buildPlaytesterPrompt({ job, elapsedMs, maxMs, viewport, state, history });
@@ -89,7 +89,8 @@ async function decideNextSequence({ job, screenshot, state, history, elapsedMs, 
       },
     ],
     maxTokens: Number(job.agentMaxTokens || 2400),
-    timeoutMs: Number(job.agentTimeoutMs || 120000),
+    timeoutMs: Math.min(Number(job.agentTimeoutMs || 120000), timeoutMs ?? Infinity),
+    attempts: job.executionMode === 'stepped' ? 1 : undefined,
     temperature: Number(job.agentTemperature ?? 0.2),
   });
 
@@ -181,6 +182,13 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
   const recorder = new AgentRecorder(outputDir || path.join(process.cwd(), 'artifacts', 'agent'));
   const history = [];
   const startedAt = Date.now();
+  const stepped = job.executionMode === 'stepped';
+  const wallLimit = stepped ? Number(job.wallTimeoutMs ?? Math.max(600000, maxMs * 10)) : maxMs;
+  const maxSteps = Number(job.maxSteps ?? 1000);
+  let gameplayTimeMs = 0;
+  let thinkingTimeMs = 0;
+  let terminationReason = 'duration';
+  const budgetElapsed = () => stepped ? gameplayTimeMs : Date.now() - startedAt;
   let lastResponse = initialResponse;
   let step = 0;
   let stoppedByAgent = false;
@@ -188,9 +196,12 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
   let consecutiveModelErrors = 0;
   const maxModelFallbacks = Math.max(1, Math.round(Number(job.agentMaxModelFallbacks || 3)));
 
-  while (Date.now() - startedAt < maxMs - STOP_RESERVE_MS) {
-    const elapsedMs = Date.now() - startedAt;
-    const remainingMs = maxMs - elapsedMs - STOP_RESERVE_MS;
+  while (budgetElapsed() < maxMs - (stepped ? 0 : STOP_RESERVE_MS)) {
+    const wallRemainingMs = wallLimit - (Date.now() - startedAt);
+    if (wallRemainingMs <= 0) { terminationReason = 'wall-timeout'; break; }
+    if (step >= maxSteps) { terminationReason = 'step-limit'; break; }
+    const elapsedMs = budgetElapsed();
+    const remainingMs = maxMs - elapsedMs - (stepped ? 0 : STOP_RESERVE_MS);
     if (remainingMs <= 0) break;
 
     const screenshot = latestScreenshot(lastResponse);
@@ -202,6 +213,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     let modelElapsedMs;
     let rawText;
     let usage;
+    const decisionStart = Date.now();
     try {
       ({ sequence, model, modelElapsedMs, rawText, usage } = await decideNextSequence({
         job,
@@ -211,6 +223,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
         elapsedMs,
         maxMs,
         modelClient,
+        timeoutMs: wallRemainingMs,
         promptStep: step + 1,
         onPrompt: (payload) => recorder.prompt(payload),
       }));
@@ -238,7 +251,20 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       history[history.length - 1].outcomeSummary = sequence.previousSequenceOutcome;
     }
 
-    const duration = Math.max(100, Math.min(sequence.durationMs, remainingMs));
+    thinkingTimeMs += Date.now() - decisionStart;
+    if (stepped && Date.now() - startedAt >= wallLimit) { terminationReason = 'wall-timeout'; break; }
+    if (sequence.shouldStop && !sequence.actions.length && budgetElapsed() >= minMs) {
+      stoppedByAgent = true;
+      terminationReason = 'agent-stop';
+      break;
+    }
+    if (stepped && sequence.shouldStop && !sequence.actions.length) {
+      sequence = failedActionAfterInvalidJson({ error: new Error('minimum gameplay time not reached; choose an action or wait') });
+      consecutiveModelErrors += 1;
+    }
+    const freshRemainingMs = stepped ? Math.min(remainingMs, wallLimit - (Date.now() - startedAt)) : maxMs - (Date.now() - startedAt) - STOP_RESERVE_MS;
+    if (freshRemainingMs <= 0) break;
+    const duration = Math.min(freshRemainingMs, Math.max(100, sequence.durationMs));
     let stepActions = [];
     if (!sequence.failedAction) {
       stepActions = actionsWithinDuration(sequence.actions, duration);
@@ -298,7 +324,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
         result: failedResult,
       });
 
-      if (consecutiveModelErrors >= maxModelFallbacks) break;
+      if (consecutiveModelErrors >= maxModelFallbacks) { terminationReason = 'invalid-model-output'; break; }
       continue;
     }
 
@@ -341,6 +367,7 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
       stepResponse = await runAction(stepRequest);
     } catch (error) {
       const message = String(error && (error.message || error) || 'runwave action failed').slice(0, 500);
+      if (stepped) throw error;
       log('agent.sequence_execution_error', {
         step,
         error: message,
@@ -367,6 +394,13 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     }
 
     lastResponse = stepResponse;
+    const timing = responseBody(lastResponse).timing || responseState(lastResponse).timing;
+    if (stepped) {
+      if (!timing?.paused || !Number.isFinite(timing.gameplayTimeMs) || timing.gameplayTimeMs <= gameplayTimeMs) {
+        throw new Error('controller did not return a frozen observation with advancing action time');
+      }
+      gameplayTimeMs = timing.gameplayTimeMs;
+    }
     const result = postSequenceResult(lastResponse, screenshot);
     history.push({
       step,
@@ -382,8 +416,9 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
 
     if (consecutiveModelErrors >= maxModelFallbacks) break;
 
-    if (sequence.shouldStop && Date.now() - startedAt >= minMs) {
+    if (sequence.shouldStop && budgetElapsed() >= minMs) {
       stoppedByAgent = true;
+      terminationReason = 'agent-stop';
       break;
     }
   }
@@ -392,6 +427,9 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     mode: 'agent',
     steps: step,
     elapsedMs: Date.now() - startedAt,
+    gameplayTimeMs: stepped ? gameplayTimeMs : null,
+    thinkingTimeMs,
+    terminationReason,
     stoppedByAgent,
     maxMs,
     minMs,
@@ -399,6 +437,9 @@ async function runAgenticPlaytest({ job, initialResponse, runAction, outputDir, 
     history,
   };
   recorder.summary(summary);
+  if (stepped && ['wall-timeout', 'step-limit', 'invalid-model-output'].includes(terminationReason) && gameplayTimeMs < minMs) {
+    throw new Error(`playtest stopped before minimum gameplay time: ${terminationReason} (${gameplayTimeMs}/${minMs}ms)`);
+  }
   return {
     ...summary,
     lastResponse,

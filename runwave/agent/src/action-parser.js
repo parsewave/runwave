@@ -19,9 +19,9 @@ const AGENT_SEQUENCE_FIELDS = new Set([
   'rationale',
 ]);
 
-function inferDurationMs(actions, fallback = DEFAULT_DURATION_MS) {
+function inferDurationMs(actions, fallback = DEFAULT_DURATION_MS, minimum = MIN_DURATION_MS) {
   const latest = actions.reduce((max, action) => Math.max(max, actionEnd(action)), 0);
-  return Math.max(MIN_DURATION_MS, latest || fallback);
+  return Math.max(minimum, latest || fallback);
 }
 
 function assertPlainSequence(raw) {
@@ -67,7 +67,7 @@ function normalizeSequence(raw, options = {}) {
   }
 
   return {
-    durationMs: inferDurationMs(actions, DEFAULT_DURATION_MS),
+    durationMs: inferDurationMs(actions, DEFAULT_DURATION_MS, options.config?.executionMode === 'stepped' ? 50 : MIN_DURATION_MS),
     actions,
     shouldStop,
     summary: String(data.summary || '').trim().slice(0, 500),

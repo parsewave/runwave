@@ -664,6 +664,8 @@ async function main() {
         baseUrl: modelConfig.baseUrl,
         playtestDurationMs: job.playtestDurationMs,
         minPlaytestMs: job.agentMinPlaytestMs,
+        wallTimeoutMs: job.wallTimeoutMs,
+        executionMode: job.executionMode,
         verbose: job.verboseRunwave || runnerEnv.RUNWAVE_VERBOSE === '1',
         sessionId: job.runwaveSessionId || job.sessionId || job.jobId,
         viewport,

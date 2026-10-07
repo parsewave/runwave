@@ -17,6 +17,7 @@ const CELL_FIELDS = [
 const POINT_FIELDS = new Set(['x', 'y', ...CELL_FIELDS]);
 
 const ACTION_FIELDS = {
+  wait: new Set(['type', 'start', 'end']),
   key: new Set(['type', 'start', 'end', 'key']),
   click: new Set(['type', 'start', 'end', 'x', 'y', ...CELL_FIELDS, 'button', 'clickCount']),
   multi_click: new Set(['type', 'start', 'end', 'x', 'y', ...CELL_FIELDS, 'button', 'count', 'intervalMs']),

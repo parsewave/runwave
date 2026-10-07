@@ -336,6 +336,10 @@ function normalizeAction(action, duration, options) {
   }
 
   const type = assertActionFields(action);
+  if (type === 'wait') {
+    const timing = normalizeTiming(action, type, duration, options);
+    return timing ? [{ type, ...timing }] : [];
+  }
   if (type === 'key') return normalizeKeyAction(action, duration, options);
   if (type === 'click') return normalizeClickAction(action, duration, options);
   if (type === 'multi_click') return normalizeClickAction(action, duration, options, true);

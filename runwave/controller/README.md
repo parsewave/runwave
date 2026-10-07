@@ -5,8 +5,10 @@ It starts browser or native Linux game sessions, captures state and screenshots,
 executes timed input sequences, records WebM output, and writes per-action
 artifacts.
 
-See the top-level [Requirements](../../README.md#requirements) section for the
-Linux, gstreamer, X server/Xvfb, and PulseAudio setup required by `record: true`.
+Browser sessions default to pause-and-step, including headless, video-only
+recording through CDP and FFmpeg. See [Browser Pause-And-Step](../../README.md#browser-pause-and-step).
+Explicit `executionMode: "realtime"` retains the previous GStreamer audio/video
+behavior and requirements. Native Linux sessions are unchanged.
 
 ## Start
 
@@ -79,20 +81,25 @@ Useful `start` options:
   for optional wrapper-side size hints.
 - `session_id`: required session identifier. Reuse it for all actions targeting
   the same controller session.
-- `record`: enable gstreamer audio+video WebM recording. Requires all the
+- `executionMode`: `stepped` by default for browsers; `realtime` opts into the
+  old live loop. Stepped observations stay frozen until the next step. `act`
+  supports named controls from optional `webgame.json`; `step` stays generic.
+- `record`: in stepped mode, encode a same-session, active-only video and action
+  timeline. Requires FFmpeg. `recordAudio` is unsupported in stepped mode and
+  rejected. In realtime/native mode, enable gstreamer audio+video. Requires the
   prerequisites in the top-level [Requirements](../../README.md#requirements)
   section. Chromium is launched headed with kiosk/fullscreen flags so
   gstreamer's `ximagesrc` can capture the rendered viewport. Override capture
   sources with `videoSource` and `audioSource`. (`recordAudio` is accepted as a
-  legacy alias for `record`; they mean the same thing - audio is always captured
-  when recording.)
+  legacy alias for `record` in realtime/native sessions.)
 - `headless`: defaults to `true`; set `false` to watch the browser.
 - `channel`: optional Playwright browser channel, such as `chrome` or `msedge`.
 - `executablePath`: optional explicit browser executable path.
 - `viewport`: defaults to `{ "width": 1024, "height": 620 }`.
 - `videoSize`: defaults to the viewport.
 - `keyAliases`: maps semantic names used in steps to real Playwright keys.
-- `stateExpression`: optional JavaScript expression evaluated in the page.
+- `stateExpression`: optional task-authored expression evaluated during live
+  boundaries; stepped reads return cached state, not new arbitrary expressions.
 - `outputRoot`: defaults to `state/output`.
 - `outDir`: defaults to `recordings/runwave-run-<timestamp>`.
 - `sessionWaitMs`: overrides daemon startup wait for this start operation.

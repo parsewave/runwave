@@ -66,6 +66,8 @@ def run_playtest(
     viewport: Optional[Mapping[str, int]] = None,
     playtest_duration_ms: Optional[int] = None,
     min_playtest_ms: Optional[int] = None,
+    wall_timeout_ms: Optional[int] = None,
+    execution_mode: Optional[str] = None,
     launch_settle_ms: Optional[int] = None,
     model: Optional[str] = None,
     verbose: bool = False,
@@ -102,7 +104,13 @@ def run_playtest(
     viewport:
         Browser viewport and video size as ``{"width": 1280, "height": 720}``.
     playtest_duration_ms:
-        Max playtest wall time. Defaults to 150000 (2m30s) if omitted.
+        Max requested action time in stepped browser mode; wall time in realtime
+        mode. Defaults to 150000 (2m30s) if omitted.
+    wall_timeout_ms:
+        Separate wall-time limit for the stepped agent loop, including model calls.
+    execution_mode:
+        ``"stepped"`` (browser default) or ``"realtime"``. Stepped recording is
+        video-only and requires ffmpeg plus Linux/macOS process signals.
     min_playtest_ms:
         Floor before the agent may self-stop. Defaults to duration - 10000.
     launch_settle_ms:
@@ -155,6 +163,10 @@ def run_playtest(
         args += ["--playtest-duration-ms", str(playtest_duration_ms)]
     if min_playtest_ms is not None:
         args += ["--min-playtest-ms", str(min_playtest_ms)]
+    if wall_timeout_ms is not None:
+        args += ["--wall-timeout-ms", str(wall_timeout_ms)]
+    if execution_mode is not None:
+        args += ["--execution-mode", execution_mode]
     if launch_settle_ms is not None:
         args += ["--launch-settle-ms", str(launch_settle_ms)]
     if base_url:

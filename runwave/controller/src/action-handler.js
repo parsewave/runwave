@@ -1,6 +1,8 @@
 const { removeFileIfExists } = require('./file-utils');
 const { assertActionName, assertSessionId, sessionId } = require('./protocol');
 const { runStep } = require('./step-runner');
+const { normalizeStep } = require('./step-normalizer');
+const { writeJson } = require('./file-utils');
 
 function assertRuntimeSession(runtime, input) {
   assertSessionId(input);
@@ -95,9 +97,12 @@ async function writeStepResponse(runtime, input) {
   const actionName = input.action_name;
   const outputDir = runtime.profiler.timeSync('action.step.action_dir', { action_name: actionName }, () => output.actionDir(actionName));
 
+  // Reject bad input without resuming the game or consuming an action.
+  const validated = normalizeStep(input, config, runtime.stepIndex + 1);
+  if (browser.stepped && validated.duration > 8000) throw new Error('stepped actions must be at most 8000ms');
   runtime.stepIndex += 1;
   runtime.profiler.mark('action.step.index_incremented', { action_name: actionName, stepIndex: runtime.stepIndex });
-  const result = await runtime.profiler.time('action.step.run_step', { action_name: actionName, stepIndex: runtime.stepIndex }, () =>
+  const perform = () => runtime.profiler.time('action.step.run_step', { action_name: actionName, stepIndex: runtime.stepIndex }, () =>
     runStep({
       input,
       config,
@@ -108,6 +113,17 @@ async function writeStepResponse(runtime, input) {
       profiler: runtime.profiler.child('step-runner'),
     })
   );
+  const result = browser.stepped ? await browser.runActive(input, perform) : await perform();
+  if (browser.stepped) {
+    const screenshot = await browser.screenshot(outputDir, 'frozen-after-action');
+    const state = await browser.state();
+    result.endState = state;
+    result.screenshot = screenshot;
+    result.cleanScreenshot = screenshot.replace(/\.grid\.png$/, '.png');
+    result.captures = [{ at: result.duration, path: screenshot, cleanPath: result.cleanScreenshot, state }];
+    result.timing = browser.timing();
+    writeJson(result.resultPath, result);
+  }
 
   return runtime.profiler.timeSync('action.step.write_response', { action_name: actionName }, () =>
     output.response(actionName, withVerboseLog(runtime, {
@@ -160,6 +176,9 @@ async function writeStopResponse(runtime, input) {
   });
   if (recording && typeof recording === 'object') {
     if (recording.audioVideo) payload.audioVideo = recording.audioVideo;
+    if (recording.timeline) payload.timeline = recording.timeline;
+    if (typeof recording.audio === 'boolean') payload.audio = recording.audio;
+    if (Number.isFinite(recording.durationMs)) payload.videoDurationMs = recording.durationMs;
   }
   if (screenshot) payload.screenshot = screenshot;
   if (stateError) payload.stateError = stateError;
@@ -191,8 +210,12 @@ async function handleAction(runtime, input) {
     }
     if (input.action === 'state') return writeStateResponse(runtime, input);
     if (input.action === 'screenshot') return writeScreenshotResponse(runtime, input);
-    if (input.action === 'navigate' || input.action === 'reset') return writeNavigateResponse(runtime, input);
+    if (input.action === 'navigate' || input.action === 'reset') {
+      if (runtime.browser.stepped) throw new Error('start a new session to navigate or reset in stepped mode');
+      return writeNavigateResponse(runtime, input);
+    }
     if (input.action === 'step') return writeStepResponse(runtime, input);
+    if (input.action === 'act' && runtime.browser.stepped) return writeStepResponse(runtime, runtime.browser.namedControl(input));
     if (input.action === 'stop') return writeStopResponse(runtime, input);
 
     throw new Error(`unknown action: ${input.action}`);

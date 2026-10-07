@@ -29,7 +29,9 @@ function usage() {
     '',
     'Options:',
     '  --kind <web|linux>           target kind (default web)',
-    '  --playtest-duration-ms <n>   max playtest wall time in ms (default 150000)',
+    '  --playtest-duration-ms <n>   max action time in stepped mode; wall time in realtime mode',
+    '  --wall-timeout-ms <n>        hard agent wall-time budget, separate from action time',
+    '  --execution-mode <mode>     stepped (browser default) or realtime',
     '  --min-playtest-ms <n>        floor before the agent may self-stop (default duration - 10000)',
     '  --launch-settle-ms <n>       linux only: wait after launch before first agent call (default 30000)',
     '  --base-url <url>             OpenAI-compatible endpoint override',
@@ -59,6 +61,8 @@ function parseArgs(argv) {
     if (arg === '--viewport') { out.viewport = parseViewport(next()); continue; }
     if (arg === '--playtest-duration-ms') { out.playtestDurationMs = Number(next()); continue; }
     if (arg === '--min-playtest-ms') { out.minPlaytestMs = Number(next()); continue; }
+    if (arg === '--wall-timeout-ms') { out.wallTimeoutMs = Number(next()); continue; }
+    if (arg === '--execution-mode') { out.executionMode = next(); continue; }
     if (arg === '--launch-settle-ms') { out.startOverrides.launchSettleMs = Number(next()); continue; }
     if (arg === '--base-url') { out.baseUrl = next(); continue; }
     if (arg === '--model') { out.model = next(); continue; }
@@ -97,6 +101,8 @@ async function main() {
     baseUrl: args.baseUrl,
     playtestDurationMs: args.playtestDurationMs,
     minPlaytestMs: args.minPlaytestMs,
+    wallTimeoutMs: args.wallTimeoutMs,
+    executionMode: args.executionMode,
     model: args.model,
     verbose: args.verbose,
     startOverrides: args.startOverrides,

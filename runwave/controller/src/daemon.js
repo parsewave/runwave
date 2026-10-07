@@ -44,7 +44,8 @@ async function main() {
   const controller = profiler.timeSync('daemon.controller_session_create', { kind }, () =>
     createSession(config, paths, profiler.child(`${kind}-session`))
   );
-  await profiler.time('daemon.controller_start', { kind }, () => controller.start());
+  try { await profiler.time('daemon.controller_start', { kind }, () => controller.start()); }
+  catch (error) { await controller.close().catch(() => {}); throw error; }
 
   const runtime = {
     config,
@@ -57,6 +58,7 @@ async function main() {
     stepIndex: 0,
   };
 
+  let queue = Promise.resolve();
   const server = http.createServer(async (req, res) => {
     try {
       const requestStartedAt = Date.now();
@@ -70,11 +72,14 @@ async function main() {
         action_name: input.action_name,
         elapsedSinceRequestMs: Date.now() - requestStartedAt,
       });
-      const result = await profiler.time(
+      const operation = () => profiler.time(
         'daemon.request.handle_action',
         { action: input.action, action_name: input.action_name },
         () => handleAction(runtime, input)
       );
+      const pending = queue.then(operation);
+      queue = pending.catch(() => {});
+      const result = await pending;
       return profiler.timeSync('daemon.request.write_response', { action: input.action, action_name: input.action_name }, () =>
         writeResponse(res, 200, result)
       );
@@ -84,7 +89,16 @@ async function main() {
     }
   });
 
-  server.listen(0, '127.0.0.1', async () => {
+  const shutdown = async () => {
+    server.close();
+    await queue;
+    await controller.close().catch(() => {});
+    process.exit(0);
+  };
+  process.once('SIGTERM', shutdown);
+  process.once('SIGINT', shutdown);
+
+  server.listen(0, '127.0.0.1', () => { (async () => {
     const { port } = server.address();
     profiler.mark('daemon.server.listening', { port });
     const outputDir = profiler.timeSync('daemon.start_response.action_dir', { action_name: config.action_name }, () =>
@@ -108,6 +122,10 @@ async function main() {
       );
     }
     if (!payload.verboseLog) delete payload.verboseLog;
+    if (controller.stepped) {
+      payload.timing = controller.timing();
+      if (payload.screenshot) payload.cleanScreenshot = payload.screenshot.replace(/\.grid\.png$/, '.png');
+    }
     const startResponse = profiler.timeSync('daemon.start_response.write_output', () =>
       output.response(config.action_name, payload)
     );
@@ -128,7 +146,12 @@ async function main() {
       startedAt: new Date().toISOString(),
     }));
     profiler.mark('daemon.ready', { sessionFile, sessionDir: paths.runDir });
-  });
+  })().catch(async (error) => {
+    console.error(error);
+    server.close();
+    await controller.close().catch(() => {});
+    process.exitCode = 1;
+  }); });
 }
 
 main().catch((error) => {

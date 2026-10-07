@@ -34,7 +34,8 @@ async function runStep({ input, config, browser, outputDir, nextStepIndex, actio
   const step = timeSync('step.normalize', { actionName, nextStepIndex }, () => normalizeStep(input, config, nextStepIndex));
   const prefix = timeSync('step.result_prefix', { actionName, stepIndex: step.index }, () => resultFileName(step.index, actionName));
   const startState = await time('step.start_state', { actionName, stepIndex: step.index }, () => browser.state(input.stateExpression));
-  const events = timeSync('step.build_timeline', { actionName, stepIndex: step.index }, () => buildStepTimeline(step));
+  const events = timeSync('step.build_timeline', { actionName, stepIndex: step.index }, () =>
+    buildStepTimeline(browser.stepped ? { ...step, captures: [] } : step));
   if (profiler) {
     profiler.mark('step.timeline_built', {
       actionName,

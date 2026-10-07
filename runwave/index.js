@@ -101,10 +101,13 @@ function validateRecordingArtifact(stopResponse) {
   if (!stat.isFile() || stat.size <= 0) {
     throw new Error(`runwave recording is empty or invalid: ${video}`);
   }
-  return { path: video, bytes: stat.size };
+  return { path: video, bytes: stat.size,
+    ...(stopResponse.timeline ? { timeline: stopResponse.timeline } : {}),
+    ...(typeof stopResponse.audio === 'boolean' ? { audio: stopResponse.audio } : {}),
+  };
 }
 
-function buildAgentJob({ playtestDurationMs, minPlaytestMs, viewport, playtestInstructions, start = {}, promptMode }) {
+function buildAgentJob({ playtestDurationMs, minPlaytestMs, wallTimeoutMs, maxSteps, viewport, playtestInstructions, start = {}, promptMode }) {
   const job = {
     playtestDurationMs,
     agentMinPlaytestMs: minPlaytestMs ?? Math.max(0, playtestDurationMs - 10000),
@@ -113,6 +116,9 @@ function buildAgentJob({ playtestDurationMs, minPlaytestMs, viewport, playtestIn
     playtestInstructions,
     markGridRows: start.markGridRows,
     markGridCols: start.markGridCols,
+    executionMode: start.executionMode,
+    wallTimeoutMs,
+    maxSteps,
   };
   if (promptMode) job.promptMode = promptMode;
   return job;
@@ -151,6 +157,7 @@ function buildStartAction({
     action_name: 'start',
     session_id: runwaveSessionId,
     kind: targetKind,
+    executionMode: targetKind === 'web' ? (startOverrides.executionMode || 'stepped') : 'realtime',
     gameDir: absoluteGameDir,
     ...(port ? { port } : {}),
     record: true,
@@ -182,6 +189,9 @@ async function runPlaytest(options) {
     baseUrl,
     playtestDurationMs = DEFAULT_PLAYTEST_DURATION_MS,
     minPlaytestMs,
+    wallTimeoutMs = Math.max(600000, playtestDurationMs * 10),
+    maxSteps = 1000,
+    executionMode,
     model,
     verbose = false,
     onLog,
@@ -199,6 +209,12 @@ async function runPlaytest(options) {
   const targetDir = applicationDir || gameDir;
   if (!targetDir) throw new Error('runPlaytest: gameDir (or applicationDir) is required');
   if (!outDir) throw new Error('runPlaytest: outDir is required');
+  for (const [name, value] of Object.entries({ playtestDurationMs, wallTimeoutMs, maxSteps })) {
+    if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be positive and finite`);
+  }
+  if (minPlaytestMs !== undefined && (!Number.isFinite(minPlaytestMs) || minPlaytestMs < 0 || minPlaytestMs > playtestDurationMs)) {
+    throw new Error('minPlaytestMs must be between 0 and playtestDurationMs');
+  }
   if (targetKind === 'web' && !port) throw new Error('runPlaytest: port is required for web games');
   if (!viewport || !Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) || viewport.width <= 0 || viewport.height <= 0) {
     throw new Error('runPlaytest: viewport {width,height} is required');
@@ -274,7 +290,7 @@ async function runPlaytest(options) {
       targetKind,
       runwaveSessionId,
       viewport,
-      startOverrides,
+      startOverrides: { ...startOverrides, ...(executionMode ? { executionMode } : {}) },
       absoluteGameDir,
       port,
     });
@@ -293,6 +309,8 @@ async function runPlaytest(options) {
       start,
       minPlaytestMs,
       promptMode,
+      wallTimeoutMs,
+      maxSteps,
     });
 
     const playtest = await runAgenticPlaytest({
@@ -314,6 +332,9 @@ async function runPlaytest(options) {
       mode: playtest.mode,
       steps: playtest.steps,
       elapsedMs: playtest.elapsedMs,
+      gameplayTimeMs: playtest.gameplayTimeMs,
+      thinkingTimeMs: playtest.thinkingTimeMs,
+      terminationReason: playtest.terminationReason,
       stoppedByAgent: playtest.stoppedByAgent,
       outputDir: playtest.outputDir,
     };

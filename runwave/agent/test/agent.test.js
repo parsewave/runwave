@@ -175,8 +175,8 @@ test('rejects model sequence fields outside the canonical schema', () => {
     /unknown field "power"/
   );
   assert.throws(
-    () => normalizeSequence({ actions: [{ type: 'wait', start: 0 }] }, { viewport: { width: 800, height: 800 } }),
-    /unknown sequence action type: wait/
+    () => normalizeSequence({ actions: [{ type: 'teleport', start: 0 }] }, { viewport: { width: 800, height: 800 } }),
+    /unknown sequence action type: teleport/
   );
 });
 
@@ -424,8 +424,8 @@ test('rejects controller step fields outside the canonical schema', () => {
     /unknown field "power"/
   );
   assert.throws(
-    () => normalizeStep({ actions: [{ type: 'wait', start: 0 }] }, {}, 1),
-    /unknown sequence action type: wait/
+    () => normalizeStep({ actions: [{ type: 'teleport', start: 0 }] }, {}, 1),
+    /unknown sequence action type: teleport/
   );
 });
 

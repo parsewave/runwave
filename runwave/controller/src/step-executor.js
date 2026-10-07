@@ -36,6 +36,7 @@ async function releasePressedKeys(browser, pressed, profiler) {
 }
 
 async function executeTimeline({ browser, events, duration, outputDir, prefix, stateExpression, profiler }) {
+  if (browser.stepped) return executeSteppedTimeline({ browser, events, duration });
   const pressed = new Set();
   const captures = [];
   const startedAt = Date.now();
@@ -46,6 +47,7 @@ async function executeTimeline({ browser, events, duration, outputDir, prefix, s
       const fields = { eventIndex: index, type: event.type, at: event.at };
       if (profiler) profiler.mark('timeline.event.ready', fields);
       await waitUntil(startedAt, event.at, profiler, fields);
+      if (browser.recordInput && event.type !== 'capture') browser.recordInput({ phase: 'dispatch', ...event });
 
       if (event.type === 'down') {
         if (profiler) await profiler.time('timeline.event.key_down', { ...fields, key: event.action.key }, () => browser.keyDown(event.action.key));
@@ -104,6 +106,7 @@ async function executeTimeline({ browser, events, duration, outputDir, prefix, s
           : captureAt({ browser, outputDir, prefix, stateExpression, at: event.at })));
       }
       if (profiler) profiler.mark('timeline.event.done', { ...fields, elapsedMs: elapsedSince(startedAt) });
+      if (browser.recordInput && event.type !== 'capture') browser.recordInput({ phase: 'completed', ...event });
     }
 
     await waitUntil(startedAt, duration, profiler, { type: 'duration_end' });
@@ -117,6 +120,45 @@ async function executeTimeline({ browser, events, duration, outputDir, prefix, s
   return captures;
 }
 
+async function executeSteppedTimeline({ browser, events, duration }) {
+  const startedAt = performance.now();
+  const pressed = new Set();
+  let failure = null;
+  const wait = async (at) => {
+    const remaining = at - (performance.now() - startedAt);
+    if (remaining > 0) await sleep(remaining);
+  };
+  const drive = async (selected) => {
+    for (const event of selected) {
+      await wait(event.at);
+      if (failure) return;
+      browser.recordInput?.({ phase: 'dispatch', ...event });
+      try {
+        if (event.type === 'down') { await browser.keyDown(event.action.key); pressed.add(event.action.key); }
+        if (event.type === 'up') { await browser.keyUp(event.action.key); pressed.delete(event.action.key); }
+        if (event.type === 'click') await browser.click(event.click);
+        if (event.type === 'drag') await browser.drag(event.drag);
+        if (event.type === 'cursor_move') await browser.moveCursor(event.cursorMove);
+        if (event.type === 'view_move') await browser.moveView(event.viewMove);
+        browser.recordInput?.({ phase: 'completed', ...event });
+      } catch (error) { failure ||= error; return; }
+    }
+  };
+  try {
+    // Pointer operations can take time. They must not postpone key-up deadlines.
+    await Promise.all([
+      drive(events.filter((event) => ['down', 'up'].includes(event.type))),
+      drive(events.filter((event) => !['down', 'up', 'capture'].includes(event.type))),
+    ]);
+    if (failure) throw failure;
+    await wait(duration);
+  } finally {
+    await releasePressedKeys(browser, pressed);
+  }
+  return [];
+}
+
 module.exports = {
   executeTimeline,
+  executeSteppedTimeline,
 };
